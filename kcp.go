@@ -123,8 +123,7 @@ func (kcp *KCP) recv(buffer []byte) int {
 	}
 
 	sz := 0
-	k := 0
-	for k = range kcp.rcv_queue {
+	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
 		if len(buffer) > 0 {
 			copy(buffer, seg.data)
@@ -132,20 +131,20 @@ func (kcp *KCP) recv(buffer []byte) int {
 		}
 		sz += len(seg.data)
 		if seg.frg == 0 {
+			kcp.rcv_queue = kcp.rcv_queue[k:]
 			break
 		}
 	}
-	kcp.rcv_queue = kcp.rcv_queue[k+1:]
 	// move available data from rcv_buf -> rcv_queue
-	for k = range kcp.rcv_buf {
+	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
 		} else {
+			kcp.rcv_buf = kcp.rcv_buf[k:]
 			break
 		}
 	}
-	kcp.rcv_buf = kcp.rcv_buf[k+1:]
 
 	// fast recover
 	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd && fast_recover {
