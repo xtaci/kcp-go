@@ -54,7 +54,7 @@ type Segment struct {
 	data     []byte
 }
 
-func NewSegment(size int32) *Segment {
+func NewSegment(size int) *Segment {
 	seg := new(Segment)
 	seg.data = make([]byte, size)
 	return seg
@@ -70,17 +70,15 @@ type KCP struct {
 	nodelay, updated                       uint32
 	ts_probe, probe_wait                   uint32
 	dead_link, incr                        uint32
-	/*
-		struct IQUEUEHEAD snd_queue;
-			struct IQUEUEHEAD rcv_queue;
-				struct IQUEUEHEAD snd_buf;
-					struct IQUEUEHEAD rcv_buf;
-	*/
+
+	snd_queue []Segment
 	rcv_queue []Segment
+	snd_buf   []Segment
 	rcv_buf   []Segment
-	acklist   []uint32
-	ackcount  uint32
-	ackblock  uint32
+
+	acklist  []uint32
+	ackcount uint32
+	ackblock uint32
 
 	user       interface{}
 	buffer     []byte
@@ -107,7 +105,33 @@ func NewKCP(conv uint32) *KCP {
 	return kcp
 }
 
-func (kcp *KCP) recv(buffer []byte) int {
+// peek data size
+func (kcp *KCP) peeksize() int {
+	if len(kcp.rcv_queue) == 0 {
+		return -1
+	}
+
+	seg := &kcp.rcv_queue[0]
+	if seg.frg == 0 {
+		return len(seg.data)
+	}
+
+	if uint32(len(kcp.rcv_queue)) < seg.frg+1 {
+		return -1
+	}
+
+	var sz int
+	for k := range kcp.rcv_queue {
+		seg := &kcp.rcv_queue[k]
+		sz += len(seg.data)
+		if seg.frg == 0 {
+			break
+		}
+	}
+	return sz
+}
+
+func (kcp *KCP) Recv(buffer []byte) int {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
 	}
@@ -155,28 +179,38 @@ func (kcp *KCP) recv(buffer []byte) int {
 	return sz
 }
 
-// peek data size
-func (kcp *KCP) peeksize() int {
-	if len(kcp.rcv_queue) == 0 {
+func (kcp *KCP) Send(buffer []byte) int {
+	var count int
+	if len(buffer) == 0 {
 		return -1
 	}
 
-	seg := &kcp.rcv_queue[0]
-	if seg.frg == 0 {
-		return len(seg.data)
+	if uint32(len(buffer)) < kcp.mss {
+		count = 1
+	} else {
+		count = (len(buffer) + int(kcp.mss) - 1) / int(kcp.mss)
 	}
 
-	if uint32(len(kcp.rcv_queue)) < seg.frg+1 {
-		return -1
+	if count > 255 {
+		return -2
 	}
 
-	var sz int
-	for k := range kcp.rcv_queue {
-		seg := &kcp.rcv_queue[k]
-		sz += len(seg.data)
-		if seg.frg == 0 {
-			break
+	if count == 0 {
+		count = 1
+	}
+
+	for i := 0; i < count; i++ {
+		sz := int(kcp.mss)
+		if len(buffer) <= int(kcp.mss) {
+			sz = len(buffer)
 		}
+		seg := NewSegment(sz)
+		if len(buffer) > 0 {
+			copy(seg.data, buffer[:sz])
+		}
+		seg.frg = uint32(count - i - 1)
+		kcp.snd_queue = append(kcp.snd_queue, *seg)
+		buffer = buffer[sz:]
 	}
-	return sz
+	return 0
 }
