@@ -39,6 +39,30 @@ const (
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 )
 
+func _imin_(a, b uint32) uint32 {
+	if a <= b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func _imax_(a, b uint32) uint32 {
+	if a >= b {
+		return a
+	} else {
+		return b
+	}
+}
+
+func _ibound_(lower, middle, upper uint32) uint32 {
+	return _imin_(_imax_(lower, middle), upper)
+}
+
+func _itimediff(later, earlier uint32) int32 {
+	return ((int32)(later - earlier))
+}
+
 type Segment struct {
 	conv     uint32
 	cmd      uint32
@@ -64,7 +88,7 @@ type KCP struct {
 	conv, mtu, mss, state                  uint32
 	snd_una, snd_nxt, rcv_nxt              uint32
 	ts_recent, ts_lastack, ssthresh        uint32
-	rx_rttval, rx_srtt, rx_rto, rx_minrto  int32
+	rx_rttval, rx_srtt, rx_rto, rx_minrto  uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
 	current, interval, ts_flush, xmit      uint32
 	nodelay, updated                       uint32
@@ -213,4 +237,94 @@ func (kcp *KCP) Send(buffer []byte) int {
 		buffer = buffer[sz:]
 	}
 	return 0
+}
+
+func (kcp *KCP) update_ack(rtt int32) {
+	rto := 0
+	if kcp.rx_srtt == 0 {
+		kcp.rx_srtt = uint32(rtt)
+		kcp.rx_rttval = uint32(rtt) / 2
+	} else {
+		delta := uint32(rtt) - kcp.rx_srtt
+		if delta < 0 {
+			delta = -delta
+		}
+		kcp.rx_rttval = (3*kcp.rx_rttval + delta) / 4
+		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
+		if kcp.rx_srtt < 1 {
+			kcp.rx_srtt = 1
+		}
+	}
+	rto = int(kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval))
+	kcp.rx_rto = _ibound_(kcp.rx_minrto, uint32(rto), IKCP_RTO_MAX)
+}
+
+func (kcp *KCP) shrink_buf() {
+	if len(kcp.snd_buf) > 0 {
+		seg := &kcp.snd_buf[0]
+		kcp.snd_una = seg.sn
+	} else {
+		kcp.snd_una = kcp.snd_nxt
+	}
+}
+
+func (kcp *KCP) parse_ack(sn uint32) {
+	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
+		return
+	}
+
+	for k := range kcp.snd_buf {
+		seg := &kcp.snd_buf[k]
+		if sn == seg.sn {
+			kcp.snd_buf = append(kcp.snd_buf[:k], kcp.snd_buf[k+1:]...)
+			break
+		} else {
+			seg.fastack++
+		}
+	}
+}
+
+func (kcp *KCP) parse_una(una uint32) {
+	for k := range kcp.snd_buf {
+		seg := &kcp.snd_buf[k]
+		if _itimediff(una, seg.sn) <= 0 {
+			kcp.snd_buf = kcp.snd_buf[k:]
+			break
+		}
+	}
+}
+
+func (kcp *KCP) ack_push(sn, ts uint32) {
+	newsize := kcp.ackcount + 1
+
+	if newsize > kcp.ackblock {
+		var acklist []uint32
+		var newblock int32
+
+		for newblock = 8; uint32(newblock) < newsize; newblock <<= 1 {
+		}
+		acklist = make([]uint32, newblock*2)
+		if kcp.acklist != nil {
+			for x := 0; uint32(x) < kcp.ackcount; x++ {
+				acklist[x*2+0] = kcp.acklist[x*2+0]
+				acklist[x*2+1] = kcp.acklist[x*2+1]
+			}
+		}
+		kcp.acklist = acklist
+		kcp.ackblock = uint32(newblock)
+	}
+
+	ptr := kcp.acklist[kcp.ackcount*2:]
+	ptr[0] = sn
+	ptr[1] = ts
+	kcp.ackcount++
+}
+
+func (kcp *KCP) ack_get(p int32, sn, ts *uint32) {
+	if sn != nil {
+		*sn = kcp.acklist[p*2+0]
+	}
+	if ts != nil {
+		*ts = kcp.acklist[p*2+1]
+	}
 }
