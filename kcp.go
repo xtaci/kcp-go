@@ -328,3 +328,43 @@ func (kcp *KCP) ack_get(p int32, sn, ts *uint32) {
 		*ts = kcp.acklist[p*2+1]
 	}
 }
+
+func (kcp *KCP) parse_data(newseg *Segment) {
+	sn := newseg.sn
+	var repeat bool
+	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
+		_itimediff(sn, kcp.rcv_nxt) < 0 {
+		return
+	}
+
+	n := len(kcp.rcv_buf) - 1
+	i := -1
+	for i = n; i >= 0; i-- {
+		seg := &kcp.rcv_buf[i]
+		if seg.sn == sn {
+			repeat = true
+			break
+		}
+		if _itimediff(sn, seg.sn) > 0 {
+			break
+		}
+	}
+
+	if !repeat {
+		if i == -1 {
+			kcp.rcv_buf = append(kcp.rcv_buf, *newseg)
+		} else {
+			kcp.rcv_buf = append(kcp.rcv_buf[:i+1], append([]Segment{*newseg}, kcp.rcv_buf[i+1:]...)...)
+		}
+	}
+
+	for k := range kcp.rcv_buf {
+		seg := &kcp.rcv_buf[k]
+		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
+		} else {
+			kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:k]...)
+			kcp.rcv_buf = kcp.rcv_buf[k:]
+			break
+		}
+	}
+}
