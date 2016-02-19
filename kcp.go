@@ -79,21 +79,6 @@ func ikcp_decode32u(p []byte, l *uint32) []byte {
 	return p[4:]
 }
 
-//---------------------------------------------------------------------
-// ikcp_encode_seg
-//---------------------------------------------------------------------
-func ikcp_encode_seg(ptr []byte, seg *Segment) []byte {
-	ptr = ikcp_encode32u(ptr, seg.conv)
-	ptr = ikcp_encode8u(ptr, uint8(seg.cmd))
-	ptr = ikcp_encode8u(ptr, uint8(seg.frg))
-	ptr = ikcp_encode16u(ptr, uint16(seg.wnd))
-	ptr = ikcp_encode32u(ptr, seg.ts)
-	ptr = ikcp_encode32u(ptr, seg.sn)
-	ptr = ikcp_encode32u(ptr, seg.una)
-	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
-	return ptr
-}
-
 func _imin_(a, b uint32) uint32 {
 	if a <= b {
 		return a
@@ -131,6 +116,18 @@ type Segment struct {
 	fastack  uint32
 	xmit     uint32
 	data     []byte
+}
+
+func (seg *Segment) encode(ptr []byte) []byte {
+	ptr = ikcp_encode32u(ptr, seg.conv)
+	ptr = ikcp_encode8u(ptr, uint8(seg.cmd))
+	ptr = ikcp_encode8u(ptr, uint8(seg.frg))
+	ptr = ikcp_encode16u(ptr, uint16(seg.wnd))
+	ptr = ikcp_encode32u(ptr, seg.ts)
+	ptr = ikcp_encode32u(ptr, seg.sn)
+	ptr = ikcp_encode32u(ptr, seg.una)
+	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
+	return ptr
 }
 
 func NewSegment(size uint32) *Segment {
@@ -567,7 +564,7 @@ func (kcp *KCP) flush() {
 			size = 0
 		}
 		kcp.ack_get(i, &seg.sn, &seg.ts)
-		ptr = ikcp_encode_seg(ptr, &seg)
+		ptr = seg.encode(ptr)
 		size += 24
 	}
 
@@ -604,7 +601,7 @@ func (kcp *KCP) flush() {
 			ptr = buffer
 			size = 0
 		}
-		ptr = ikcp_encode_seg(ptr, &seg)
+		ptr = seg.encode(ptr)
 		size += 24
 	}
 
@@ -616,7 +613,7 @@ func (kcp *KCP) flush() {
 			ptr = buffer
 			size = 0
 		}
-		ptr = ikcp_encode_seg(ptr, &seg)
+		ptr = seg.encode(ptr)
 		size += 24
 	}
 
@@ -707,7 +704,7 @@ func (kcp *KCP) flush() {
 				size = 0
 			}
 
-			ptr = ikcp_encode_seg(ptr, segment)
+			ptr = segment.encode(ptr)
 			size += 24
 
 			if len(segment.data) > 0 {
