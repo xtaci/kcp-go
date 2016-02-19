@@ -126,7 +126,6 @@ type Segment struct {
 	ts       uint32
 	sn       uint32
 	una      uint32
-	len      uint32
 	resendts uint32
 	rto      uint32
 	fastack  uint32
