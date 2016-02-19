@@ -1,5 +1,7 @@
 package kcp
 
+import "encoding/binary"
+
 const (
 	IKCP_LOG_OUTPUT    = 1
 	IKCP_LOG_INPUT     = 2
@@ -39,6 +41,59 @@ const (
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 )
 
+type Output func(kcp *KCP, buf []byte, size int32)
+
+/* encode 8 bits unsigned int */
+func ikcp_encode8u(p []byte, c byte) []byte {
+	p[0] = c
+	return p[1:]
+}
+
+/* decode 8 bits unsigned int */
+func ikcp_decode8u(p []byte, c *byte) []byte {
+	*c = p[0]
+	return p[1:]
+}
+
+/* encode 16 bits unsigned int (lsb) */
+func ikcp_encode16u(p []byte, w uint16) []byte {
+	binary.LittleEndian.PutUint16(p, w)
+	return p[2:]
+}
+
+/* decode 16 bits unsigned int (lsb) */
+func ikcp_decode16u(p []byte, w *uint16) []byte {
+	*w = binary.LittleEndian.Uint16(p)
+	return p[2:]
+}
+
+/* encode 32 bits unsigned int (lsb) */
+func ikcp_encode32u(p []byte, l uint32) []byte {
+	binary.LittleEndian.PutUint32(p, l)
+	return p[4:]
+}
+
+/* decode 32 bits unsigned int (lsb) */
+func ikcp_decode32u(p []byte, l *uint32) []byte {
+	*l = binary.LittleEndian.Uint32(p)
+	return p[4:]
+}
+
+//---------------------------------------------------------------------
+// ikcp_encode_seg
+//---------------------------------------------------------------------
+func ikcp_encode_seg(ptr []byte, seg *Segment) []byte {
+	ptr = ikcp_encode32u(ptr, seg.conv)
+	ptr = ikcp_encode8u(ptr, uint8(seg.cmd))
+	ptr = ikcp_encode8u(ptr, uint8(seg.frg))
+	ptr = ikcp_encode16u(ptr, uint16(seg.wnd))
+	ptr = ikcp_encode32u(ptr, seg.ts)
+	ptr = ikcp_encode32u(ptr, seg.sn)
+	ptr = ikcp_encode32u(ptr, seg.una)
+	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
+	return ptr
+}
+
 func _imin_(a, b uint32) uint32 {
 	if a <= b {
 		return a
@@ -67,6 +122,7 @@ type Segment struct {
 	conv     uint32
 	cmd      uint32
 	frg      uint32
+	wnd      uint32
 	ts       uint32
 	sn       uint32
 	una      uint32
@@ -78,7 +134,7 @@ type Segment struct {
 	data     []byte
 }
 
-func NewSegment(size int) *Segment {
+func NewSegment(size uint32) *Segment {
 	seg := new(Segment)
 	seg.data = make([]byte, size)
 	return seg
@@ -104,14 +160,14 @@ type KCP struct {
 	ackcount uint32
 	ackblock uint32
 
-	user       interface{}
 	buffer     []byte
 	fastresend int
 	nocwnd     int
 	logmask    int
+	output     Output
 }
 
-func NewKCP(conv uint32) *KCP {
+func NewKCP(conv uint32, output Output) *KCP {
 	kcp := new(KCP)
 	kcp.conv = conv
 	kcp.snd_wnd = IKCP_WND_SND
@@ -126,6 +182,7 @@ func NewKCP(conv uint32) *KCP {
 	kcp.ts_flush = IKCP_INTERVAL
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
+	kcp.output = output
 	return kcp
 }
 
@@ -224,9 +281,9 @@ func (kcp *KCP) Send(buffer []byte) int {
 	}
 
 	for i := 0; i < count; i++ {
-		sz := int(kcp.mss)
+		sz := kcp.mss
 		if len(buffer) <= int(kcp.mss) {
-			sz = len(buffer)
+			sz = uint32(len(buffer))
 		}
 		seg := NewSegment(sz)
 		if len(buffer) > 0 {
@@ -366,5 +423,333 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 			kcp.rcv_buf = kcp.rcv_buf[k:]
 			break
 		}
+	}
+}
+
+func (kcp *KCP) Input(data []byte) int {
+	una := kcp.snd_una
+	size := len(data)
+	if size < 24 {
+		return 0
+	}
+
+	for {
+		var ts, sn, len, una, conv uint32
+		var wnd uint16
+		var cmd, frg uint8
+
+		if size < int(IKCP_OVERHEAD) {
+			break
+		}
+
+		data = ikcp_decode32u(data, &conv)
+		if conv != kcp.conv {
+			return -1
+		}
+
+		data = ikcp_decode8u(data, &cmd)
+		data = ikcp_decode8u(data, &frg)
+		data = ikcp_decode16u(data, &wnd)
+		data = ikcp_decode32u(data, &ts)
+		data = ikcp_decode32u(data, &sn)
+		data = ikcp_decode32u(data, &una)
+		data = ikcp_decode32u(data, &len)
+
+		size -= int(IKCP_OVERHEAD)
+
+		if uint32(size) < uint32(len) {
+			return -2
+		}
+
+		if cmd != uint8(IKCP_CMD_PUSH) && cmd != uint8(IKCP_CMD_ACK) &&
+			cmd != uint8(IKCP_CMD_WASK) && cmd != uint8(IKCP_CMD_WINS) {
+			return -3
+		}
+
+		kcp.rmt_wnd = uint32(wnd)
+		kcp.parse_una(una)
+		kcp.shrink_buf()
+
+		if cmd == uint8(IKCP_CMD_ACK) {
+			if _itimediff(kcp.current, ts) >= 0 {
+				kcp.update_ack(_itimediff(kcp.current, ts))
+			}
+			kcp.parse_ack(sn)
+			kcp.shrink_buf()
+		} else if cmd == uint8(IKCP_CMD_PUSH) {
+			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
+				kcp.ack_push(sn, ts)
+				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
+					seg := NewSegment(len)
+					seg.conv = conv
+					seg.cmd = uint32(cmd)
+					seg.frg = uint32(frg)
+					seg.wnd = uint32(wnd)
+					seg.ts = ts
+					seg.sn = sn
+					seg.una = una
+					copy(seg.data, data[:len])
+					kcp.parse_data(seg)
+				}
+			}
+		} else if cmd == uint8(IKCP_CMD_WASK) {
+			// ready to send back IKCP_CMD_WINS in Ikcp_flush
+			// tell remote my window size
+			kcp.probe |= IKCP_ASK_TELL
+		} else if cmd == uint8(IKCP_CMD_WINS) {
+			// do nothing
+		} else {
+			return -3
+		}
+
+		data = data[len:]
+		size -= int(len)
+	}
+
+	if _itimediff(kcp.snd_una, una) > 0 {
+		if kcp.cwnd < kcp.rmt_wnd {
+			mss := kcp.mss
+			if kcp.cwnd < kcp.ssthresh {
+				kcp.cwnd++
+				kcp.incr += mss
+			} else {
+				if kcp.incr < mss {
+					kcp.incr = mss
+				}
+				kcp.incr += (mss*mss)/kcp.incr + (mss / 16)
+				if (kcp.cwnd+1)*mss <= kcp.incr {
+					kcp.cwnd++
+				}
+			}
+			if kcp.cwnd > kcp.rmt_wnd {
+				kcp.cwnd = kcp.rmt_wnd
+				kcp.incr = kcp.rmt_wnd * mss
+			}
+		}
+	}
+
+	return 0
+}
+
+func (kcp *KCP) wnd_unused() int32 {
+	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
+		return int32(kcp.rcv_wnd) - int32(len(kcp.rcv_queue))
+	}
+	return 0
+}
+
+func (kcp *KCP) flush() {
+	current := kcp.current
+	buffer := kcp.buffer
+	ptr := buffer
+	var count, size, i int32
+	var resent, cwnd uint32
+	var rtomin uint32
+	change := 0
+	lost := 0
+
+	if kcp.updated == 0 {
+		return
+	}
+	var seg Segment
+	seg.conv = kcp.conv
+	seg.cmd = IKCP_CMD_ACK
+	seg.wnd = uint32(kcp.wnd_unused())
+	seg.una = kcp.rcv_nxt
+
+	// flush acknowledges
+	size = 0
+	count = int32(kcp.ackcount)
+	for i = 0; i < count; i++ {
+		//size = int32(ptr - buffer)
+		if size > int32(kcp.mtu) {
+			kcp.output(kcp, buffer, size)
+			ptr = buffer
+			size = 0
+		}
+		kcp.ack_get(i, &seg.sn, &seg.ts)
+		ptr = ikcp_encode_seg(ptr, &seg)
+		size += 24
+	}
+
+	kcp.ackcount = 0
+
+	// probe window size (if remote window size equals zero)
+	if kcp.rmt_wnd == 0 {
+		if kcp.probe_wait == 0 {
+			kcp.probe_wait = IKCP_PROBE_INIT
+			kcp.ts_probe = kcp.current + kcp.probe_wait
+		} else {
+			if _itimediff(kcp.current, kcp.ts_probe) >= 0 {
+				if kcp.probe_wait < IKCP_PROBE_INIT {
+					kcp.probe_wait = IKCP_PROBE_INIT
+				}
+				kcp.probe_wait += kcp.probe_wait / 2
+				if kcp.probe_wait > IKCP_PROBE_LIMIT {
+					kcp.probe_wait = IKCP_PROBE_LIMIT
+				}
+				kcp.ts_probe = kcp.current + kcp.probe_wait
+				kcp.probe |= IKCP_ASK_SEND
+			}
+		}
+	} else {
+		kcp.ts_probe = 0
+		kcp.probe_wait = 0
+	}
+
+	// flush window probing commands
+	if (kcp.probe & IKCP_ASK_SEND) != 0 {
+		seg.cmd = IKCP_CMD_WASK
+		if size > int32(kcp.mtu) {
+			kcp.output(kcp, buffer, size)
+			ptr = buffer
+			size = 0
+		}
+		ptr = ikcp_encode_seg(ptr, &seg)
+		size += 24
+	}
+
+	// flush window probing commands
+	if (kcp.probe & IKCP_ASK_TELL) != 0 {
+		seg.cmd = IKCP_CMD_WINS
+		if size > int32(kcp.mtu) {
+			kcp.output(kcp, buffer, size)
+			ptr = buffer
+			size = 0
+		}
+		ptr = ikcp_encode_seg(ptr, &seg)
+		size += 24
+	}
+
+	kcp.probe = 0
+
+	// calculate window size
+	cwnd = _imin_(kcp.snd_wnd, kcp.rmt_wnd)
+	if kcp.nocwnd == 0 {
+		cwnd = _imin_(kcp.cwnd, cwnd)
+	}
+
+	t := 0
+
+	for k := range kcp.snd_queue {
+		t++
+		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) >= 0 {
+			kcp.snd_queue = kcp.snd_queue[:k]
+			break
+		}
+		newseg := kcp.snd_queue[k]
+		kcp.snd_buf = append(kcp.snd_buf, newseg)
+		newseg.conv = kcp.conv
+		newseg.cmd = IKCP_CMD_PUSH
+		newseg.wnd = seg.wnd
+		newseg.ts = current
+		newseg.sn = kcp.snd_nxt
+		kcp.snd_nxt++
+		newseg.una = kcp.rcv_nxt
+		newseg.resendts = current
+		newseg.rto = kcp.rx_rto
+		newseg.fastack = 0
+		newseg.xmit = 0
+	}
+
+	// calculate resent
+	resent = uint32(kcp.fastresend)
+	if kcp.fastresend <= 0 {
+		resent = 0xffffffff
+	}
+	rtomin = (kcp.rx_rto >> 3)
+	if kcp.nodelay != 0 {
+		rtomin = 0
+	}
+
+	a := 0
+	// flush data segments
+	for k := range kcp.snd_buf {
+		////println("debug loop", a, kcp.snd_buf.Len())
+		a++
+		segment := &kcp.snd_buf[k]
+		needsend := 0
+		if segment.xmit == 0 {
+			needsend = 1
+			segment.xmit++
+			segment.rto = kcp.rx_rto
+			segment.resendts = current + segment.rto + rtomin
+		} else if _itimediff(current, segment.resendts) >= 0 {
+			needsend = 1
+			segment.xmit++
+			kcp.xmit++
+			if kcp.nodelay == 0 {
+				segment.rto += kcp.rx_rto
+			} else {
+				segment.rto += kcp.rx_rto / 2
+			}
+			segment.resendts = current + segment.rto
+			lost = 1
+		} else if segment.fastack >= resent {
+			needsend = 1
+			segment.xmit++
+			segment.fastack = 0
+			segment.resendts = current + segment.rto
+			change++
+		}
+		if needsend != 0 {
+			var need int32
+			segment.ts = current
+			segment.wnd = seg.wnd
+			segment.una = kcp.rcv_nxt
+
+			need = int32(IKCP_OVERHEAD + len(segment.data))
+
+			////fmt.Printf("vzex:need send%d, %d,%d,%d\n", kcp.nsnd_buf, size, need, kcp.mtu)
+			if size+need >= int32(kcp.mtu) {
+				//      //fmt.Printf("trigger!\n");
+				kcp.output(kcp, buffer, size)
+				ptr = buffer
+				size = 0
+			}
+
+			ptr = ikcp_encode_seg(ptr, segment)
+			size += 24
+
+			if len(segment.data) > 0 {
+				copy(ptr, segment.data)
+				ptr = ptr[len(segment.data):]
+				size += int32(len(segment.data))
+			}
+
+			if segment.xmit >= kcp.dead_link {
+				kcp.state = 0
+			}
+		}
+	}
+
+	// flash remain segments
+	if size > 0 {
+		kcp.output(kcp, buffer, size)
+	}
+
+	// update ssthresh
+	if change != 0 {
+		inflight := kcp.snd_nxt - kcp.snd_una
+		kcp.ssthresh = inflight / 2
+		if kcp.ssthresh < IKCP_THRESH_MIN {
+			kcp.ssthresh = IKCP_THRESH_MIN
+		}
+		kcp.cwnd = kcp.ssthresh + resent
+		kcp.incr = kcp.cwnd * kcp.mss
+	}
+
+	if lost != 0 {
+		kcp.ssthresh = cwnd / 2
+		if kcp.ssthresh < IKCP_THRESH_MIN {
+			kcp.ssthresh = IKCP_THRESH_MIN
+		}
+		kcp.cwnd = 1
+		kcp.incr = kcp.mss
+	}
+
+	if kcp.cwnd < 1 {
+		kcp.cwnd = 1
+		kcp.incr = kcp.mss
 	}
 }
