@@ -161,9 +161,9 @@ type KCP struct {
 	ackblock uint32
 
 	buffer     []byte
-	fastresend int
-	nocwnd     int
-	logmask    int
+	fastresend int32
+	nocwnd     int32
+	logmask    int32
 	output     Output
 }
 
@@ -752,4 +752,138 @@ func (kcp *KCP) flush() {
 		kcp.cwnd = 1
 		kcp.incr = kcp.mss
 	}
+}
+
+func (kcp *KCP) Update(current uint32) {
+	var slap int32
+
+	kcp.current = current
+
+	if kcp.updated == 0 {
+		kcp.updated = 1
+		kcp.ts_flush = kcp.current
+	}
+
+	slap = _itimediff(kcp.current, kcp.ts_flush)
+
+	if slap >= 10000 || slap < -10000 {
+		kcp.ts_flush = kcp.current
+		slap = 0
+	}
+
+	if slap >= 0 {
+		kcp.ts_flush += kcp.interval
+		if _itimediff(kcp.current, kcp.ts_flush) >= 0 {
+			kcp.ts_flush = kcp.current + kcp.interval
+		}
+		kcp.flush()
+	}
+}
+
+func (kcp *KCP) check(current uint32) uint32 {
+	ts_flush := kcp.ts_flush
+	tm_flush := 0x7fffffff
+	tm_packet := 0x7fffffff
+	minimal := 0
+	if kcp.updated == 0 {
+		return current
+	}
+
+	if _itimediff(current, ts_flush) >= 10000 ||
+		_itimediff(current, ts_flush) < -10000 {
+		ts_flush = current
+	}
+
+	if _itimediff(current, ts_flush) >= 0 {
+		return current
+	}
+
+	tm_flush = int(_itimediff(ts_flush, current))
+
+	for k := range kcp.snd_buf {
+		seg := &kcp.snd_buf[k]
+		diff := _itimediff(seg.resendts, current)
+		if diff <= 0 {
+			return current
+		}
+		if diff < int32(tm_packet) {
+			tm_packet = int(diff)
+		}
+	}
+
+	minimal = int(tm_packet)
+	if tm_packet >= tm_flush {
+		minimal = int(tm_flush)
+	}
+	if uint32(minimal) >= kcp.interval {
+		minimal = int(kcp.interval)
+	}
+
+	return current + uint32(minimal)
+}
+
+func (kcp *KCP) SetMtu(mtu int32) int32 {
+	if mtu < 50 || mtu < int32(IKCP_OVERHEAD) {
+		return -1
+	}
+	buffer := make([]byte, (uint32(mtu)+IKCP_OVERHEAD)*3)
+	if buffer == nil {
+		return -2
+	}
+	kcp.mtu = uint32(mtu)
+	kcp.mss = kcp.mtu - IKCP_OVERHEAD
+	kcp.buffer = buffer
+	return 0
+}
+
+func (kcp *KCP) Interval(interval int32) int32 {
+	if interval > 5000 {
+		interval = 5000
+	} else if interval < 10 {
+		interval = 10
+	}
+	kcp.interval = uint32(interval)
+	return 0
+}
+
+func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
+	if nodelay >= 0 {
+		kcp.nodelay = uint32(nodelay)
+		if nodelay != 0 {
+			kcp.rx_minrto = IKCP_RTO_NDL
+		} else {
+			kcp.rx_minrto = IKCP_RTO_MIN
+		}
+	}
+	if interval >= 0 {
+		if interval > 5000 {
+			interval = 5000
+		} else if interval < 10 {
+			interval = 10
+		}
+		kcp.interval = uint32(interval)
+	}
+	if resend >= 0 {
+		kcp.fastresend = resend
+	}
+	if nc >= 0 {
+		kcp.nocwnd = nc
+	}
+	return 0
+}
+
+func (kcp *KCP) WndSize(sndwnd, rcvwnd int32) int32 {
+	if kcp != nil {
+		if sndwnd > 0 {
+			kcp.snd_wnd = uint32(sndwnd)
+		}
+		if rcvwnd > 0 {
+			kcp.rcv_wnd = uint32(rcvwnd)
+		}
+	}
+	return 0
+}
+
+func (kcp *KCP) WaitSnd() int32 {
+	return int32(len(kcp.snd_buf) + len(kcp.snd_queue))
 }
