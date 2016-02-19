@@ -1,2 +1,3 @@
 # kcp-go
-go port of KCP
+go port of KCP (inprogress...) 
+
