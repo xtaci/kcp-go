@@ -168,7 +168,7 @@ func NewKCP(conv uint32, output Output) *KCP {
 	return kcp
 }
 
-// peek data size
+// check the size of next message in the recv queue
 func (kcp *KCP) peeksize() (size int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
@@ -407,7 +407,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	}
 }
 
-// input data
+// when you received a low level packet (eg. UDP packet), call it
 func (kcp *KCP) Input(data []byte) int {
 	una := kcp.snd_una
 	size := len(data)
@@ -522,6 +522,7 @@ func (kcp *KCP) wnd_unused() int32 {
 	return 0
 }
 
+// flush pending data
 func (kcp *KCP) flush() {
 	current := kcp.current
 	buffer := kcp.buffer
@@ -808,8 +809,7 @@ func (kcp *KCP) Check(current uint32) uint32 {
 	return current + uint32(minimal)
 }
 
-// 纯算法协议并不负责探测 MTU，默认 mtu是1400字节，可以使用ikcp_setmtu来设置该值。
-// 该值将会影响数据包归并及分片时候的最大传输单元。
+// change MTU size, default is 1400
 func (kcp *KCP) SetMtu(mtu int32) int32 {
 	if mtu < 50 || mtu < int32(IKCP_OVERHEAD) {
 		return -1
@@ -834,13 +834,11 @@ func (kcp *KCP) Interval(interval int32) int32 {
 	return 0
 }
 
-// nodelay ：是否启用 nodelay模式，0不启用；1启用
-// interval ：协议内部工作的 interval，单位毫秒，比如 10ms或者 20ms
-// resend ：快速重传模式，默认0关闭，可以设置2（2次ACK跨越将会直接重传）
-// nc ：是否关闭流控，默认是0代表不关闭，1代表关闭
-// 普通模式： ikcp_nodelay(kcp, 0, 40, 0, 0)
-// 极速模式： ikcp_nodelay(kcp, 1, 10, 2, 1);
-// 不管是 TCP还是 KCP计算 RTO时都有最小 RTO的限制，即便计算出来RTO为40ms，由于默认的 RTO是100ms，协议只有在100ms后才能检测到丢包，快速模式下为30ms，可以手动更改该值：
+// fastest: ikcp_nodelay(kcp, 1, 20, 2, 1)
+// nodelay: 0:disable(default), 1:enable
+// interval: internal update timer interval in millisec, default is 100ms
+// resend: 0:disable fast resend(default), 1:enable fast resend
+// nc: 0:normal congestion control(default), 1:disable congestion control
 func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
 	if nodelay >= 0 {
 		kcp.nodelay = uint32(nodelay)
@@ -867,8 +865,7 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
 	return 0
 }
 
-// 该调用将会设置协议的最大发送窗口和最大接收窗口大小，默认为32.
-// 这个可以理解为 TCP的 SND_BUF 和 RCV_BUF，只不过单位不一样 SND/RCV_BUF 单位是字节，这个单位是包。
+// set maximum window size: sndwnd=32, rcvwnd=32 by default
 func (kcp *KCP) WndSize(sndwnd, rcvwnd int32) int32 {
 	if kcp != nil {
 		if sndwnd > 0 {
@@ -881,6 +878,7 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int32) int32 {
 	return 0
 }
 
+// get how many packet is waiting to be sent
 func (kcp *KCP) WaitSnd() int32 {
 	return int32(len(kcp.snd_buf) + len(kcp.snd_queue))
 }
