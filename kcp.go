@@ -407,6 +407,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	}
 }
 
+// input data
 func (kcp *KCP) Input(data []byte) int {
 	una := kcp.snd_una
 	size := len(data)
