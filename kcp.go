@@ -227,7 +227,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	kcp.rcv_queue = kcp.rcv_queue[count+1:]
+	kcp.rcv_queue = kcp.rcv_queue[count:]
 
 	// move available data from rcv_buf -> rcv_queue
 	count = 0
@@ -240,7 +240,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	kcp.rcv_buf = kcp.rcv_buf[count+1:]
+	kcp.rcv_buf = kcp.rcv_buf[count:]
 
 	// fast recover
 	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd && fast_recover {
