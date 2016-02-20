@@ -523,8 +523,6 @@ func (kcp *KCP) wnd_unused() int32 {
 func (kcp *KCP) flush() {
 	current := kcp.current
 	buffer := kcp.buffer
-	var resent, cwnd uint32
-	var rtomin uint32
 	change := 0
 	lost := 0
 
@@ -538,18 +536,16 @@ func (kcp *KCP) flush() {
 	seg.una = kcp.rcv_nxt
 
 	// flush acknowledges
-	size := 0
 	count := len(kcp.acklist) / 2
 	ptr := buffer
 	for i := 0; i < count; i++ {
+		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
-			size = 0
 		}
 		seg.sn, seg.ts = kcp.ack_get(i)
 		ptr = seg.encode(ptr)
-		size += 24
 	}
 	kcp.acklist = nil
 
@@ -579,31 +575,29 @@ func (kcp *KCP) flush() {
 	// flush window probing commands
 	if (kcp.probe & IKCP_ASK_SEND) != 0 {
 		seg.cmd = IKCP_CMD_WASK
+		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
-			size = 0
 		}
 		ptr = seg.encode(ptr)
-		size += 24
 	}
 
 	// flush window probing commands
 	if (kcp.probe & IKCP_ASK_TELL) != 0 {
 		seg.cmd = IKCP_CMD_WINS
+		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
-			size = 0
 		}
 		ptr = seg.encode(ptr)
-		size += 24
 	}
 
 	kcp.probe = 0
 
 	// calculate window size
-	cwnd = _imin_(kcp.snd_wnd, kcp.rmt_wnd)
+	cwnd := _imin_(kcp.snd_wnd, kcp.rmt_wnd)
 	if kcp.nocwnd == 0 {
 		cwnd = _imin_(kcp.cwnd, cwnd)
 	}
@@ -633,11 +627,11 @@ func (kcp *KCP) flush() {
 	}
 
 	// calculate resent
-	resent = uint32(kcp.fastresend)
+	resent := uint32(kcp.fastresend)
 	if kcp.fastresend <= 0 {
 		resent = 0xffffffff
 	}
-	rtomin = (kcp.rx_rto >> 3)
+	rtomin := (kcp.rx_rto >> 3)
 	if kcp.nodelay != 0 {
 		rtomin = 0
 	}
@@ -645,14 +639,14 @@ func (kcp *KCP) flush() {
 	// flush data segments
 	for k := range kcp.snd_buf {
 		segment := &kcp.snd_buf[k]
-		needsend := 0
+		needsend := false
 		if segment.xmit == 0 {
-			needsend = 1
+			needsend = true
 			segment.xmit++
 			segment.rto = kcp.rx_rto
 			segment.resendts = current + segment.rto + rtomin
 		} else if _itimediff(current, segment.resendts) >= 0 {
-			needsend = 1
+			needsend = true
 			segment.xmit++
 			kcp.xmit++
 			if kcp.nodelay == 0 {
@@ -663,32 +657,30 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			lost = 1
 		} else if segment.fastack >= resent {
-			needsend = 1
+			needsend = true
 			segment.xmit++
 			segment.fastack = 0
 			segment.resendts = current + segment.rto
 			change++
 		}
 
-		if needsend != 0 {
+		if needsend {
 			segment.ts = current
 			segment.wnd = seg.wnd
 			segment.una = kcp.rcv_nxt
 
+			size := len(buffer) - len(ptr)
 			need := IKCP_OVERHEAD + len(segment.data)
 
 			if size+need >= int(kcp.mtu) {
 				kcp.output(buffer, size)
 				ptr = buffer
-				size = 0
 			}
 
 			ptr = segment.encode(ptr)
-			size += 24
 			if len(segment.data) > 0 {
 				copy(ptr, segment.data)
 				ptr = ptr[len(segment.data):]
-				size += len(segment.data)
 			}
 
 			if segment.xmit >= kcp.dead_link {
@@ -698,6 +690,7 @@ func (kcp *KCP) flush() {
 	}
 
 	// flash remain segments
+	size := len(buffer) - len(ptr)
 	if size > 0 {
 		kcp.output(buffer, size)
 	}
