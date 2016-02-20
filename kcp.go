@@ -149,6 +149,8 @@ type KCP struct {
 	output     Output
 }
 
+// create a new kcp control object, 'conv' must equal in two endpoint
+// from the same connection.
 func NewKCP(conv uint32, output Output) *KCP {
 	kcp := new(KCP)
 	kcp.conv = conv
