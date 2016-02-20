@@ -103,6 +103,7 @@ func _itimediff(later, earlier uint32) int32 {
 	return ((int32)(later - earlier))
 }
 
+// KCP Segment Definition
 type Segment struct {
 	conv     uint32
 	cmd      uint32
@@ -118,6 +119,7 @@ type Segment struct {
 	data     []byte
 }
 
+// encode a segment into buffer
 func (seg *Segment) encode(ptr []byte) []byte {
 	ptr = ikcp_encode32u(ptr, seg.conv)
 	ptr = ikcp_encode8u(ptr, uint8(seg.cmd))
@@ -136,6 +138,7 @@ func NewSegment(size uint32) *Segment {
 	return seg
 }
 
+// KCP Connection Definition
 type KCP struct {
 	conv, mtu, mss, state                  uint32
 	snd_una, snd_nxt, rcv_nxt              uint32
@@ -818,6 +821,8 @@ func (kcp *KCP) check(current uint32) uint32 {
 	return current + uint32(minimal)
 }
 
+// 纯算法协议并不负责探测 MTU，默认 mtu是1400字节，可以使用ikcp_setmtu来设置该值。
+// 该值将会影响数据包归并及分片时候的最大传输单元。
 func (kcp *KCP) SetMtu(mtu int32) int32 {
 	if mtu < 50 || mtu < int32(IKCP_OVERHEAD) {
 		return -1
@@ -842,6 +847,13 @@ func (kcp *KCP) Interval(interval int32) int32 {
 	return 0
 }
 
+// nodelay ：是否启用 nodelay模式，0不启用；1启用
+// interval ：协议内部工作的 interval，单位毫秒，比如 10ms或者 20ms
+// resend ：快速重传模式，默认0关闭，可以设置2（2次ACK跨越将会直接重传）
+// nc ：是否关闭流控，默认是0代表不关闭，1代表关闭
+// 普通模式： ikcp_nodelay(kcp, 0, 40, 0, 0)
+// 极速模式： ikcp_nodelay(kcp, 1, 10, 2, 1);
+// 不管是 TCP还是 KCP计算 RTO时都有最小 RTO的限制，即便计算出来RTO为40ms，由于默认的 RTO是100ms，协议只有在100ms后才能检测到丢包，快速模式下为30ms，可以手动更改该值：
 func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
 	if nodelay >= 0 {
 		kcp.nodelay = uint32(nodelay)
@@ -868,6 +880,8 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
 	return 0
 }
 
+// 该调用将会设置协议的最大发送窗口和最大接收窗口大小，默认为32.
+// 这个可以理解为 TCP的 SND_BUF 和 RCV_BUF，只不过单位不一样 SND/RCV_BUF 单位是字节，这个单位是包。
 func (kcp *KCP) WndSize(sndwnd, rcvwnd int32) int32 {
 	if kcp != nil {
 		if sndwnd > 0 {
