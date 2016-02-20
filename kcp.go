@@ -196,14 +196,19 @@ func (kcp *KCP) peeksize() int {
 	return length
 }
 
-func (kcp *KCP) Recv(buffer []byte) int {
+// user/upper level recv: returns size, returns below zero for EAGAIN
+func (kcp *KCP) Recv(buffer []byte) (n int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
 	}
 
 	peeksize := kcp.peeksize()
 	if peeksize < 0 {
-		return -1
+		return -2
+	}
+
+	if peeksize > len(buffer) {
+		return -3
 	}
 
 	var fast_recover bool
@@ -211,19 +216,18 @@ func (kcp *KCP) Recv(buffer []byte) int {
 		fast_recover = true
 	}
 
-	sz := 0
+	// merge fragment
 	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
-		if len(buffer) > 0 {
-			copy(buffer, seg.data)
-			buffer = buffer[len(seg.data):]
-		}
-		sz += len(seg.data)
+		copy(buffer, seg.data)
+		buffer = buffer[len(seg.data):]
+		n += len(seg.data)
 		if seg.frg == 0 {
-			kcp.rcv_queue = kcp.rcv_queue[k:]
+			kcp.rcv_queue = kcp.rcv_queue[k+1:]
 			break
 		}
 	}
+
 	// move available data from rcv_buf -> rcv_queue
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
@@ -241,7 +245,7 @@ func (kcp *KCP) Recv(buffer []byte) int {
 		// tell remote my window size
 		kcp.probe |= IKCP_ASK_TELL
 	}
-	return sz
+	return
 }
 
 func (kcp *KCP) Send(buffer []byte) int {
