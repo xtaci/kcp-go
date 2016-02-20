@@ -41,7 +41,7 @@ const (
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 )
 
-type Output func(kcp *KCP, buf []byte, size int32)
+type Output func(buf []byte, size int32)
 
 /* encode 8 bits unsigned int */
 func ikcp_encode8u(p []byte, c byte) []byte {
@@ -562,7 +562,7 @@ func (kcp *KCP) flush() {
 	for i = 0; i < count; i++ {
 		//size = int32(ptr - buffer)
 		if size > int32(kcp.mtu) {
-			kcp.output(kcp, buffer, size)
+			kcp.output(buffer, size)
 			ptr = buffer
 			size = 0
 		}
@@ -600,7 +600,7 @@ func (kcp *KCP) flush() {
 	if (kcp.probe & IKCP_ASK_SEND) != 0 {
 		seg.cmd = IKCP_CMD_WASK
 		if size > int32(kcp.mtu) {
-			kcp.output(kcp, buffer, size)
+			kcp.output(buffer, size)
 			ptr = buffer
 			size = 0
 		}
@@ -612,7 +612,7 @@ func (kcp *KCP) flush() {
 	if (kcp.probe & IKCP_ASK_TELL) != 0 {
 		seg.cmd = IKCP_CMD_WINS
 		if size > int32(kcp.mtu) {
-			kcp.output(kcp, buffer, size)
+			kcp.output(buffer, size)
 			ptr = buffer
 			size = 0
 		}
@@ -699,10 +699,8 @@ func (kcp *KCP) flush() {
 
 			need = int32(IKCP_OVERHEAD + len(segment.data))
 
-			////fmt.Printf("vzex:need send%d, %d,%d,%d\n", kcp.nsnd_buf, size, need, kcp.mtu)
 			if size+need >= int32(kcp.mtu) {
-				//      //fmt.Printf("trigger!\n");
-				kcp.output(kcp, buffer, size)
+				kcp.output(buffer, size)
 				ptr = buffer
 				size = 0
 			}
@@ -724,7 +722,7 @@ func (kcp *KCP) flush() {
 
 	// flash remain segments
 	if size > 0 {
-		kcp.output(kcp, buffer, size)
+		kcp.output(buffer, size)
 	}
 
 	// update ssthresh
