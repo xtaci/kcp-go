@@ -3,21 +3,6 @@ package kcp
 import "encoding/binary"
 
 const (
-	IKCP_LOG_OUTPUT    = 1
-	IKCP_LOG_INPUT     = 2
-	IKCP_LOG_SEND      = 4
-	IKCP_LOG_RECV      = 8
-	IKCP_LOG_IN_DATA   = 16
-	IKCP_LOG_IN_ACK    = 32
-	IKCP_LOG_IN_PROBE  = 64
-	IKCP_LOG_IN_WIN    = 128
-	IKCP_LOG_OUT_DATA  = 256
-	IKCP_LOG_OUT_ACK   = 512
-	IKCP_LOG_OUT_PROBE = 1024
-	IKCP_LOG_OUT_WINS  = 2048
-)
-
-const (
 	IKCP_RTO_NDL     = 30  // no delay min rto
 	IKCP_RTO_MIN     = 100 // normal min rto
 	IKCP_RTO_DEF     = 200
@@ -200,15 +185,15 @@ func (kcp *KCP) peeksize() int {
 		return -1
 	}
 
-	var sz int
+	var length int
 	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
-		sz += len(seg.data)
+		length += len(seg.data)
 		if seg.frg == 0 {
 			break
 		}
 	}
-	return sz
+	return length
 }
 
 func (kcp *KCP) Recv(buffer []byte) int {
