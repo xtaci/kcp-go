@@ -117,7 +117,7 @@ func (seg *Segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
-func NewSegment(size uint32) *Segment {
+func NewSegment(size int) *Segment {
 	seg := new(Segment)
 	seg.data = make([]byte, size)
 	return seg
@@ -140,9 +140,7 @@ type KCP struct {
 	snd_buf   []Segment
 	rcv_buf   []Segment
 
-	acklist  []uint32
-	ackcount uint32
-	ackblock uint32
+	acklist []uint32
 
 	buffer     []byte
 	fastresend int32
@@ -227,7 +225,9 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	kcp.rcv_queue = kcp.rcv_queue[count:]
+	if count > 0 {
+		kcp.rcv_queue = kcp.rcv_queue[count:]
+	}
 
 	// move available data from rcv_buf -> rcv_queue
 	count = 0
@@ -235,12 +235,15 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
+			kcp.rcv_nxt++
 			count++
 		} else {
 			break
 		}
 	}
-	kcp.rcv_buf = kcp.rcv_buf[count:]
+	if count > 0 {
+		kcp.rcv_buf = kcp.rcv_buf[count:]
+	}
 
 	// fast recover
 	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd && fast_recover {
@@ -251,6 +254,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	return
 }
 
+// user/upper level send, returns below zero for error
 func (kcp *KCP) Send(buffer []byte) int {
 	var count int
 	if len(buffer) == 0 {
@@ -272,17 +276,17 @@ func (kcp *KCP) Send(buffer []byte) int {
 	}
 
 	for i := 0; i < count; i++ {
-		sz := kcp.mss
-		if len(buffer) <= int(kcp.mss) {
-			sz = uint32(len(buffer))
+		var size int
+		if len(buffer) > int(kcp.mss) {
+			size = int(kcp.mss)
+		} else {
+			size = len(buffer)
 		}
-		seg := NewSegment(sz)
-		if len(buffer) > 0 {
-			copy(seg.data, buffer[:sz])
-		}
+		seg := NewSegment(size)
+		copy(seg.data, buffer[:size])
 		seg.frg = uint32(count - i - 1)
 		kcp.snd_queue = append(kcp.snd_queue, *seg)
-		buffer = buffer[sz:]
+		buffer = buffer[size:]
 	}
 	return 0
 }
@@ -333,87 +337,73 @@ func (kcp *KCP) parse_ack(sn uint32) {
 }
 
 func (kcp *KCP) parse_una(una uint32) {
+	count := 0
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
-		if _itimediff(una, seg.sn) <= 0 {
-			kcp.snd_buf = kcp.snd_buf[k:]
+		if _itimediff(una, seg.sn) > 0 {
+			count++
+		} else {
 			break
 		}
 	}
+	if count > 0 {
+		kcp.snd_buf = kcp.snd_buf[count:]
+	}
 }
 
+// ack append
 func (kcp *KCP) ack_push(sn, ts uint32) {
-	newsize := kcp.ackcount + 1
-
-	if newsize > kcp.ackblock {
-		var acklist []uint32
-		var newblock int32
-
-		for newblock = 8; uint32(newblock) < newsize; newblock <<= 1 {
-		}
-		acklist = make([]uint32, newblock*2)
-		if kcp.acklist != nil {
-			for x := 0; uint32(x) < kcp.ackcount; x++ {
-				acklist[x*2+0] = kcp.acklist[x*2+0]
-				acklist[x*2+1] = kcp.acklist[x*2+1]
-			}
-		}
-		kcp.acklist = acklist
-		kcp.ackblock = uint32(newblock)
-	}
-
-	ptr := kcp.acklist[kcp.ackcount*2:]
-	ptr[0] = sn
-	ptr[1] = ts
-	kcp.ackcount++
+	kcp.acklist = append(kcp.acklist, sn, ts)
 }
 
-func (kcp *KCP) ack_get(p int32, sn, ts *uint32) {
-	if sn != nil {
-		*sn = kcp.acklist[p*2+0]
-	}
-	if ts != nil {
-		*ts = kcp.acklist[p*2+1]
-	}
+func (kcp *KCP) ack_get(p int32) (sn, ts uint32) {
+	return kcp.acklist[p*2+0], kcp.acklist[p*2+1]
 }
 
 func (kcp *KCP) parse_data(newseg *Segment) {
 	sn := newseg.sn
-	var repeat bool
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
 		return
 	}
 
 	n := len(kcp.rcv_buf) - 1
-	i := -1
-	for i = n; i >= 0; i-- {
+	idx := -1
+	repeat := false
+	for i := n; i >= 0; i-- {
 		seg := &kcp.rcv_buf[i]
 		if seg.sn == sn {
 			repeat = true
 			break
 		}
 		if _itimediff(sn, seg.sn) > 0 {
+			idx = i + 1 // target index
 			break
 		}
 	}
 
 	if !repeat {
-		if i == -1 {
-			kcp.rcv_buf = append(kcp.rcv_buf, *newseg)
+		if idx == -1 {
+			kcp.rcv_buf = append([]Segment{*newseg}, kcp.rcv_buf...)
 		} else {
-			kcp.rcv_buf = append(kcp.rcv_buf[:i+1], append([]Segment{*newseg}, kcp.rcv_buf[i+1:]...)...)
+			kcp.rcv_buf = append(kcp.rcv_buf[:idx], append([]Segment{*newseg}, kcp.rcv_buf[idx:]...)...)
 		}
 	}
 
+	// move available data from rcv_buf -> rcv_queue
+	count := 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
+			kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[k])
+			kcp.rcv_nxt++
+			count++
 		} else {
-			kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:k]...)
-			kcp.rcv_buf = kcp.rcv_buf[k:]
 			break
 		}
+	}
+	if count > 0 {
+		kcp.rcv_buf = kcp.rcv_buf[count:]
 	}
 }
 
@@ -471,7 +461,7 @@ func (kcp *KCP) Input(data []byte) int {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
-					seg := NewSegment(len)
+					seg := NewSegment(int(len))
 					seg.conv = conv
 					seg.cmd = uint32(cmd)
 					seg.frg = uint32(frg)
@@ -550,20 +540,18 @@ func (kcp *KCP) flush() {
 
 	// flush acknowledges
 	size = 0
-	count = int32(kcp.ackcount)
+	count = int32(len(kcp.acklist) / 2)
 	for i = 0; i < count; i++ {
-		//size = int32(ptr - buffer)
 		if size > int32(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
 			size = 0
 		}
-		kcp.ack_get(i, &seg.sn, &seg.ts)
+		seg.sn, seg.ts = kcp.ack_get(i)
 		ptr = seg.encode(ptr)
 		size += 24
 	}
-
-	kcp.ackcount = 0
+	kcp.acklist = nil
 
 	// probe window size (if remote window size equals zero)
 	if kcp.rmt_wnd == 0 {
