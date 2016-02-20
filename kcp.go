@@ -171,7 +171,7 @@ func NewKCP(conv uint32, output Output) *KCP {
 }
 
 // peek data size
-func (kcp *KCP) peeksize() int {
+func (kcp *KCP) peeksize() (size int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
 	}
@@ -185,15 +185,14 @@ func (kcp *KCP) peeksize() int {
 		return -1
 	}
 
-	var length int
 	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
-		length += len(seg.data)
+		size += len(seg.data)
 		if seg.frg == 0 {
 			break
 		}
 	}
-	return length
+	return
 }
 
 // user/upper level recv: returns size, returns below zero for EAGAIN
@@ -217,27 +216,29 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	// merge fragment
-	for k := range kcp.rcv_queue {
+	k := 0
+	for k = range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
 		copy(buffer, seg.data)
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
 		if seg.frg == 0 {
-			kcp.rcv_queue = kcp.rcv_queue[k+1:]
 			break
 		}
 	}
+	kcp.rcv_queue = kcp.rcv_queue[k+1:]
 
 	// move available data from rcv_buf -> rcv_queue
-	for k := range kcp.rcv_buf {
+	k = 0
+	for k = range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
 		} else {
-			kcp.rcv_buf = kcp.rcv_buf[k:]
 			break
 		}
 	}
+	kcp.rcv_buf = kcp.rcv_buf[k:]
 
 	// fast recover
 	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd && fast_recover {
