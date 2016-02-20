@@ -265,7 +265,6 @@ func test(mode int) {
 
 			println("[RECV] mode=", mode, " sn=", sn, " rtt=", rtt)
 		}
-		println("next:", next)
 		if next > 100 {
 			break
 		}
@@ -279,7 +278,7 @@ func test(mode int) {
 }
 
 func TestNetwork(t *testing.T) {
-	//	test(0) // 默认模式，类似 TCP：正常模式，无快速重传，常规流控
-	//	test(1) // 普通模式，关闭流控等
+	test(0) // 默认模式，类似 TCP：正常模式，无快速重传，常规流控
+	test(1) // 普通模式，关闭流控等
 	test(2) // 快速模式，所有开关都打开，且关闭流控
 }

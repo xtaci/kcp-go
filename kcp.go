@@ -171,7 +171,7 @@ func NewKCP(conv uint32, output Output) *KCP {
 }
 
 // check the size of next message in the recv queue
-func (kcp *KCP) peeksize() (size int) {
+func (kcp *KCP) peeksize() (length int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
 	}
@@ -187,7 +187,7 @@ func (kcp *KCP) peeksize() (size int) {
 
 	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
-		size += len(seg.data)
+		length += len(seg.data)
 		if seg.frg == 0 {
 			break
 		}
@@ -235,7 +235,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	count = 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
-		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
+		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
 			kcp.rcv_nxt++
 			count++
@@ -248,7 +248,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	// fast recover
-	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd && fast_recover {
+	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) && fast_recover {
 		// ready to send back IKCP_CMD_WINS in ikcp_flush
 		// tell remote my window size
 		kcp.probe |= IKCP_ASK_TELL
@@ -263,7 +263,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		return -1
 	}
 
-	if uint32(len(buffer)) < kcp.mss {
+	if len(buffer) < int(kcp.mss) {
 		count = 1
 	} else {
 		count = (len(buffer) + int(kcp.mss) - 1) / int(kcp.mss)
@@ -370,7 +370,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	}
 
 	n := len(kcp.rcv_buf) - 1
-	idx := -1
+	after_idx := -1
 	repeat := false
 	for i := n; i >= 0; i-- {
 		seg := &kcp.rcv_buf[i]
@@ -379,16 +379,16 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 			break
 		}
 		if _itimediff(sn, seg.sn) > 0 {
-			idx = i + 1 // target index
+			after_idx = i
 			break
 		}
 	}
 
 	if !repeat {
-		if idx == -1 {
+		if after_idx == -1 {
 			kcp.rcv_buf = append([]Segment{*newseg}, kcp.rcv_buf...)
 		} else {
-			kcp.rcv_buf = append(kcp.rcv_buf[:idx], append([]Segment{*newseg}, kcp.rcv_buf[idx:]...)...)
+			kcp.rcv_buf = append(kcp.rcv_buf[:after_idx+1], append([]Segment{*newseg}, kcp.rcv_buf[after_idx+1:]...)...)
 		}
 	}
 
@@ -396,7 +396,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	count := 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
-		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
+		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
 			kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[k])
 			kcp.rcv_nxt++
 			count++
@@ -412,8 +412,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 // when you received a low level packet (eg. UDP packet), call it
 func (kcp *KCP) Input(data []byte) int {
 	una := kcp.snd_una
-	size := len(data)
-	if size < 24 {
+	if len(data) < IKCP_OVERHEAD {
 		return 0
 	}
 
@@ -422,7 +421,7 @@ func (kcp *KCP) Input(data []byte) int {
 		var wnd uint16
 		var cmd, frg uint8
 
-		if size < int(IKCP_OVERHEAD) {
+		if len(data) < int(IKCP_OVERHEAD) {
 			break
 		}
 
@@ -438,10 +437,7 @@ func (kcp *KCP) Input(data []byte) int {
 		data = ikcp_decode32u(data, &sn)
 		data = ikcp_decode32u(data, &una)
 		data = ikcp_decode32u(data, &length)
-
-		size -= int(IKCP_OVERHEAD)
-
-		if size < int(length) {
+		if len(data) < int(length) {
 			return -2
 		}
 
@@ -489,7 +485,6 @@ func (kcp *KCP) Input(data []byte) int {
 		}
 
 		data = data[length:]
-		size -= int(length)
 	}
 
 	if _itimediff(kcp.snd_una, una) > 0 {
