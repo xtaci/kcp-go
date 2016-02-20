@@ -216,29 +216,31 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	// merge fragment
-	k := 0
-	for k = range kcp.rcv_queue {
+	count := 0
+	for k := range kcp.rcv_queue {
 		seg := &kcp.rcv_queue[k]
 		copy(buffer, seg.data)
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
+		count++
 		if seg.frg == 0 {
 			break
 		}
 	}
-	kcp.rcv_queue = kcp.rcv_queue[k+1:]
+	kcp.rcv_queue = kcp.rcv_queue[count+1:]
 
 	// move available data from rcv_buf -> rcv_queue
-	k = 0
-	for k = range kcp.rcv_buf {
+	count = 0
+	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd {
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
+			count++
 		} else {
 			break
 		}
 	}
-	kcp.rcv_buf = kcp.rcv_buf[k:]
+	kcp.rcv_buf = kcp.rcv_buf[count+1:]
 
 	// fast recover
 	if uint32(len(kcp.rcv_queue)) < kcp.rcv_wnd && fast_recover {
