@@ -171,7 +171,7 @@ func NewKCP(conv uint32, output Output) *KCP {
 }
 
 // check the size of next message in the recv queue
-func (kcp *KCP) peeksize() (length int) {
+func (kcp *KCP) PeekSize() (length int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
 	}
@@ -201,7 +201,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		return -1
 	}
 
-	peeksize := kcp.peeksize()
+	peeksize := kcp.PeekSize()
 	if peeksize < 0 {
 		return -2
 	}
