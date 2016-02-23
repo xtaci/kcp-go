@@ -25,6 +25,8 @@ func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSessio
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		conn.WriteToUDP(buf[:size], addr)
 	})
+	sess.kcp.WndSize(128, 128)
+	sess.kcp.NoDelay(1, 10, 2, 1)
 	go sess.monitor()
 	return sess
 }
