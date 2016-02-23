@@ -64,7 +64,6 @@ type (
 		accepts  chan *UDPSession
 		die      chan struct{}
 		buffer   []byte
-		convs    map[string]uint32
 	}
 
 	Packet struct {
@@ -83,7 +82,11 @@ func (l *Listener) loop() {
 			addr := pkt.addr.String()
 			sess, ok := l.sessions[addr]
 			if !ok {
-				l.sessions[addr] = NewUDPSession(l.convs[addr], l.conn, pkt.addr)
+				var conv uint32
+				if len(pkt.data) >= IKCP_OVERHEAD {
+					ikcp_decode32u(pkt.data, &conv) // conversation id
+					l.sessions[addr] = NewUDPSession(conv, l.conn, pkt.addr)
+				}
 			}
 			sess.Read(pkt.data)
 		case <-ticker.C:
@@ -141,7 +144,6 @@ func Listen(addr string) (*Listener, error) {
 	listener.conn = conn
 	listener.sessions = make(map[string]*UDPSession)
 	listener.buffer = make([]byte, BUFSIZE)
-	listener.convs = make(map[string]uint32)
 	go listener.loop()
 	return listener, nil
 }
