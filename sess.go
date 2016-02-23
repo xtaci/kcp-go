@@ -90,7 +90,6 @@ type (
 		sessions map[string]*UDPSession
 		accepts  chan *UDPSession
 		die      chan struct{}
-		buffer   []byte
 	}
 
 	Packet struct {
@@ -123,11 +122,12 @@ func (l *Listener) monitor() {
 
 func (l *Listener) read_loop() chan Packet {
 	ch := make(chan Packet, 128)
+	buffer := make([]byte, 4096)
 	go func(ch chan Packet) {
 		for {
-			if n, from, err := l.conn.ReadFromUDP(l.buffer); err == nil {
+			if n, from, err := l.conn.ReadFromUDP(buffer); err == nil {
 				data := make([]byte, n)
-				copy(data, l.buffer)
+				copy(data, buffer[:n])
 				ch <- Packet{data, from}
 			}
 
@@ -167,7 +167,6 @@ func Listen(addr string) (*Listener, error) {
 	listener := &Listener{}
 	listener.conn = conn
 	listener.sessions = make(map[string]*UDPSession)
-	listener.buffer = make([]byte, BUFSIZE)
 	go listener.monitor()
 	return listener, nil
 }
