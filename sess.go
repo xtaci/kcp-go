@@ -3,6 +3,7 @@ package kcp
 import (
 	"errors"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -11,25 +12,33 @@ const (
 )
 
 // Implement net.Conn for KCP
-type UDPSession struct {
-	die chan struct{}
-	kcp *KCP
-}
+type (
+	UDPSession struct {
+		die chan struct{}
+		kcp *KCP
+		sync.Mutex
+	}
+)
 
 func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		conn.WriteToUDP(buf[:size], addr)
 	})
+	go sess.monitor()
 	return sess
 }
 
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	return 0, nil
+	s.Lock()
+	defer s.Unlock()
+	return s.kcp.Recv(b), nil
 }
 
 func (s *UDPSession) Write(b []byte) (n int, err error) {
-	return 0, nil
+	s.Lock()
+	defer s.Unlock()
+	return s.kcp.Send(b), nil
 }
 
 func (s *UDPSession) Close() error {
@@ -56,6 +65,24 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+func (s *UDPSession) Input(data []byte) {
+	s.Lock()
+	defer s.Unlock()
+	s.kcp.Input(data)
+}
+
+func (s *UDPSession) monitor() {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	for {
+		select {
+		case <-ticker.C:
+			s.Lock()
+			s.kcp.Update(uint32(time.Now().Nanosecond() / int(time.Millisecond)))
+			s.Unlock()
+		}
+	}
+}
+
 // Session Manager Implement net.Listener
 type (
 	Listener struct {
@@ -72,9 +99,7 @@ type (
 	}
 )
 
-// main loop
-func (l *Listener) loop() {
-	ticker := time.NewTicker(10 * time.Millisecond)
+func (l *Listener) monitor() {
 	ch := l.read_loop()
 	for {
 		select {
@@ -86,15 +111,11 @@ func (l *Listener) loop() {
 				if len(pkt.data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(pkt.data, &conv) // conversation id
 					sess := NewUDPSession(conv, l.conn, pkt.addr)
-					sess.kcp.Input(pkt.data)
+					sess.Input(pkt.data)
 					l.sessions[addr] = sess
 				}
 			} else {
-				sess.kcp.Input(pkt.data)
-			}
-		case <-ticker.C:
-			for k := range l.sessions {
-				l.sessions[k].kcp.Update(uint32(time.Now().Nanosecond() / int(time.Millisecond)))
+				sess.Input(pkt.data)
 			}
 		}
 	}
@@ -147,6 +168,6 @@ func Listen(addr string) (*Listener, error) {
 	listener.conn = conn
 	listener.sessions = make(map[string]*UDPSession)
 	listener.buffer = make([]byte, BUFSIZE)
-	go listener.loop()
+	go listener.monitor()
 	return listener, nil
 }
