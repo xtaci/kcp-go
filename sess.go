@@ -112,6 +112,7 @@ func (l *Listener) monitor() {
 					sess := NewUDPSession(conv, l.conn, pkt.addr)
 					sess.Input(pkt.data)
 					l.sessions[addr] = sess
+					l.accepts <- sess
 				}
 			} else {
 				sess.Input(pkt.data)
@@ -164,9 +165,10 @@ func Listen(addr string) (*Listener, error) {
 		return nil, _err
 	}
 
-	listener := &Listener{}
-	listener.conn = conn
-	listener.sessions = make(map[string]*UDPSession)
-	go listener.monitor()
-	return listener, nil
+	l := &Listener{}
+	l.conn = conn
+	l.sessions = make(map[string]*UDPSession)
+	l.accepts = make(chan *UDPSession)
+	go l.monitor()
+	return l, nil
 }
