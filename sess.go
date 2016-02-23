@@ -85,10 +85,13 @@ func (l *Listener) loop() {
 				var conv uint32
 				if len(pkt.data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(pkt.data, &conv) // conversation id
-					l.sessions[addr] = NewUDPSession(conv, l.conn, pkt.addr)
+					sess := NewUDPSession(conv, l.conn, pkt.addr)
+					sess.kcp.Input(pkt.data)
+					l.sessions[addr] = sess
 				}
+			} else {
+				sess.kcp.Input(pkt.data)
 			}
-			sess.Read(pkt.data)
 		case <-ticker.C:
 			for k := range l.sessions {
 				l.sessions[k].kcp.Update(uint32(time.Now().Nanosecond() / int(time.Millisecond)))
