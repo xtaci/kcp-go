@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"testing"
-	"time"
 )
 
 const port = "127.0.0.1:9999"
@@ -48,13 +47,11 @@ func TestSess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	<-time.After(2 * time.Second)
 	const N = 10
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
 		fmt.Println("sendmsg:", i)
-		fmt.Println(cli.Write([]byte(fmt.Sprintf("hello%v", i))))
+		cli.Write([]byte(fmt.Sprintf("hello%v", i)))
 		_, err := cli.Read(buf)
 		if err != nil {
 			t.Fatal(err)
