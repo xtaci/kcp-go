@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"errors"
+	"math/rand"
 	"net"
 	"sync"
 	"time"
@@ -11,13 +12,7 @@ var (
 	ERR_TIMEOUT = errors.New("Deadline exceeded")
 )
 
-// Implement net.Conn for KCP
 type (
-	w struct {
-		data []byte
-		ok   chan struct{}
-	}
-
 	UDPSession struct {
 		kcp           *KCP
 		ch_in         chan []byte
@@ -49,7 +44,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		if !s.read_deadline.IsZero() {
 			if time.Now().Before(s.read_deadline) {
 				s.Unlock()
-				return 0, ERR_TIMEOUT
+				return -1, ERR_TIMEOUT
 			}
 		}
 
@@ -124,7 +119,6 @@ func (s *UDPSession) update_task() {
 	}
 }
 
-// Session Manager Implement net.Listener
 type (
 	Listener struct {
 		conn     *net.UDPConn
@@ -181,6 +175,7 @@ func (l *Listener) Addr() net.Addr {
 	return l.conn.LocalAddr()
 }
 
+// kcp listen
 func Listen(addr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", addr)
 	if err != nil {
@@ -197,4 +192,17 @@ func Listen(addr string) (*Listener, error) {
 	l.accepts = make(chan *UDPSession)
 	go l.monitor()
 	return l, nil
+}
+
+// dial
+func Dial(addr string) (*UDPSession, error) {
+	udpaddr, err := net.ResolveUDPAddr("udp", addr)
+	if err != nil {
+		return nil, err
+	}
+	udpconn, err := net.DialUDP("udp", nil, udpaddr)
+	if err != nil {
+		return nil, err
+	}
+	return NewUDPSession(rand.Uint32(), udpconn, udpaddr), nil
 }
