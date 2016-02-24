@@ -11,13 +11,24 @@ const (
 	BUFSIZE = 4096
 )
 
+var (
+	TIMEOUT = errors.New("Deadline exceeded")
+)
+
 // Implement net.Conn for KCP
 type (
+	w struct {
+		data []byte
+		ok   chan struct{}
+	}
+
 	UDPSession struct {
-		die           chan struct{}
-		local, remote net.Addr
-		closed        bool
-		kcp           *KCP
+		kcp            *KCP
+		local, remote  net.Addr
+		read_deadline  time.Time
+		write_deadline time.Time
+		closed         bool
+		die            chan struct{}
 		sync.Mutex
 	}
 )
@@ -36,9 +47,22 @@ func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSessio
 }
 
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	s.Lock()
-	defer s.Unlock()
-	return s.kcp.Recv(b), nil
+	for {
+		if !s.read_deadline.IsZero() {
+			if time.Now().Before(s.read_deadline) {
+				return 0, TIMEOUT
+			}
+		}
+
+		s.Lock()
+		if s.kcp.PeekSize() > 0 {
+			return s.kcp.Recv(b), nil
+			s.Unlock()
+		} else {
+			s.Unlock()
+			<-time.After(10 * time.Millisecond)
+		}
+	}
 }
 
 func (s *UDPSession) Write(b []byte) (n int, err error) {
@@ -66,14 +90,24 @@ func (s *UDPSession) RemoteAddr() net.Addr {
 }
 
 func (s *UDPSession) SetDeadline(t time.Time) error {
+	s.Lock()
+	defer s.Unlock()
+	s.read_deadline = t
+	s.write_deadline = t
 	return nil
 }
 
 func (s *UDPSession) SetReadDeadline(t time.Time) error {
+	s.Lock()
+	defer s.Unlock()
+	s.read_deadline = t
 	return nil
 }
 
 func (s *UDPSession) SetWriteDeadline(t time.Time) error {
+	s.Lock()
+	defer s.Unlock()
+	s.write_deadline = t
 	return nil
 }
 
