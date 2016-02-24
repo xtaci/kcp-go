@@ -7,12 +7,8 @@ import (
 	"time"
 )
 
-const (
-	BUFSIZE = 4096
-)
-
 var (
-	TIMEOUT = errors.New("Deadline exceeded")
+	ERR_TIMEOUT = errors.New("Deadline exceeded")
 )
 
 // Implement net.Conn for KCP
@@ -49,20 +45,22 @@ func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSessio
 
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
+		s.Lock()
 		if !s.read_deadline.IsZero() {
 			if time.Now().Before(s.read_deadline) {
-				return 0, TIMEOUT
+				s.Unlock()
+				return 0, ERR_TIMEOUT
 			}
 		}
 
-		s.Lock()
 		if s.kcp.PeekSize() > 0 {
-			return s.kcp.Recv(b), nil
+			n = s.kcp.Recv(b)
 			s.Unlock()
-		} else {
-			s.Unlock()
-			<-time.After(10 * time.Millisecond)
+			return n, nil
 		}
+
+		s.Unlock()
+		<-time.After(20 * time.Millisecond)
 	}
 }
 
