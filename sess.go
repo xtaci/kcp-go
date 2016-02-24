@@ -2,6 +2,8 @@ package kcp
 
 import (
 	"errors"
+	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"sync"
@@ -15,6 +17,7 @@ var (
 type (
 	UDPSession struct {
 		kcp           *KCP
+		conn          *net.UDPConn
 		ch_in         chan []byte
 		local, remote net.Addr
 		read_deadline time.Time
@@ -24,17 +27,24 @@ type (
 	}
 )
 
-func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSession {
+func NewUDPSession(conv uint32, isclient bool, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.local = conn.LocalAddr()
-	sess.remote = addr
+	sess.remote = remote
+	sess.conn = conn
 	sess.ch_in = make(chan []byte, 10)
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
-		conn.WriteToUDP(buf[:size], addr)
+		n, err := conn.WriteToUDP(buf[:size], remote)
+		if err != nil {
+			log.Println(err, n)
+		}
 	})
 	sess.kcp.WndSize(128, 128)
-	sess.kcp.NoDelay(1, 10, 2, 1)
+	sess.kcp.NoDelay(0, 10, 0, 1)
 	go sess.update_task()
+	if isclient {
+		go sess.read_loop()
+	}
 	return sess
 }
 
@@ -107,7 +117,7 @@ func (s *UDPSession) update_task() {
 		select {
 		case <-ticker.C:
 			s.Lock()
-			s.kcp.Update(uint32(time.Now().Nanosecond() / int(time.Millisecond)))
+			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
 			s.Unlock()
 		case data := <-s.ch_in:
 			s.Lock()
@@ -119,6 +129,18 @@ func (s *UDPSession) update_task() {
 	}
 }
 
+func (s *UDPSession) read_loop() {
+	conn := s.conn
+	buffer := make([]byte, 4096)
+	for {
+		if n, err := conn.Read(buffer); err == nil {
+			data := make([]byte, n)
+			copy(data, buffer[:n])
+			s.ch_in <- data
+		}
+	}
+}
+
 type (
 	Listener struct {
 		conn     *net.UDPConn
@@ -126,17 +148,13 @@ type (
 		accepts  chan *UDPSession
 		die      chan struct{}
 	}
-
-	Packet struct {
-		data []byte
-		addr *net.UDPAddr
-	}
 )
 
 func (l *Listener) monitor() {
+	conn := l.conn
 	buffer := make([]byte, 4096)
 	for {
-		if n, from, err := l.conn.ReadFromUDP(buffer); err == nil {
+		if n, from, err := conn.ReadFromUDP(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
 			addr := from.String()
@@ -145,7 +163,8 @@ func (l *Listener) monitor() {
 				var conv uint32
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
-					sess := NewUDPSession(conv, l.conn, from)
+					fmt.Println("conv id:", conv)
+					sess := NewUDPSession(conv, false, conn, from)
 					sess.ch_in <- data
 					l.sessions[addr] = sess
 					l.accepts <- sess
@@ -181,15 +200,15 @@ func Listen(addr string) (*Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	conn, _err := net.ListenUDP("udp", udpaddr)
-	if _err != nil {
-		return nil, _err
+	conn, err := net.ListenUDP("udp", udpaddr)
+	if err != nil {
+		return nil, err
 	}
 
 	l := &Listener{}
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
-	l.accepts = make(chan *UDPSession)
+	l.accepts = make(chan *UDPSession, 10)
 	go l.monitor()
 	return l, nil
 }
@@ -200,9 +219,9 @@ func Dial(addr string) (*UDPSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	udpconn, err := net.DialUDP("udp", nil, udpaddr)
+	udpconn, err := net.ListenUDP("udp", &net.UDPAddr{})
 	if err != nil {
 		return nil, err
 	}
-	return NewUDPSession(rand.Uint32(), udpconn, udpaddr), nil
+	return NewUDPSession(rand.Uint32(), true, udpconn, udpaddr), nil
 }
