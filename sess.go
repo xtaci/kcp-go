@@ -14,14 +14,18 @@ const (
 // Implement net.Conn for KCP
 type (
 	UDPSession struct {
-		die chan struct{}
-		kcp *KCP
+		die           chan struct{}
+		local, remote net.Addr
+		closed        bool
+		kcp           *KCP
 		sync.Mutex
 	}
 )
 
 func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
+	sess.local = conn.LocalAddr()
+	sess.remote = addr
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		conn.WriteToUDP(buf[:size], addr)
 	})
@@ -44,15 +48,21 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 }
 
 func (s *UDPSession) Close() error {
+	s.Lock()
+	defer s.Unlock()
+	if !s.closed {
+		close(s.die)
+		s.closed = true
+	}
 	return nil
 }
 
 func (s *UDPSession) LocalAddr() net.Addr {
-	return nil
+	return s.local
 }
 
 func (s *UDPSession) RemoteAddr() net.Addr {
-	return nil
+	return s.remote
 }
 
 func (s *UDPSession) SetDeadline(t time.Time) error {
@@ -81,6 +91,8 @@ func (s *UDPSession) monitor() {
 			s.Lock()
 			s.kcp.Update(uint32(time.Now().Nanosecond() / int(time.Millisecond)))
 			s.Unlock()
+		case <-s.die:
+			return
 		}
 	}
 }
