@@ -23,12 +23,11 @@ type (
 	}
 
 	UDPSession struct {
-		kcp            *KCP
-		local, remote  net.Addr
-		read_deadline  time.Time
-		write_deadline time.Time
-		closed         bool
-		die            chan struct{}
+		kcp           *KCP
+		local, remote net.Addr
+		read_deadline time.Time
+		closed        bool
+		die           chan struct{}
 		sync.Mutex
 	}
 )
@@ -93,7 +92,6 @@ func (s *UDPSession) SetDeadline(t time.Time) error {
 	s.Lock()
 	defer s.Unlock()
 	s.read_deadline = t
-	s.write_deadline = t
 	return nil
 }
 
@@ -105,9 +103,6 @@ func (s *UDPSession) SetReadDeadline(t time.Time) error {
 }
 
 func (s *UDPSession) SetWriteDeadline(t time.Time) error {
-	s.Lock()
-	defer s.Unlock()
-	s.write_deadline = t
 	return nil
 }
 
