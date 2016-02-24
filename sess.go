@@ -24,6 +24,7 @@ type (
 
 	UDPSession struct {
 		kcp           *KCP
+		ch_in         chan []byte
 		local, remote net.Addr
 		read_deadline time.Time
 		closed        bool
@@ -36,12 +37,13 @@ func NewUDPSession(conv uint32, conn *net.UDPConn, addr *net.UDPAddr) *UDPSessio
 	sess := new(UDPSession)
 	sess.local = conn.LocalAddr()
 	sess.remote = addr
+	sess.ch_in = make(chan []byte, 10)
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		conn.WriteToUDP(buf[:size], addr)
 	})
 	sess.kcp.WndSize(128, 128)
 	sess.kcp.NoDelay(1, 10, 2, 1)
-	go sess.monitor()
+	go sess.update_task()
 	return sess
 }
 
@@ -106,19 +108,17 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
-func (s *UDPSession) Input(data []byte) {
-	s.Lock()
-	defer s.Unlock()
-	s.kcp.Input(data)
-}
-
-func (s *UDPSession) monitor() {
+func (s *UDPSession) update_task() {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	for {
 		select {
 		case <-ticker.C:
 			s.Lock()
 			s.kcp.Update(uint32(time.Now().Nanosecond() / int(time.Millisecond)))
+			s.Unlock()
+		case data := <-s.ch_in:
+			s.Lock()
+			s.kcp.Input(data)
 			s.Unlock()
 		case <-s.die:
 			return
@@ -142,42 +142,27 @@ type (
 )
 
 func (l *Listener) monitor() {
-	ch := l.read_loop()
+	buffer := make([]byte, 4096)
 	for {
-		select {
-		case pkt := <-ch:
-			addr := pkt.addr.String()
+		if n, from, err := l.conn.ReadFromUDP(buffer); err == nil {
+			data := make([]byte, n)
+			copy(data, buffer[:n])
+			addr := from.String()
 			sess, ok := l.sessions[addr]
 			if !ok {
 				var conv uint32
-				if len(pkt.data) >= IKCP_OVERHEAD {
-					ikcp_decode32u(pkt.data, &conv) // conversation id
-					sess := NewUDPSession(conv, l.conn, pkt.addr)
-					sess.Input(pkt.data)
+				if len(data) >= IKCP_OVERHEAD {
+					ikcp_decode32u(data, &conv) // conversation id
+					sess := NewUDPSession(conv, l.conn, from)
+					sess.ch_in <- data
 					l.sessions[addr] = sess
 					l.accepts <- sess
 				}
 			} else {
-				sess.Input(pkt.data)
+				sess.ch_in <- data
 			}
 		}
 	}
-}
-
-func (l *Listener) read_loop() chan Packet {
-	ch := make(chan Packet, 128)
-	buffer := make([]byte, 4096)
-	go func(ch chan Packet) {
-		for {
-			if n, from, err := l.conn.ReadFromUDP(buffer); err == nil {
-				data := make([]byte, n)
-				copy(data, buffer[:n])
-				ch <- Packet{data, from}
-			}
-
-		}
-	}(ch)
-	return ch
 }
 
 func (l *Listener) Accept() (net.Conn, error) {
