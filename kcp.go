@@ -26,6 +26,7 @@ const (
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 )
 
+// In general, Output is a closure which captures conn and calls conn.Write
 type Output func(buf []byte, size int)
 
 /* encode 8 bits unsigned int */
