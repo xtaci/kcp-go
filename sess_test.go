@@ -20,7 +20,6 @@ func server() {
 		panic(err)
 	}
 	for {
-		fmt.Println("accept loop")
 		s, err := l.Accept()
 		if err != nil {
 			panic(err)
@@ -31,11 +30,11 @@ func server() {
 }
 
 func handle_client(conn net.Conn) {
-	fmt.Println("new client", conn)
+	fmt.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 10)
 	for {
 		n, err := conn.Read(buf)
-		fmt.Println("receiving:", string(buf[:n]))
+		fmt.Println("recv:", string(buf[:n]))
 		if err != nil {
 			panic(err)
 		}
@@ -61,8 +60,9 @@ func client(wg *sync.WaitGroup) {
 	const N = 10
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
-		fmt.Println("sendmsg:", i)
-		cli.Write([]byte(fmt.Sprintf("hello%v", i)))
+		msg := fmt.Sprintf("hello%v", i)
+		fmt.Println("sent:", msg)
+		cli.Write([]byte(msg))
 		_, err := cli.Read(buf)
 		if err != nil {
 			panic(err)
