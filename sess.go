@@ -11,7 +11,8 @@ import (
 )
 
 var (
-	ERR_TIMEOUT = errors.New("Deadline exceeded")
+	ERR_TIMEOUT     = errors.New("i/o timeout")
+	ERR_BROKEN_PIPE = errors.New("broken pipe")
 )
 
 type (
@@ -24,6 +25,7 @@ type (
 		read_deadline time.Time
 		closed        bool
 		die           chan struct{}
+		bts           []byte
 		sync.Mutex
 	}
 )
@@ -54,7 +56,18 @@ func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPA
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
+		if len(s.bts) > 0 {
+			n := copy(b, s.bts)
+			s.bts = s.bts[n:]
+			return n, nil
+		}
+
 		s.Lock()
+		if s.closed {
+			s.Unlock()
+			return -1, ERR_BROKEN_PIPE
+		}
+
 		if !s.read_deadline.IsZero() {
 			if time.Now().Before(s.read_deadline) {
 				s.Unlock()
@@ -62,12 +75,16 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			}
 		}
 
-		if s.kcp.PeekSize() > 0 {
-			n = s.kcp.Recv(b)
-			s.Unlock()
-			return n, nil
+		n := s.kcp.PeekSize()
+		if n > 0 {
+			buf := make([]byte, n)
+			if s.kcp.Recv(buf) > 0 {
+				n := copy(b, buf)
+				s.bts = buf[n:]
+				s.Unlock()
+				return n, nil
+			}
 		}
-
 		s.Unlock()
 		<-time.After(20 * time.Millisecond)
 	}
