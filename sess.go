@@ -27,7 +27,8 @@ type (
 	}
 )
 
-func NewUDPSession(conv uint32, isclient bool, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+//  create a new udp session for client or server
+func newUDPSession(conv uint32, isclient bool, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.local = conn.LocalAddr()
 	sess.remote = remote
@@ -48,6 +49,7 @@ func NewUDPSession(conv uint32, isclient bool, conn *net.UDPConn, remote *net.UD
 	return sess
 }
 
+// Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
 		s.Lock()
@@ -69,12 +71,14 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	}
 }
 
+// Write implements the Conn Write method.
 func (s *UDPSession) Write(b []byte) (n int, err error) {
 	s.Lock()
 	defer s.Unlock()
 	return s.kcp.Send(b), nil
 }
 
+// Close closes the connection.
 func (s *UDPSession) Close() error {
 	s.Lock()
 	defer s.Unlock()
@@ -85,14 +89,17 @@ func (s *UDPSession) Close() error {
 	return nil
 }
 
+// LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
 func (s *UDPSession) LocalAddr() net.Addr {
 	return s.local
 }
 
+// RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
 func (s *UDPSession) RemoteAddr() net.Addr {
 	return s.remote
 }
 
+// SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
 func (s *UDPSession) SetDeadline(t time.Time) error {
 	s.Lock()
 	defer s.Unlock()
@@ -100,6 +107,7 @@ func (s *UDPSession) SetDeadline(t time.Time) error {
 	return nil
 }
 
+// SetReadDeadline implements the Conn SetReadDeadline method.
 func (s *UDPSession) SetReadDeadline(t time.Time) error {
 	s.Lock()
 	defer s.Unlock()
@@ -107,10 +115,12 @@ func (s *UDPSession) SetReadDeadline(t time.Time) error {
 	return nil
 }
 
+// SetWriteDeadline implements the Conn SetWriteDeadline method.
 func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	return nil
 }
 
+// kcp update, input loop
 func (s *UDPSession) update_task() {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	for {
@@ -129,14 +139,24 @@ func (s *UDPSession) update_task() {
 	}
 }
 
+// read loop for client session
 func (s *UDPSession) read_loop() {
 	conn := s.conn
 	buffer := make([]byte, 4096)
 	for {
+		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, err := conn.Read(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
 			s.ch_in <- data
+		} else {
+			return
+		}
+
+		select {
+		case <-s.die:
+			return
+		default:
 		}
 	}
 }
@@ -150,6 +170,7 @@ type (
 	}
 )
 
+// monitor incoming data for all connections of server
 func (l *Listener) monitor() {
 	conn := l.conn
 	buffer := make([]byte, 4096)
@@ -164,7 +185,7 @@ func (l *Listener) monitor() {
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
 					fmt.Println("conv id:", conv)
-					sess := NewUDPSession(conv, false, conn, from)
+					sess := newUDPSession(conv, false, conn, from)
 					sess.ch_in <- data
 					l.sessions[addr] = sess
 					l.accepts <- sess
@@ -176,6 +197,7 @@ func (l *Listener) monitor() {
 	}
 }
 
+// Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
 func (l *Listener) Accept() (net.Conn, error) {
 	select {
 	case c := <-l.accepts:
@@ -185,18 +207,21 @@ func (l *Listener) Accept() (net.Conn, error) {
 	}
 }
 
+// Close stops listening on the TCP address. Already Accepted connections are not closed.
 func (l *Listener) Close() error {
+	l.conn.Close()
 	close(l.die)
 	return nil
 }
 
+// Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
 func (l *Listener) Addr() net.Addr {
 	return l.conn.LocalAddr()
 }
 
-// kcp listen
-func Listen(addr string) (*Listener, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", addr)
+// Listen listens for incoming KCP packets addressed to the local address laddr
+func Listen(laddr string) (*Listener, error) {
+	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
 	}
@@ -213,9 +238,9 @@ func Listen(addr string) (*Listener, error) {
 	return l, nil
 }
 
-// dial
-func Dial(addr string) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", addr)
+// Dial connects to the remote address raddr on the network net
+func Dial(raddr string) (*UDPSession, error) {
+	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
 	}
@@ -223,5 +248,5 @@ func Dial(addr string) (*UDPSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewUDPSession(rand.Uint32(), true, udpconn, udpaddr), nil
+	return newUDPSession(rand.Uint32(), true, udpconn, udpaddr), nil
 }
