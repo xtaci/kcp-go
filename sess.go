@@ -61,14 +61,13 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		s.Lock()
 		select {
 		case <-s.die: // closed connection
-			s.Unlock()
 			return -1, ERR_BROKEN_PIPE
 		default:
 		}
 
+		s.Lock()
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				s.Unlock()
