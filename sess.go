@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ERR_TIMEOUT     = errors.New("i/o timeout")
-	ERR_BROKEN_PIPE = errors.New("broken pipe")
+	ERR_TIMEOUT          = errors.New("i/o timeout")
+	ERR_BROKEN_PIPE      = errors.New("broken pipe")
+	ERR_PACKET_TOO_LARGE = errors.New("packet too large")
 )
 
 type (
@@ -92,7 +93,11 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 func (s *UDPSession) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.kcp.Send(b), nil
+	n = s.kcp.Send(b)
+	if n == -2 {
+		return n, ERR_PACKET_TOO_LARGE
+	}
+	return
 }
 
 // Close closes the connection.
