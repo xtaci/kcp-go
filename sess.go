@@ -69,7 +69,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 
 		if !s.read_deadline.IsZero() {
-			if time.Now().Before(s.read_deadline) {
+			if time.Now().After(s.read_deadline) {
 				s.Unlock()
 				return -1, ERR_TIMEOUT
 			}
