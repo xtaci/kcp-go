@@ -181,7 +181,7 @@ func (kcp *KCP) PeekSize() (length int) {
 		return len(seg.data)
 	}
 
-	if uint32(len(kcp.rcv_queue)) < seg.frg+1 {
+	if len(kcp.rcv_queue) < int(seg.frg+1) {
 		return -1
 	}
 
@@ -211,7 +211,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	var fast_recover bool
-	if uint32(len(kcp.rcv_queue)) >= kcp.rcv_wnd {
+	if len(kcp.rcv_queue) >= int(kcp.rcv_wnd) {
 		fast_recover = true
 	}
 
