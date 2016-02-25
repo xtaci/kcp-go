@@ -18,6 +18,7 @@ type (
 	UDPSession struct {
 		kcp           *KCP
 		conn          *net.UDPConn
+		l             *Listener
 		ch_in         chan []byte
 		local, remote net.Addr
 		read_deadline time.Time
@@ -28,11 +29,12 @@ type (
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, isclient bool, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.local = conn.LocalAddr()
 	sess.remote = remote
 	sess.conn = conn
+	sess.l = l
 	sess.ch_in = make(chan []byte, 10)
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		n, err := conn.WriteToUDP(buf[:size], remote)
@@ -43,7 +45,7 @@ func newUDPSession(conv uint32, isclient bool, conn *net.UDPConn, remote *net.UD
 	sess.kcp.WndSize(128, 128)
 	sess.kcp.NoDelay(0, 10, 0, 1)
 	go sess.update_task()
-	if isclient {
+	if l == nil {
 		go sess.read_loop()
 	}
 	return sess
@@ -95,9 +97,7 @@ func (s *UDPSession) LocalAddr() net.Addr {
 }
 
 // RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
-func (s *UDPSession) RemoteAddr() net.Addr {
-	return s.remote
-}
+func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
 
 // SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
 func (s *UDPSession) SetDeadline(t time.Time) error {
@@ -128,12 +128,19 @@ func (s *UDPSession) update_task() {
 		case <-ticker.C:
 			s.Lock()
 			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
+			state := s.kcp.state
 			s.Unlock()
+			if state != 0 { // deadlink
+				close(s.die)
+			}
 		case data := <-s.ch_in:
 			s.Lock()
 			s.kcp.Input(data)
 			s.Unlock()
 		case <-s.die:
+			if s.l != nil { // has listener
+				s.l.ch_deadlinks <- s.remote
+			}
 			return
 		}
 	}
@@ -150,23 +157,25 @@ func (s *UDPSession) read_loop() {
 			copy(data, buffer[:n])
 			s.ch_in <- data
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
-			select {
-			case <-s.die:
-				return
-			default:
-			}
 		} else {
 			return
+		}
+
+		select {
+		case <-s.die:
+			return
+		default:
 		}
 	}
 }
 
 type (
 	Listener struct {
-		conn     *net.UDPConn
-		sessions map[string]*UDPSession
-		accepts  chan *UDPSession
-		die      chan struct{}
+		conn         *net.UDPConn
+		sessions     map[string]*UDPSession
+		ch_accepts   chan *UDPSession
+		ch_deadlinks chan net.Addr
+		die          chan struct{}
 	}
 )
 
@@ -175,6 +184,7 @@ func (l *Listener) monitor() {
 	conn := l.conn
 	buffer := make([]byte, 4096)
 	for {
+		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, from, err := conn.ReadFromUDP(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
@@ -185,14 +195,20 @@ func (l *Listener) monitor() {
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
 					fmt.Println("conv id:", conv)
-					sess := newUDPSession(conv, false, conn, from)
+					sess := newUDPSession(conv, l, conn, from)
 					sess.ch_in <- data
 					l.sessions[addr] = sess
-					l.accepts <- sess
+					l.ch_accepts <- sess
 				}
 			} else {
 				sess.ch_in <- data
 			}
+		}
+
+		select {
+		case deadlink := <-l.ch_deadlinks:
+			delete(l.sessions, deadlink.String())
+		default:
 		}
 	}
 }
@@ -200,7 +216,7 @@ func (l *Listener) monitor() {
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
 func (l *Listener) Accept() (net.Conn, error) {
 	select {
-	case c := <-l.accepts:
+	case c := <-l.ch_accepts:
 		return net.Conn(c), nil
 	case <-l.die:
 		return nil, errors.New("listener stopped")
@@ -233,7 +249,8 @@ func Listen(laddr string) (*Listener, error) {
 	l := &Listener{}
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
-	l.accepts = make(chan *UDPSession, 10)
+	l.ch_accepts = make(chan *UDPSession, 10)
+	l.ch_deadlinks = make(chan net.Addr, 10)
 	go l.monitor()
 	return l, nil
 }
@@ -248,5 +265,5 @@ func Dial(raddr string) (*UDPSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newUDPSession(rand.Uint32(), true, udpconn, udpaddr), nil
+	return newUDPSession(rand.Uint32(), nil, udpconn, udpaddr), nil
 }

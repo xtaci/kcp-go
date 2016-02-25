@@ -684,7 +684,7 @@ func (kcp *KCP) flush() {
 			}
 
 			if segment.xmit >= kcp.dead_link {
-				kcp.state = 0
+				kcp.state = 0xFFFFFFFF
 			}
 		}
 	}
