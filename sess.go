@@ -46,7 +46,7 @@ func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPA
 	sess.kcp.WndSize(128, 128)
 	sess.kcp.NoDelay(0, 10, 0, 1)
 	go sess.update_task()
-	if l == nil {
+	if l == nil { // it's a client connection
 		go sess.read_loop()
 	}
 	return sess
@@ -105,6 +105,9 @@ func (s *UDPSession) Close() error {
 	case <-s.die:
 	default:
 		close(s.die)
+		if s.l == nil { // client socket close
+			s.conn.Close()
+		}
 	}
 	return nil
 }
