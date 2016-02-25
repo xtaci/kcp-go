@@ -17,13 +17,12 @@ var (
 
 type (
 	UDPSession struct {
-		kcp           *KCP
-		conn          *net.UDPConn
-		l             *Listener
-		ch_in         chan []byte
+		kcp           *KCP         // the core ARQ
+		conn          *net.UDPConn // the underlying UDP socket
+		l             *Listener    // point to server listener if it's a server socket
+		ch_in         chan []byte  // input data from UDP socket
 		local, remote net.Addr
-		read_deadline time.Time
-		closed        bool
+		rd            time.Time // read deadline
 		die           chan struct{}
 		bts           []byte
 		sync.Mutex
@@ -63,21 +62,23 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 
 		s.Lock()
-		if s.closed {
+		select {
+		case <-s.die: // closed connection
 			s.Unlock()
 			return -1, ERR_BROKEN_PIPE
+		default:
 		}
 
-		if !s.read_deadline.IsZero() {
-			if time.Now().After(s.read_deadline) {
+		if !s.rd.IsZero() {
+			if time.Now().After(s.rd) { // timeout
 				s.Unlock()
 				return -1, ERR_TIMEOUT
 			}
 		}
 
-		if n := s.kcp.PeekSize(); n > 0 {
+		if n := s.kcp.PeekSize(); n > 0 { // data arrived
 			buf := make([]byte, n)
-			if s.kcp.Recv(buf) > 0 {
+			if s.kcp.Recv(buf) > 0 { // buffer large enough
 				n := copy(b, buf)
 				s.bts = buf[n:]
 				s.Unlock()
@@ -100,9 +101,10 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 func (s *UDPSession) Close() error {
 	s.Lock()
 	defer s.Unlock()
-	if !s.closed {
+	select {
+	case <-s.die:
+	default:
 		close(s.die)
-		s.closed = true
 	}
 	return nil
 }
@@ -119,7 +121,7 @@ func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
 func (s *UDPSession) SetDeadline(t time.Time) error {
 	s.Lock()
 	defer s.Unlock()
-	s.read_deadline = t
+	s.rd = t
 	return nil
 }
 
@@ -127,7 +129,7 @@ func (s *UDPSession) SetDeadline(t time.Time) error {
 func (s *UDPSession) SetReadDeadline(t time.Time) error {
 	s.Lock()
 	defer s.Unlock()
-	s.read_deadline = t
+	s.rd = t
 	return nil
 }
 
