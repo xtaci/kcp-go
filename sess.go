@@ -75,8 +75,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			}
 		}
 
-		n := s.kcp.PeekSize()
-		if n > 0 {
+		if n := s.kcp.PeekSize(); n > 0 {
 			buf := make([]byte, n)
 			if s.kcp.Recv(buf) > 0 {
 				n := copy(b, buf)
