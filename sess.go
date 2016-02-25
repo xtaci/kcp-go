@@ -24,7 +24,7 @@ type (
 		local, remote net.Addr
 		rd            time.Time // read deadline
 		die           chan struct{}
-		bts           []byte
+		sockbuff      []byte
 		sync.Mutex
 	}
 )
@@ -55,9 +55,9 @@ func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPA
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
-		if len(s.bts) > 0 {
-			n := copy(b, s.bts)
-			s.bts = s.bts[n:]
+		if len(s.sockbuff) > 0 { // copy from buffer
+			n := copy(b, s.sockbuff)
+			s.sockbuff = s.sockbuff[n:]
 			return n, nil
 		}
 
@@ -78,9 +78,9 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 
 		if n := s.kcp.PeekSize(); n > 0 { // data arrived
 			buf := make([]byte, n)
-			if s.kcp.Recv(buf) > 0 { // buffer large enough
+			if s.kcp.Recv(buf) > 0 { // if Recv() succeded
 				n := copy(b, buf)
-				s.bts = buf[n:]
+				s.sockbuff = buf[n:] // store remaining bytes into sockbuff for next read
 				s.Unlock()
 				return n, nil
 			}
