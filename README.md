@@ -1,7 +1,9 @@
 # kcp-go
-[![GoDoc][1]][2]
+[![GoDoc][1]][2] [![Build Status][3]][4]
 [1]: https://godoc.org/github.com/xtaci/kcp-go?status.svg
 [2]: https://godoc.org/github.com/xtaci/kcp-go
+[3]: https://travis-ci.org/xtaci/kcp-go.svg?branch=master
+[4]: https://travis-ci.org/xtaci/kcp-go
 A port of [KCP](https://github.com/skywind3000/kcp) in [golang](https://golang.org/)
 
 # Status
