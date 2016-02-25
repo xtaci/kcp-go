@@ -2,7 +2,6 @@ package kcp
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"math/rand"
 	"net"
@@ -214,7 +213,7 @@ func (l *Listener) monitor() {
 				var conv uint32
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
-					fmt.Println("conv id:", conv)
+					log.Println("conv id:", conv)
 					sess := newUDPSession(conv, l, conn, from)
 					sess.ch_in <- data
 					l.sessions[addr] = sess
