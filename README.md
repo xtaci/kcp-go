@@ -13,7 +13,7 @@ Alpha
 1. Pure golang implementation of KCP in a single file [kcp.go](https://github.com/xtaci/kcp-go/blob/master/kcp.go).
 2. Instead of container.List, kcp-go made use of slice based internal queue. 
 3. Provides a basic session manager, compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener).
-4. Sepearted KCP code and session manager code, you can use kcp.go only without session manager.
+4. Seperated KCP code and session manager code, you can use kcp.go only without session manager.
 
 # Conventions
 1. ```conv uint32``` in session manager is a random number initiated by client
