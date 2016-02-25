@@ -3,6 +3,7 @@ package kcp
 import (
 	"fmt"
 	"net"
+	"sync"
 	"testing"
 )
 
@@ -43,9 +44,19 @@ func handle_client(conn net.Conn) {
 }
 
 func TestSess(t *testing.T) {
+	var wg sync.WaitGroup
+	const par = 10
+	wg.Add(par)
+	for i := 0; i < par; i++ {
+		go client(&wg)
+	}
+	wg.Wait()
+}
+
+func client(wg *sync.WaitGroup) {
 	cli, err := Dial(port)
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
 	const N = 10
 	buf := make([]byte, 10)
@@ -54,7 +65,8 @@ func TestSess(t *testing.T) {
 		cli.Write([]byte(fmt.Sprintf("hello%v", i)))
 		_, err := cli.Read(buf)
 		if err != nil {
-			t.Fatal(err)
+			panic(err)
 		}
 	}
+	wg.Done()
 }
