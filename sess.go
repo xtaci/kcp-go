@@ -25,7 +25,7 @@ type (
 		rd            time.Time // read deadline
 		die           chan struct{}
 		sockbuff      []byte
-		sync.Mutex
+		mu            sync.Mutex
 	}
 )
 
@@ -67,10 +67,10 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		default:
 		}
 
-		s.Lock()
+		s.mu.Lock()
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
-				s.Unlock()
+				s.mu.Unlock()
 				return -1, ERR_TIMEOUT
 			}
 		}
@@ -80,26 +80,26 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			if s.kcp.Recv(buf) > 0 { // if Recv() succeded
 				n := copy(b, buf)
 				s.sockbuff = buf[n:] // store remaining bytes into sockbuff for next read
-				s.Unlock()
+				s.mu.Unlock()
 				return n, nil
 			}
 		}
-		s.Unlock()
+		s.mu.Unlock()
 		<-time.After(20 * time.Millisecond)
 	}
 }
 
 // Write implements the Conn Write method.
 func (s *UDPSession) Write(b []byte) (n int, err error) {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.kcp.Send(b), nil
 }
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	select {
 	case <-s.die:
 	default:
@@ -121,16 +121,16 @@ func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
 
 // SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
 func (s *UDPSession) SetDeadline(t time.Time) error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.rd = t
 	return nil
 }
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (s *UDPSession) SetReadDeadline(t time.Time) error {
-	s.Lock()
-	defer s.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.rd = t
 	return nil
 }
@@ -146,17 +146,17 @@ func (s *UDPSession) update_task() {
 	for {
 		select {
 		case <-ticker.C:
-			s.Lock()
+			s.mu.Lock()
 			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
 			state := s.kcp.state
-			s.Unlock()
+			s.mu.Unlock()
 			if state != 0 { // deadlink
 				close(s.die)
 			}
 		case data := <-s.ch_in:
-			s.Lock()
+			s.mu.Lock()
 			s.kcp.Input(data)
-			s.Unlock()
+			s.mu.Unlock()
 		case <-s.die:
 			if s.l != nil { // has listener
 				s.l.ch_deadlinks <- s.remote
