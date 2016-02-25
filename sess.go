@@ -149,14 +149,14 @@ func (s *UDPSession) read_loop() {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
 			s.ch_in <- data
+		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
+			select {
+			case <-s.die:
+				return
+			default:
+			}
 		} else {
 			return
-		}
-
-		select {
-		case <-s.die:
-			return
-		default:
 		}
 	}
 }
