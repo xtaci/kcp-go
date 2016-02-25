@@ -9,8 +9,8 @@ Alpha
 
 # Features
 1. Pure golang implementation of KCP in a single file kcp.go.
-2. Instead of container.List, kcp-go use slice based internal queue. 
-3. Provide a basic session manager, compatible with net.Conn and net.Listener.
+2. Instead of container.List, kcp-go made use of slice based internal queue. 
+3. Provides a basic session manager, compatible with net.Conn and net.Listener.
 4. Sepearted KCP code and session manager code, you can use kcp.go only without session manager.
 
 # Conventions
