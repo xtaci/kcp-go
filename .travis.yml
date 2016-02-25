@@ -1,0 +1,8 @@
+language: go
+go:
+    - 1.6
+install:
+    - go build .
+before_script:
+script:
+    - exit 0
