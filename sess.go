@@ -227,11 +227,15 @@ func (l *Listener) monitor() {
 			} else {
 				sess.ch_in <- data
 			}
+		} else {
+			log.Println(err)
 		}
 
 		select {
-		case deadlink := <-l.ch_deadlinks:
+		case deadlink := <-l.ch_deadlinks: // remove deadlinks
 			delete(l.sessions, deadlink.String())
+		case <-l.die: // listener close
+			return
 		default:
 		}
 	}
@@ -270,7 +274,7 @@ func Listen(laddr string) (*Listener, error) {
 		return nil, err
 	}
 
-	l := &Listener{}
+	l := new(Listener)
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
 	l.ch_accepts = make(chan *UDPSession, 10)
