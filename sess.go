@@ -20,7 +20,6 @@ type (
 		kcp           *KCP         // the core ARQ
 		conn          *net.UDPConn // the underlying UDP socket
 		l             *Listener    // point to server listener if it's a server socket
-		ch_in         chan []byte  // input data from UDP socket
 		local, remote net.Addr
 		rd            time.Time // read deadline
 		die           chan struct{}
@@ -37,7 +36,6 @@ func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPA
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
-	sess.ch_in = make(chan []byte, 10)
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		n, err := conn.WriteToUDP(buf[:size], remote)
 		if err != nil {
@@ -153,14 +151,9 @@ func (s *UDPSession) update_task() {
 		case <-ticker.C:
 			s.mu.Lock()
 			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
-			state := s.kcp.state
-			s.mu.Unlock()
-			if state != 0 { // deadlink
+			if s.kcp.state != 0 { // deadlink
 				close(s.die)
 			}
-		case data := <-s.ch_in:
-			s.mu.Lock()
-			s.kcp.Input(data)
 			s.mu.Unlock()
 		case <-s.die:
 			if s.l != nil { // has listener
@@ -180,7 +173,9 @@ func (s *UDPSession) read_loop() {
 		if n, err := conn.Read(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			s.ch_in <- data
+			s.mu.Lock()
+			s.kcp.Input(data)
+			s.mu.Unlock()
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
 			return
@@ -214,19 +209,23 @@ func (l *Listener) monitor() {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
 			addr := from.String()
-			sess, ok := l.sessions[addr]
+			s, ok := l.sessions[addr]
 			if !ok {
 				var conv uint32
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
 					log.Println("conv id:", conv)
-					sess := newUDPSession(conv, l, conn, from)
-					sess.ch_in <- data
-					l.sessions[addr] = sess
-					l.ch_accepts <- sess
+					s := newUDPSession(conv, l, conn, from)
+					s.mu.Lock()
+					s.kcp.Input(data)
+					s.mu.Unlock()
+					l.sessions[addr] = s
+					l.ch_accepts <- s
 				}
 			} else {
-				sess.ch_in <- data
+				s.mu.Lock()
+				s.kcp.Input(data)
+				s.mu.Unlock()
 			}
 		} else {
 			log.Println(err)
