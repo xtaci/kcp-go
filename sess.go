@@ -22,8 +22,8 @@ type (
 		l             *Listener    // point to server listener if it's a server socket
 		local, remote net.Addr
 		rd            time.Time // read deadline
+		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
 		die           chan struct{}
-		sockbuff      []byte
 		mu            sync.Mutex
 	}
 )
