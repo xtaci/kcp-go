@@ -64,6 +64,7 @@ func client(wg *sync.WaitGroup) {
 			panic(err)
 		}
 	}
+	cli.Close()
 	wg.Done()
 }
 
