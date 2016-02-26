@@ -34,10 +34,10 @@ func handle_client(conn net.Conn) {
 	buf := make([]byte, 10)
 	for {
 		n, err := conn.Read(buf)
-		fmt.Println("recv:", string(buf[:n]))
 		if err != nil {
 			panic(err)
 		}
+		fmt.Println("recv:", string(buf[:n]))
 		conn.Write(buf[:n])
 	}
 }
