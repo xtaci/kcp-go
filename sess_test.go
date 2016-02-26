@@ -9,11 +9,6 @@ import (
 
 const port = "127.0.0.1:9999"
 
-func init() {
-	go server()
-	println("init")
-}
-
 func server() {
 	l, err := Listen(port)
 	if err != nil {
@@ -42,7 +37,8 @@ func handle_client(conn net.Conn) {
 	}
 }
 
-func TestSess(t *testing.T) {
+func TestSendRecv(t *testing.T) {
+	go server()
 	var wg sync.WaitGroup
 	const par = 10
 	wg.Add(par)
@@ -69,4 +65,12 @@ func client(wg *sync.WaitGroup) {
 		}
 	}
 	wg.Done()
+}
+
+func TestListen(t *testing.T) {
+	l, err := Listen(port)
+	if err != nil {
+		panic(err)
+	}
+	l.Close()
 }

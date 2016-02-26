@@ -32,6 +32,7 @@ type (
 //  create a new udp session for client or server
 func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
+	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
 	sess.remote = remote
 	sess.conn = conn
@@ -279,6 +280,7 @@ func Listen(laddr string) (*Listener, error) {
 	l.sessions = make(map[string]*UDPSession)
 	l.ch_accepts = make(chan *UDPSession, 10)
 	l.ch_deadlinks = make(chan net.Addr, 10)
+	l.die = make(chan struct{})
 	go l.monitor()
 	return l, nil
 }
