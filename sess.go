@@ -259,7 +259,7 @@ func (l *Listener) Addr() net.Addr {
 	return l.conn.LocalAddr()
 }
 
-// Listen listens for incoming KCP packets addressed to the local address laddr
+// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp"
 func Listen(laddr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
@@ -279,7 +279,7 @@ func Listen(laddr string) (*Listener, error) {
 	return l, nil
 }
 
-// Dial connects to the remote address raddr on the network net
+// Dial connects to the remote address raddr on the network "udp"
 func Dial(raddr string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
