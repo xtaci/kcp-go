@@ -5,6 +5,7 @@ import (
 	"net"
 	"sync"
 	"testing"
+	"time"
 )
 
 const port = "127.0.0.1:9999"
@@ -24,6 +25,10 @@ func server() {
 	}
 }
 
+func init() {
+	go server()
+}
+
 func handle_client(conn net.Conn) {
 	fmt.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 10)
@@ -38,7 +43,6 @@ func handle_client(conn net.Conn) {
 }
 
 func TestSendRecv(t *testing.T) {
-	go server()
 	var wg sync.WaitGroup
 	const par = 10
 	wg.Add(par)
@@ -74,4 +78,41 @@ func TestListen(t *testing.T) {
 		panic(err)
 	}
 	l.Close()
+}
+
+func TestBigPacket(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go client2(&wg)
+	wg.Wait()
+}
+
+func client2(wg *sync.WaitGroup) {
+	cli, err := Dial(port)
+	if err != nil {
+		panic(err)
+	}
+	const N = 10
+	buf := make([]byte, 100)
+	msg := make([]byte, 4096)
+	for i := 0; i < N; i++ {
+		cli.Write(msg)
+
+	}
+	println("total written:", len(msg)*N)
+
+	nrecv := 0
+	cli.SetReadDeadline(time.Now().Add(3 * time.Second))
+	for {
+		n, err := cli.Read(buf)
+		if err != nil {
+			break
+		} else {
+			nrecv += n
+			println("total recv:", nrecv)
+		}
+	}
+
+	cli.Close()
+	wg.Done()
 }
