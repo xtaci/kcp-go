@@ -227,8 +227,6 @@ func (l *Listener) monitor() {
 				s.kcp.Input(data)
 				s.mu.Unlock()
 			}
-		} else {
-			log.Println(err)
 		}
 
 		select {
