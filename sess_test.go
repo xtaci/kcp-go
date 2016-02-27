@@ -37,6 +37,7 @@ func handle_client(conn net.Conn) {
 		if err != nil {
 			panic(err)
 		}
+		fmt.Println("recv:", string(buf[:n]))
 		conn.Write(buf[:n])
 	}
 }

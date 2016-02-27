@@ -67,7 +67,9 @@ func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote
 
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	for {
+	ticker := time.NewTimer(20 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
 		if len(s.sockbuff) > 0 { // copy from buffer
 			n := copy(b, s.sockbuff)
 			s.sockbuff = s.sockbuff[n:]
@@ -98,8 +100,9 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			}
 		}
 		s.mu.Unlock()
-		<-time.After(20 * time.Millisecond)
+		ticker.Reset(20 * time.Millisecond)
 	}
+	return -1, ERR_BROKEN_PIPE
 }
 
 // Write implements the Conn Write method.
