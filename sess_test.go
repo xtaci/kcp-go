@@ -98,7 +98,6 @@ func client2(wg *sync.WaitGroup) {
 	msg := make([]byte, 4096)
 	for i := 0; i < N; i++ {
 		cli.Write(msg)
-
 	}
 	println("total written:", len(msg)*N)
 

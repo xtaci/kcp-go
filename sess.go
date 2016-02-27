@@ -174,9 +174,11 @@ func (s *UDPSession) update_task() {
 		case <-ticker.C:
 			s.mu.Lock()
 			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
-			if s.kcp.state != 0 { // deadlink
-				close(s.die)
-			}
+			/*
+				if s.kcp.state != 0 { // deadlink
+					close(s.die)
+				}
+			*/
 			s.mu.Unlock()
 		case <-s.die:
 			if s.l != nil { // has listener
