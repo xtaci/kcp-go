@@ -15,6 +15,12 @@ var (
 	ERR_PACKET_TOO_LARGE = errors.New("packet too large")
 )
 
+const (
+	MODE_DEFAULT = 0
+	MODE_NORMAL  = 1
+	MODE_FAST    = 2
+)
+
 type (
 	UDPSession struct {
 		kcp           *KCP         // the core ARQ
@@ -29,7 +35,7 @@ type (
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -43,7 +49,15 @@ func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPA
 		}
 	})
 	sess.kcp.WndSize(128, 128)
-	sess.kcp.NoDelay(0, 10, 0, 1)
+	switch mode {
+	case 2:
+		sess.kcp.NoDelay(1, 10, 2, 1)
+	case 1:
+		sess.kcp.NoDelay(0, 10, 0, 1)
+	default:
+		sess.kcp.NoDelay(0, 10, 0, 1)
+	}
+
 	go sess.update_task()
 	if l == nil { // it's a client connection
 		go sess.read_loop()
@@ -198,6 +212,7 @@ func (s *UDPSession) read_loop() {
 type (
 	Listener struct {
 		conn         *net.UDPConn
+		mode         int
 		sessions     map[string]*UDPSession
 		ch_accepts   chan *UDPSession
 		ch_deadlinks chan net.Addr
@@ -221,7 +236,7 @@ func (l *Listener) monitor() {
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
 					log.Println("conv id:", conv)
-					s := newUDPSession(conv, l, conn, from)
+					s := newUDPSession(conv, l.mode, l, conn, from)
 					s.mu.Lock()
 					s.kcp.Input(data)
 					s.mu.Unlock()
@@ -271,7 +286,11 @@ func (l *Listener) Addr() net.Addr {
 }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp"
-func Listen(laddr string) (*Listener, error) {
+// mode must be one of:
+// MODE_DEFAULT
+// MODE_NORMAL
+// MODE_FAST
+func Listen(mode int, laddr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
@@ -283,6 +302,7 @@ func Listen(laddr string) (*Listener, error) {
 
 	l := new(Listener)
 	l.conn = conn
+	l.mode = mode
 	l.sessions = make(map[string]*UDPSession)
 	l.ch_accepts = make(chan *UDPSession, 10)
 	l.ch_deadlinks = make(chan net.Addr, 10)
@@ -292,7 +312,11 @@ func Listen(laddr string) (*Listener, error) {
 }
 
 // Dial connects to the remote address raddr on the network "udp"
-func Dial(raddr string) (*UDPSession, error) {
+// mode must be one of:
+// MODE_DEFAULT
+// MODE_NORMAL
+// MODE_FAST
+func Dial(mode int, raddr string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
@@ -301,5 +325,5 @@ func Dial(raddr string) (*UDPSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newUDPSession(rand.Uint32(), nil, udpconn, udpaddr), nil
+	return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr), nil
 }

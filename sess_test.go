@@ -11,7 +11,7 @@ import (
 const port = "127.0.0.1:9999"
 
 func server() {
-	l, err := Listen(port)
+	l, err := Listen(MODE_NORMAL, port)
 	if err != nil {
 		panic(err)
 	}
@@ -52,7 +52,7 @@ func TestSendRecv(t *testing.T) {
 }
 
 func client(wg *sync.WaitGroup) {
-	cli, err := Dial(port)
+	cli, err := Dial(MODE_NORMAL, port)
 	if err != nil {
 		panic(err)
 	}
@@ -73,7 +73,7 @@ func client(wg *sync.WaitGroup) {
 }
 
 func TestListen(t *testing.T) {
-	l, err := Listen(port)
+	l, err := Listen(MODE_NORMAL, port)
 	if err != nil {
 		panic(err)
 	}
@@ -88,7 +88,7 @@ func TestBigPacket(t *testing.T) {
 }
 
 func client2(wg *sync.WaitGroup) {
-	cli, err := Dial(port)
+	cli, err := Dial(MODE_NORMAL, port)
 	if err != nil {
 		panic(err)
 	}
