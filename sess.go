@@ -174,6 +174,8 @@ func (s *UDPSession) update_task() {
 		case <-ticker.C:
 			s.mu.Lock()
 			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
+			// deadlink detection may fail fast in high packet lost environment
+			// I just ignore it for the moment
 			/*
 				if s.kcp.state != 0 { // deadlink
 					close(s.die)
