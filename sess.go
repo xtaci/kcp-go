@@ -92,9 +92,14 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 func (s *UDPSession) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n = s.kcp.Send(b)
-	if n == -2 {
-		return n, ERR_PACKET_TOO_LARGE
+	select {
+	case <-s.die:
+		return -1, ERR_BROKEN_PIPE
+	default:
+		n = s.kcp.Send(b)
+		if n == -2 {
+			return n, ERR_PACKET_TOO_LARGE
+		}
 	}
 	return
 }
@@ -105,6 +110,7 @@ func (s *UDPSession) Close() error {
 	defer s.mu.Unlock()
 	select {
 	case <-s.die:
+		return ERR_BROKEN_PIPE
 	default:
 		close(s.die)
 		if s.l == nil { // client socket close
@@ -251,9 +257,12 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // Close stops listening on the TCP address. Already Accepted connections are not closed.
 func (l *Listener) Close() error {
-	l.conn.Close()
-	close(l.die)
-	return nil
+	if err := l.conn.Close(); err == nil {
+		close(l.die)
+		return nil
+	} else {
+		return err
+	}
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
