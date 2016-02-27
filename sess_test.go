@@ -34,7 +34,6 @@ func handle_client(conn net.Conn) {
 	buf := make([]byte, 10)
 	for {
 		n, err := conn.Read(buf)
-		fmt.Println("recv:", string(buf[:n]))
 		if err != nil {
 			panic(err)
 		}
@@ -63,8 +62,9 @@ func client(wg *sync.WaitGroup) {
 		msg := fmt.Sprintf("hello%v", i)
 		fmt.Println("sent:", msg)
 		cli.Write([]byte(msg))
-		_, err := cli.Read(buf)
-		if err != nil {
+		if n, err := cli.Read(buf); err == nil {
+			fmt.Println("recv:", string(buf[:n]))
+		} else {
 			panic(err)
 		}
 	}
@@ -109,10 +109,13 @@ func client2(wg *sync.WaitGroup) {
 			break
 		} else {
 			nrecv += n
-			println("total recv:", nrecv)
+			if nrecv == len(msg)*N {
+				break
+			}
 		}
 	}
 
+	println("total recv:", nrecv)
 	cli.Close()
 	wg.Done()
 }
