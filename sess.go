@@ -50,9 +50,9 @@ func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote
 	})
 	sess.kcp.WndSize(128, 128)
 	switch mode {
-	case 2:
+	case MODE_FAST:
 		sess.kcp.NoDelay(1, 10, 2, 1)
-	case 1:
+	case MODE_NORMAL:
 		sess.kcp.NoDelay(0, 10, 0, 1)
 	default:
 		sess.kcp.NoDelay(0, 10, 0, 1)
