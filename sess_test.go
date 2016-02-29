@@ -73,14 +73,6 @@ func client(wg *sync.WaitGroup) {
 	wg.Done()
 }
 
-func TestListen(t *testing.T) {
-	l, err := Listen(MODE_NORMAL, port)
-	if err != nil {
-		panic(err)
-	}
-	l.Close()
-}
-
 func TestBigPacket(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
