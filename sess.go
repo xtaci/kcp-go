@@ -319,10 +319,7 @@ func Listen(mode int, laddr string) (*Listener, error) {
 }
 
 // Dial connects to the remote address raddr on the network "udp"
-// mode must be one of:
-// MODE_DEFAULT
-// MODE_NORMAL
-// MODE_FAST
+// mode is same as Listen
 func Dial(mode int, raddr string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
