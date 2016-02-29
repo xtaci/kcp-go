@@ -180,9 +180,8 @@ func (s *UDPSession) update_task() {
 			s.mu.Lock()
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
 			s.kcp.Update(current)
-			trigger = time.After(time.Millisecond * time.Duration(s.kcp.Check(current)-current))
+			trigger = time.After(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
 			s.mu.Unlock()
-
 			// deadlink detection may fail fast in high packet lost environment
 			// I just ignore it for the moment
 			/*
