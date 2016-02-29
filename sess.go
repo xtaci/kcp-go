@@ -10,9 +10,8 @@ import (
 )
 
 var (
-	ERR_TIMEOUT          = errors.New("i/o timeout")
-	ERR_BROKEN_PIPE      = errors.New("broken pipe")
-	ERR_PACKET_TOO_LARGE = errors.New("packet too large")
+	ERR_TIMEOUT     = errors.New("i/o timeout")
+	ERR_BROKEN_PIPE = errors.New("broken pipe")
 )
 
 const (
@@ -113,9 +112,15 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 	case <-s.die:
 		return -1, ERR_BROKEN_PIPE
 	default:
-		n = s.kcp.Send(b)
-		if n == -2 {
-			return n, ERR_PACKET_TOO_LARGE
+		max := int(s.kcp.mss * 255)
+		for {
+			if len(b) <= max { // in most cases
+				s.kcp.Send(b)
+				break
+			} else {
+				s.kcp.Send(b[:max])
+				b = b[max:]
+			}
 		}
 	}
 	return
