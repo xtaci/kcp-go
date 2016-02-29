@@ -16,9 +16,9 @@ var (
 )
 
 const (
-	MODE_DEFAULT = 0
-	MODE_NORMAL  = 1
-	MODE_FAST    = 2
+	MODE_DEFAULT = iota
+	MODE_NORMAL
+	MODE_FAST
 )
 
 type (
