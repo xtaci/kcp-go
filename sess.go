@@ -189,8 +189,8 @@ func (s *UDPSession) update_task() {
 	for {
 		select {
 		case <-trigger:
-			s.mu.Lock()
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
+			s.mu.Lock()
 			s.kcp.Update(current)
 			trigger = time.After(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
 			s.mu.Unlock()
