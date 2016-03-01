@@ -31,13 +31,14 @@ func init() {
 
 func handle_client(conn net.Conn) {
 	fmt.Println("new client", conn.RemoteAddr())
-	buf := make([]byte, 10)
+	buf := make([]byte, 4096)
+	count := 0
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
 			panic(err)
 		}
-		//fmt.Println("recv:", string(buf[:n]))
+		count++
 		conn.Write(buf[:n])
 	}
 }
@@ -102,6 +103,42 @@ func client2(wg *sync.WaitGroup) {
 		} else {
 			nrecv += n
 			if nrecv == len(msg)*N {
+				break
+			}
+		}
+	}
+
+	println("total recv:", nrecv)
+	cli.Close()
+	wg.Done()
+}
+
+func TestSpeed(t *testing.T) {
+	start := time.Now()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go client3(&wg)
+	wg.Wait()
+	fmt.Println("time for 1MB rtt", time.Now().Sub(start))
+}
+
+func client3(wg *sync.WaitGroup) {
+	cli, err := Dial(MODE_NORMAL, port)
+	if err != nil {
+		panic(err)
+	}
+	msg := make([]byte, 1024*1024)
+	buf := make([]byte, 4096)
+	cli.Write(msg)
+	nrecv := 0
+	for {
+		n, err := cli.Read(buf)
+		if err != nil {
+			fmt.Println(err)
+			break
+		} else {
+			nrecv += n
+			if nrecv == 1024*1024 {
 				break
 			}
 		}
