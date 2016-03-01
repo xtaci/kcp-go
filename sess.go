@@ -33,6 +33,19 @@ type (
 	}
 )
 
+var (
+	ch_input chan func()
+)
+
+func init() {
+	ch_input = make(chan func(), 65535)
+	go func() {
+		for {
+			(<-ch_input)()
+		}
+	}()
+}
+
 //  create a new udp session for client or server
 func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
@@ -66,7 +79,7 @@ func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote
 
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	ticker := time.NewTicker(20 * time.Millisecond)
+	ticker := time.NewTimer(20 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
 		if len(s.sockbuff) > 0 { // copy from buffer
@@ -99,6 +112,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			}
 		}
 		s.mu.Unlock()
+		ticker.Reset(20 * time.Millisecond)
 	}
 	return -1, ERR_BROKEN_PIPE
 }
@@ -176,8 +190,8 @@ func (s *UDPSession) update_task() {
 	for {
 		select {
 		case <-trigger:
-			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
 			s.mu.Lock()
+			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
 			s.kcp.Update(current)
 			trigger = time.After(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
 			s.mu.Unlock()
@@ -206,9 +220,11 @@ func (s *UDPSession) read_loop() {
 		if n, err := conn.Read(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			s.mu.Lock()
-			s.kcp.Input(data)
-			s.mu.Unlock()
+			ch_input <- func() {
+				s.mu.Lock()
+				s.kcp.Input(data)
+				s.mu.Unlock()
+			}
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
 			return
@@ -250,16 +266,20 @@ func (l *Listener) monitor() {
 					ikcp_decode32u(data, &conv) // conversation id
 					log.Println("conv id:", conv)
 					s := newUDPSession(conv, l.mode, l, conn, from)
-					s.mu.Lock()
-					s.kcp.Input(data)
-					s.mu.Unlock()
+					ch_input <- func() {
+						s.mu.Lock()
+						s.kcp.Input(data)
+						s.mu.Unlock()
+					}
 					l.sessions[addr] = s
 					l.ch_accepts <- s
 				}
 			} else {
-				s.mu.Lock()
-				s.kcp.Input(data)
-				s.mu.Unlock()
+				ch_input <- func() {
+					s.mu.Lock()
+					s.kcp.Input(data)
+					s.mu.Unlock()
+				}
 			}
 		}
 
