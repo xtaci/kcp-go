@@ -33,6 +33,19 @@ type (
 	}
 )
 
+var (
+	ch_input chan func()
+)
+
+func init() {
+	ch_input = make(chan func(), 65535)
+	go func() {
+		for {
+			(<-ch_input)()
+		}
+	}()
+}
+
 //  create a new udp session for client or server
 func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
@@ -207,9 +220,11 @@ func (s *UDPSession) read_loop() {
 		if n, err := conn.Read(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			s.mu.Lock()
-			s.kcp.Input(data)
-			s.mu.Unlock()
+			ch_input <- func() {
+				s.mu.Lock()
+				s.kcp.Input(data)
+				s.mu.Unlock()
+			}
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
 			return
@@ -251,16 +266,20 @@ func (l *Listener) monitor() {
 					ikcp_decode32u(data, &conv) // conversation id
 					log.Println("conv id:", conv)
 					s := newUDPSession(conv, l.mode, l, conn, from)
-					s.mu.Lock()
-					s.kcp.Input(data)
-					s.mu.Unlock()
+					ch_input <- func() {
+						s.mu.Lock()
+						s.kcp.Input(data)
+						s.mu.Unlock()
+					}
 					l.sessions[addr] = s
 					l.ch_accepts <- s
 				}
 			} else {
-				s.mu.Lock()
-				s.kcp.Input(data)
-				s.mu.Unlock()
+				ch_input <- func() {
+					s.mu.Lock()
+					s.kcp.Input(data)
+					s.mu.Unlock()
+				}
 			}
 		}
 
