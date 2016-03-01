@@ -31,7 +31,7 @@ func init() {
 
 func handle_client(conn net.Conn) {
 	fmt.Println("new client", conn.RemoteAddr())
-	buf := make([]byte, 4096)
+	buf := make([]byte, 65536)
 	count := 0
 	for {
 		n, err := conn.Read(buf)
@@ -128,7 +128,7 @@ func client3(wg *sync.WaitGroup) {
 		panic(err)
 	}
 	msg := make([]byte, 1024*1024)
-	buf := make([]byte, 4096)
+	buf := make([]byte, 65536)
 	cli.Write(msg)
 	nrecv := 0
 	for {
