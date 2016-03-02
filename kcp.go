@@ -292,12 +292,12 @@ func (kcp *KCP) Send(buffer []byte) int {
 }
 
 func (kcp *KCP) update_ack(rtt int32) {
-	rto := 0
+	var rto uint32 = 0
 	if kcp.rx_srtt == 0 {
 		kcp.rx_srtt = uint32(rtt)
 		kcp.rx_rttval = uint32(rtt) / 2
 	} else {
-		delta := int(rtt) - int(kcp.rx_srtt)
+		delta := rtt - int32(kcp.rx_srtt)
 		if delta < 0 {
 			delta = -delta
 		}
@@ -307,8 +307,8 @@ func (kcp *KCP) update_ack(rtt int32) {
 			kcp.rx_srtt = 1
 		}
 	}
-	rto = int(kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval))
-	kcp.rx_rto = _ibound_(kcp.rx_minrto, uint32(rto), IKCP_RTO_MAX)
+	rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
+	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
 }
 
 func (kcp *KCP) shrink_buf() {

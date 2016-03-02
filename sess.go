@@ -79,13 +79,13 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		s.mu.Lock()
 		if s.is_closed {
 			s.mu.Unlock()
-			return -1, ERR_BROKEN_PIPE
+			return 0, ERR_BROKEN_PIPE
 		}
 
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				s.mu.Unlock()
-				return -1, ERR_TIMEOUT
+				return 0, ERR_TIMEOUT
 			}
 		}
 
@@ -101,7 +101,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		s.mu.Unlock()
 		ticker.Reset(20 * time.Millisecond)
 	}
-	return -1, ERR_BROKEN_PIPE
+	return 0, ERR_BROKEN_PIPE
 }
 
 // Write implements the Conn Write method.
@@ -109,7 +109,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.is_closed {
-		return -1, ERR_BROKEN_PIPE
+		return 0, ERR_BROKEN_PIPE
 	}
 
 	max := int(s.kcp.mss * 255)
@@ -171,14 +171,15 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 
 // kcp update, input loop
 func (s *UDPSession) update_task() {
-	trigger := time.After(10 * time.Millisecond)
+	trigger := time.NewTimer(10 * time.Millisecond)
+	defer trigger.Stop()
 	for {
 		select {
-		case <-trigger:
+		case <-trigger.C:
 			s.mu.Lock()
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
 			s.kcp.Update(current)
-			trigger = time.After(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
+			trigger.Reset(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
 			s.mu.Unlock()
 			// deadlink detection may fail fast in high packet lost environment
 			// I just ignore it for the moment
@@ -194,6 +195,10 @@ func (s *UDPSession) update_task() {
 			return
 		}
 	}
+}
+
+func (s *UDPSession) GetConv() uint32 {
+	return s.kcp.conv
 }
 
 // read loop for client session
@@ -249,7 +254,6 @@ func (l *Listener) monitor() {
 				var conv uint32
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
-					log.Println("conv id:", conv)
 					s := newUDPSession(conv, l.mode, l, conn, from)
 					ch_feed <- func() {
 						s.mu.Lock()
