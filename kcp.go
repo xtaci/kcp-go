@@ -462,9 +462,7 @@ func (kcp *KCP) Input(data []byte) int {
 					seg.ts = ts
 					seg.sn = sn
 					seg.una = una
-					if length > 0 {
-						copy(seg.data, data[:length])
-					}
+					copy(seg.data, data[:length])
 					kcp.parse_data(seg)
 				}
 			}
@@ -518,7 +516,7 @@ func (kcp *KCP) flush() {
 	current := kcp.current
 	buffer := kcp.buffer
 	change := 0
-	lost := 0
+	lost := false
 
 	if kcp.updated == 0 {
 		return
@@ -647,7 +645,7 @@ func (kcp *KCP) flush() {
 				segment.rto += kcp.rx_rto / 2
 			}
 			segment.resendts = current + segment.rto
-			lost = 1
+			lost = true
 		} else if segment.fastack >= resent {
 			needsend = true
 			segment.xmit++
@@ -670,10 +668,8 @@ func (kcp *KCP) flush() {
 			}
 
 			ptr = segment.encode(ptr)
-			if len(segment.data) > 0 {
-				copy(ptr, segment.data)
-				ptr = ptr[len(segment.data):]
-			}
+			copy(ptr, segment.data)
+			ptr = ptr[len(segment.data):]
 
 			if segment.xmit >= kcp.dead_link {
 				kcp.state = 0xFFFFFFFF
@@ -698,7 +694,7 @@ func (kcp *KCP) flush() {
 		kcp.incr = kcp.cwnd * kcp.mss
 	}
 
-	if lost != 0 {
+	if lost {
 		kcp.ssthresh = cwnd / 2
 		if kcp.ssthresh < IKCP_THRESH_MIN {
 			kcp.ssthresh = IKCP_THRESH_MIN
