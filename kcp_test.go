@@ -265,6 +265,7 @@ func test(mode int) {
 
 			println("[RECV] mode=", mode, " sn=", sn, " rtt=", rtt)
 		}
+
 		if next > 100 {
 			break
 		}

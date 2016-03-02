@@ -1,3 +1,4 @@
+// KCP - A Fast and Reliable ARQ Protocol
 package kcp
 
 import "encoding/binary"
@@ -86,7 +87,7 @@ func _ibound_(lower, middle, upper uint32) uint32 {
 }
 
 func _itimediff(later, earlier uint32) int32 {
-	return ((int32)(later - earlier))
+	return (int32)(later - earlier)
 }
 
 // KCP Segment Definition
@@ -228,9 +229,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	if count > 0 {
-		kcp.rcv_queue = kcp.rcv_queue[count:]
-	}
+	kcp.rcv_queue = kcp.rcv_queue[count:]
 
 	// move available data from rcv_buf -> rcv_queue
 	count = 0
@@ -244,9 +243,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	if count > 0 {
-		kcp.rcv_buf = kcp.rcv_buf[count:]
-	}
+	kcp.rcv_buf = kcp.rcv_buf[count:]
 
 	// fast recover
 	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) && fast_recover {
@@ -300,11 +297,11 @@ func (kcp *KCP) update_ack(rtt int32) {
 		kcp.rx_srtt = uint32(rtt)
 		kcp.rx_rttval = uint32(rtt) / 2
 	} else {
-		delta := uint32(rtt) - kcp.rx_srtt
+		delta := int(rtt) - int(kcp.rx_srtt)
 		if delta < 0 {
 			delta = -delta
 		}
-		kcp.rx_rttval = (3*kcp.rx_rttval + delta) / 4
+		kcp.rx_rttval = (3*kcp.rx_rttval + uint32(delta)) / 4
 		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
 		if kcp.rx_srtt < 1 {
 			kcp.rx_srtt = 1
@@ -349,9 +346,7 @@ func (kcp *KCP) parse_una(una uint32) {
 			break
 		}
 	}
-	if count > 0 {
-		kcp.snd_buf = kcp.snd_buf[count:]
-	}
+	kcp.snd_buf = kcp.snd_buf[count:]
 }
 
 // ack append
@@ -405,9 +400,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 			break
 		}
 	}
-	if count > 0 {
-		kcp.rcv_buf = kcp.rcv_buf[count:]
-	}
+	kcp.rcv_buf = kcp.rcv_buf[count:]
 }
 
 // when you received a low level packet (eg. UDP packet), call it
@@ -623,9 +616,7 @@ func (kcp *KCP) flush() {
 		kcp.snd_nxt++
 		count++
 	}
-	if count > 0 {
-		kcp.snd_queue = kcp.snd_queue[count:]
-	}
+	kcp.snd_queue = kcp.snd_queue[count:]
 
 	// calculate resent
 	resent := uint32(kcp.fastresend)

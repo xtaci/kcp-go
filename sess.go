@@ -10,9 +10,14 @@ import (
 )
 
 var (
-	ERR_TIMEOUT          = errors.New("i/o timeout")
-	ERR_BROKEN_PIPE      = errors.New("broken pipe")
-	ERR_PACKET_TOO_LARGE = errors.New("packet too large")
+	ERR_TIMEOUT     = errors.New("i/o timeout")
+	ERR_BROKEN_PIPE = errors.New("broken pipe")
+)
+
+const (
+	MODE_DEFAULT = iota
+	MODE_NORMAL
+	MODE_FAST
 )
 
 type (
@@ -24,12 +29,13 @@ type (
 		rd            time.Time // read deadline
 		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
 		die           chan struct{}
+		is_closed     bool
 		mu            sync.Mutex
 	}
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -42,8 +48,16 @@ func newUDPSession(conv uint32, l *Listener, conn *net.UDPConn, remote *net.UDPA
 			log.Println(err, n)
 		}
 	})
-	sess.kcp.WndSize(128, 128)
-	sess.kcp.NoDelay(0, 10, 0, 1)
+	sess.kcp.WndSize(1024, 1024)
+	switch mode {
+	case MODE_FAST:
+		sess.kcp.NoDelay(1, 10, 2, 1)
+	case MODE_NORMAL:
+		sess.kcp.NoDelay(0, 10, 0, 1)
+	default:
+		sess.kcp.NoDelay(0, 10, 0, 1)
+	}
+
 	go sess.update_task()
 	if l == nil { // it's a client connection
 		go sess.read_loop()
@@ -62,13 +76,12 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		select {
-		case <-s.die: // closed connection
+		s.mu.Lock()
+		if s.is_closed {
+			s.mu.Unlock()
 			return -1, ERR_BROKEN_PIPE
-		default:
 		}
 
-		s.mu.Lock()
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				s.mu.Unlock()
@@ -95,9 +108,19 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 func (s *UDPSession) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n = s.kcp.Send(b)
-	if n == -2 {
-		return n, ERR_PACKET_TOO_LARGE
+	if s.is_closed {
+		return -1, ERR_BROKEN_PIPE
+	}
+
+	max := int(s.kcp.mss * 255)
+	for {
+		if len(b) <= max { // in most cases
+			s.kcp.Send(b)
+			break
+		} else {
+			s.kcp.Send(b[:max])
+			b = b[max:]
+		}
 	}
 	return
 }
@@ -106,13 +129,13 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 func (s *UDPSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	select {
-	case <-s.die:
-	default:
-		close(s.die)
-		if s.l == nil { // client socket close
-			s.conn.Close()
-		}
+	if s.is_closed {
+		return ERR_BROKEN_PIPE
+	}
+	close(s.die)
+	s.is_closed = true
+	if s.l == nil { // client socket close
+		s.conn.Close()
 	}
 	return nil
 }
@@ -148,16 +171,22 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 
 // kcp update, input loop
 func (s *UDPSession) update_task() {
-	ticker := time.NewTicker(10 * time.Millisecond)
+	trigger := time.After(10 * time.Millisecond)
 	for {
 		select {
-		case <-ticker.C:
+		case <-trigger:
 			s.mu.Lock()
-			s.kcp.Update(uint32(time.Now().UnixNano() / int64(time.Millisecond)))
-			if s.kcp.state != 0 { // deadlink
-				close(s.die)
-			}
+			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
+			s.kcp.Update(current)
+			trigger = time.After(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
 			s.mu.Unlock()
+			// deadlink detection may fail fast in high packet lost environment
+			// I just ignore it for the moment
+			/*
+				if s.kcp.state != 0 { // deadlink
+					close(s.die)
+				}
+			*/
 		case <-s.die:
 			if s.l != nil { // has listener
 				s.l.ch_deadlinks <- s.remote
@@ -195,6 +224,7 @@ func (s *UDPSession) read_loop() {
 type (
 	Listener struct {
 		conn         *net.UDPConn
+		mode         int
 		sessions     map[string]*UDPSession
 		ch_accepts   chan *UDPSession
 		ch_deadlinks chan net.Addr
@@ -205,6 +235,8 @@ type (
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
 	conn := l.conn
+	ch_feed := make(chan func(), 65535)
+	go l.feed(ch_feed)
 	buffer := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -218,17 +250,21 @@ func (l *Listener) monitor() {
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
 					log.Println("conv id:", conv)
-					s := newUDPSession(conv, l, conn, from)
-					s.mu.Lock()
-					s.kcp.Input(data)
-					s.mu.Unlock()
+					s := newUDPSession(conv, l.mode, l, conn, from)
+					ch_feed <- func() {
+						s.mu.Lock()
+						s.kcp.Input(data)
+						s.mu.Unlock()
+					}
 					l.sessions[addr] = s
 					l.ch_accepts <- s
 				}
 			} else {
-				s.mu.Lock()
-				s.kcp.Input(data)
-				s.mu.Unlock()
+				ch_feed <- func() {
+					s.mu.Lock()
+					s.kcp.Input(data)
+					s.mu.Unlock()
+				}
 			}
 		}
 
@@ -238,6 +274,18 @@ func (l *Listener) monitor() {
 		case <-l.die: // listener close
 			return
 		default:
+		}
+	}
+}
+
+// feed data from listener to UDPSessions
+func (l *Listener) feed(ch chan func()) {
+	for {
+		select {
+		case f := <-ch:
+			f()
+		case <-l.die:
+			return
 		}
 	}
 }
@@ -254,9 +302,12 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // Close stops listening on the TCP address. Already Accepted connections are not closed.
 func (l *Listener) Close() error {
-	l.conn.Close()
-	close(l.die)
-	return nil
+	if err := l.conn.Close(); err == nil {
+		close(l.die)
+		return nil
+	} else {
+		return err
+	}
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
@@ -265,7 +316,11 @@ func (l *Listener) Addr() net.Addr {
 }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp"
-func Listen(laddr string) (*Listener, error) {
+// mode must be one of:
+// MODE_DEFAULT
+// MODE_NORMAL
+// MODE_FAST
+func Listen(mode int, laddr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
@@ -277,6 +332,7 @@ func Listen(laddr string) (*Listener, error) {
 
 	l := new(Listener)
 	l.conn = conn
+	l.mode = mode
 	l.sessions = make(map[string]*UDPSession)
 	l.ch_accepts = make(chan *UDPSession, 10)
 	l.ch_deadlinks = make(chan net.Addr, 10)
@@ -286,7 +342,8 @@ func Listen(laddr string) (*Listener, error) {
 }
 
 // Dial connects to the remote address raddr on the network "udp"
-func Dial(raddr string) (*UDPSession, error) {
+// mode is same as Listen
+func Dial(mode int, raddr string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
@@ -295,5 +352,5 @@ func Dial(raddr string) (*UDPSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newUDPSession(rand.Uint32(), nil, udpconn, udpaddr), nil
+	return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr), nil
 }
