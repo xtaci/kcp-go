@@ -29,22 +29,10 @@ type (
 		rd            time.Time // read deadline
 		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
 		die           chan struct{}
+		is_closed     bool
 		mu            sync.Mutex
 	}
 )
-
-var (
-	ch_input chan func()
-)
-
-func init() {
-	ch_input = make(chan func(), 65535)
-	go func() {
-		for {
-			(<-ch_input)()
-		}
-	}()
-}
 
 //  create a new udp session for client or server
 func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
@@ -88,13 +76,12 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		select {
-		case <-s.die: // closed connection
+		s.mu.Lock()
+		if s.is_closed {
+			s.mu.Unlock()
 			return -1, ERR_BROKEN_PIPE
-		default:
 		}
 
-		s.mu.Lock()
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				s.mu.Unlock()
@@ -121,19 +108,18 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 func (s *UDPSession) Write(b []byte) (n int, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	select {
-	case <-s.die:
+	if s.is_closed {
 		return -1, ERR_BROKEN_PIPE
-	default:
-		max := int(s.kcp.mss * 255)
-		for {
-			if len(b) <= max { // in most cases
-				s.kcp.Send(b)
-				break
-			} else {
-				s.kcp.Send(b[:max])
-				b = b[max:]
-			}
+	}
+
+	max := int(s.kcp.mss * 255)
+	for {
+		if len(b) <= max { // in most cases
+			s.kcp.Send(b)
+			break
+		} else {
+			s.kcp.Send(b[:max])
+			b = b[max:]
 		}
 	}
 	return
@@ -143,14 +129,13 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 func (s *UDPSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	select {
-	case <-s.die:
+	if s.is_closed {
 		return ERR_BROKEN_PIPE
-	default:
-		close(s.die)
-		if s.l == nil { // client socket close
-			s.conn.Close()
-		}
+	}
+	close(s.die)
+	s.is_closed = true
+	if s.l == nil { // client socket close
+		s.conn.Close()
 	}
 	return nil
 }
@@ -220,11 +205,9 @@ func (s *UDPSession) read_loop() {
 		if n, err := conn.Read(buffer); err == nil {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			ch_input <- func() {
-				s.mu.Lock()
-				s.kcp.Input(data)
-				s.mu.Unlock()
-			}
+			s.mu.Lock()
+			s.kcp.Input(data)
+			s.mu.Unlock()
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
 			return
@@ -252,6 +235,8 @@ type (
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
 	conn := l.conn
+	ch_feed := make(chan func(), 65535)
+	go l.feed(ch_feed)
 	buffer := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -266,7 +251,7 @@ func (l *Listener) monitor() {
 					ikcp_decode32u(data, &conv) // conversation id
 					log.Println("conv id:", conv)
 					s := newUDPSession(conv, l.mode, l, conn, from)
-					ch_input <- func() {
+					ch_feed <- func() {
 						s.mu.Lock()
 						s.kcp.Input(data)
 						s.mu.Unlock()
@@ -275,7 +260,7 @@ func (l *Listener) monitor() {
 					l.ch_accepts <- s
 				}
 			} else {
-				ch_input <- func() {
+				ch_feed <- func() {
 					s.mu.Lock()
 					s.kcp.Input(data)
 					s.mu.Unlock()
@@ -289,6 +274,18 @@ func (l *Listener) monitor() {
 		case <-l.die: // listener close
 			return
 		default:
+		}
+	}
+}
+
+// feed data from listener to UDPSessions
+func (l *Listener) feed(ch chan func()) {
+	for {
+		select {
+		case f := <-ch:
+			f()
+		case <-l.die:
+			return
 		}
 	}
 }

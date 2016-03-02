@@ -58,7 +58,7 @@ func client(wg *sync.WaitGroup) {
 	if err != nil {
 		panic(err)
 	}
-	const N = 10
+	const N = 100
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
