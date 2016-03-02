@@ -7,7 +7,7 @@
 A port of [KCP](https://github.com/skywind3000/kcp) by [skywind3000](https://github.com/skywind3000) in [golang](https://golang.org/)
 
 # Status
-Alpha
+Beta
 
 # Features
 1. Pure golang implementation of KCP in a single file [kcp.go](https://github.com/xtaci/kcp-go/blob/master/kcp.go).
