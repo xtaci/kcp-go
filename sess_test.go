@@ -87,8 +87,8 @@ func client2(wg *sync.WaitGroup) {
 		panic(err)
 	}
 	const N = 10
-	buf := make([]byte, 100)
-	msg := make([]byte, 4096)
+	buf := make([]byte, 1024*512)
+	msg := make([]byte, 1024*512)
 	for i := 0; i < N; i++ {
 		cli.Write(msg)
 	}
