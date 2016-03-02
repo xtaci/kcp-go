@@ -1,7 +1,10 @@
 // KCP - A Fast and Reliable ARQ Protocol
 package kcp
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"sync"
+)
 
 const (
 	IKCP_RTO_NDL     = 30  // no delay min rto
@@ -119,10 +122,8 @@ func (seg *Segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
-func NewSegment(size int) *Segment {
-	seg := new(Segment)
-	seg.data = make([]byte, size)
-	return seg
+func NewSegment() *Segment {
+	return new(Segment)
 }
 
 // KCP Connection Definition
@@ -149,6 +150,8 @@ type KCP struct {
 	nocwnd     int32
 	logmask    int32
 	output     Output
+
+	segmentPool sync.Pool
 }
 
 // create a new kcp control object, 'conv' must equal in two endpoint
@@ -170,6 +173,36 @@ func NewKCP(conv uint32, output Output) *KCP {
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
 	return kcp
+}
+
+func (kcp *KCP) acquireSegment(size int) *Segment {
+	v := kcp.segmentPool.Get()
+	if v == nil {
+		seg := NewSegment()
+		seg.data = make([]byte, size)
+		return seg
+	}
+	seg := v.(*Segment)
+	seg.conv = 0
+	seg.cmd = 0
+	seg.frg = 0
+	seg.wnd = 0
+	seg.ts = 0
+	seg.sn = 0
+	seg.una = 0
+	seg.resendts = 0
+	seg.rto = 0
+	seg.fastack = 0
+	seg.xmit = 0
+	if cap(seg.data) < size {
+		seg.data = make([]byte, size)
+	}
+	seg.data = seg.data[:size]
+	return seg
+}
+
+func (kcp *KCP) releaseSegment(seg *Segment) {
+	kcp.segmentPool.Put(seg)
 }
 
 // check the size of next message in the recv queue
@@ -225,6 +258,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
 		count++
+		kcp.releaseSegment(seg)
 		if seg.frg == 0 {
 			break
 		}
@@ -282,7 +316,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		} else {
 			size = len(buffer)
 		}
-		seg := NewSegment(size)
+		seg := kcp.acquireSegment(size)
 		copy(seg.data, buffer[:size])
 		seg.frg = uint32(count - i - 1)
 		kcp.snd_queue = append(kcp.snd_queue, *seg)
@@ -342,6 +376,7 @@ func (kcp *KCP) parse_una(una uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
 			count++
+			kcp.releaseSegment(seg)
 		} else {
 			break
 		}
@@ -362,6 +397,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	sn := newseg.sn
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
+		kcp.releaseSegment(newseg)
 		return
 	}
 
@@ -386,6 +422,8 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 		} else {
 			kcp.rcv_buf = append(kcp.rcv_buf[:after_idx+1], append([]Segment{*newseg}, kcp.rcv_buf[after_idx+1:]...)...)
 		}
+	} else {
+		kcp.releaseSegment(newseg)
 	}
 
 	// move available data from rcv_buf -> rcv_queue
@@ -454,7 +492,7 @@ func (kcp *KCP) Input(data []byte) int {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
-					seg := NewSegment(int(length))
+					seg := kcp.acquireSegment(int(length))
 					seg.conv = conv
 					seg.cmd = uint32(cmd)
 					seg.frg = uint32(frg)
