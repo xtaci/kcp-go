@@ -462,9 +462,7 @@ func (kcp *KCP) Input(data []byte) int {
 					seg.ts = ts
 					seg.sn = sn
 					seg.una = una
-					if length > 0 {
-						copy(seg.data, data[:length])
-					}
+					copy(seg.data, data[:length])
 					kcp.parse_data(seg)
 				}
 			}
