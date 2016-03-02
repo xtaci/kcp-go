@@ -516,7 +516,7 @@ func (kcp *KCP) flush() {
 	current := kcp.current
 	buffer := kcp.buffer
 	change := 0
-	lost := 0
+	lost := false
 
 	if kcp.updated == 0 {
 		return
@@ -645,7 +645,7 @@ func (kcp *KCP) flush() {
 				segment.rto += kcp.rx_rto / 2
 			}
 			segment.resendts = current + segment.rto
-			lost = 1
+			lost = true
 		} else if segment.fastack >= resent {
 			needsend = true
 			segment.xmit++
@@ -694,7 +694,7 @@ func (kcp *KCP) flush() {
 		kcp.incr = kcp.cwnd * kcp.mss
 	}
 
-	if lost != 0 {
+	if lost {
 		kcp.ssthresh = cwnd / 2
 		if kcp.ssthresh < IKCP_THRESH_MIN {
 			kcp.ssthresh = IKCP_THRESH_MIN
