@@ -668,10 +668,8 @@ func (kcp *KCP) flush() {
 			}
 
 			ptr = segment.encode(ptr)
-			if len(segment.data) > 0 {
-				copy(ptr, segment.data)
-				ptr = ptr[len(segment.data):]
-			}
+			copy(ptr, segment.data)
+			ptr = ptr[len(segment.data):]
 
 			if segment.xmit >= kcp.dead_link {
 				kcp.state = 0xFFFFFFFF
