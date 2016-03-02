@@ -87,7 +87,7 @@ func _ibound_(lower, middle, upper uint32) uint32 {
 }
 
 func _itimediff(later, earlier uint32) int32 {
-	return ((int32)(int(later) - int(earlier)))
+	return (int32)(later - earlier)
 }
 
 // KCP Segment Definition
