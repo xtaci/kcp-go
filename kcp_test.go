@@ -253,6 +253,7 @@ func test(mode int) {
 				//println("---", i, buffer[i])
 				//}
 				println("ERROR sn ", count, "<->", next, sn)
+				panic("error sn")
 				return
 			}
 
