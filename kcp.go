@@ -1,3 +1,4 @@
+// KCP - A Fast and Reliable ARQ Protocol
 package kcp
 
 import "encoding/binary"
