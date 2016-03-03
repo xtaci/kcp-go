@@ -181,7 +181,7 @@ func (s *UDPSession) update_task() {
 		case <-trigger.C:
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
 			s.mu.Lock()
-			if current > nextupdate || s.need_update {
+			if current >= nextupdate || s.need_update {
 				s.kcp.Update(current)
 				nextupdate = s.kcp.Check(current)
 			}
