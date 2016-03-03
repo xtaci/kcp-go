@@ -788,11 +788,11 @@ func (kcp *KCP) Check(current uint32) uint32 {
 }
 
 // change MTU size, default is 1400
-func (kcp *KCP) SetMtu(mtu int32) int32 {
-	if mtu < 50 || mtu < int32(IKCP_OVERHEAD) {
+func (kcp *KCP) SetMtu(mtu int) int {
+	if mtu < 50 || mtu < IKCP_OVERHEAD {
 		return -1
 	}
-	buffer := make([]byte, (uint32(mtu)+IKCP_OVERHEAD)*3)
+	buffer := make([]byte, (mtu+IKCP_OVERHEAD)*3)
 	if buffer == nil {
 		return -2
 	}
@@ -802,7 +802,7 @@ func (kcp *KCP) SetMtu(mtu int32) int32 {
 	return 0
 }
 
-func (kcp *KCP) Interval(interval int32) int32 {
+func (kcp *KCP) Interval(interval int) int {
 	if interval > 5000 {
 		interval = 5000
 	} else if interval < 10 {
@@ -817,7 +817,7 @@ func (kcp *KCP) Interval(interval int32) int32 {
 // interval: internal update timer interval in millisec, default is 100ms
 // resend: 0:disable fast resend(default), 1:enable fast resend
 // nc: 0:normal congestion control(default), 1:disable congestion control
-func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
+func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int) int {
 	if nodelay >= 0 {
 		kcp.nodelay = uint32(nodelay)
 		if nodelay != 0 {
@@ -835,16 +835,16 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int32) int32 {
 		kcp.interval = uint32(interval)
 	}
 	if resend >= 0 {
-		kcp.fastresend = resend
+		kcp.fastresend = int32(resend)
 	}
 	if nc >= 0 {
-		kcp.nocwnd = nc
+		kcp.nocwnd = int32(nc)
 	}
 	return 0
 }
 
 // set maximum window size: sndwnd=32, rcvwnd=32 by default
-func (kcp *KCP) WndSize(sndwnd, rcvwnd int32) int32 {
+func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 	if kcp != nil {
 		if sndwnd > 0 {
 			kcp.snd_wnd = uint32(sndwnd)
@@ -857,6 +857,6 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int32) int32 {
 }
 
 // get how many packet is waiting to be sent
-func (kcp *KCP) WaitSnd() int32 {
-	return int32(len(kcp.snd_buf) + len(kcp.snd_queue))
+func (kcp *KCP) WaitSnd() int {
+	return len(kcp.snd_buf) + len(kcp.snd_queue)
 }
