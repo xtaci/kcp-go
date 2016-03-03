@@ -18,3 +18,6 @@ Beta
 # Conventions
 1. ```conv uint32``` in session manager is a random number initiated by client
 2. conn.Write never blocks in KCP, so conn.SetWriteDeadline has no use.
+
+# Contribution
+PR is welcome if the code is short and clean.
