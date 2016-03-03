@@ -30,6 +30,7 @@ type (
 		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
 		die           chan struct{}
 		is_closed     bool
+		need_update   bool
 		mu            sync.Mutex
 	}
 )
@@ -122,6 +123,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			b = b[max:]
 		}
 	}
+	s.need_update = true
 	return
 }
 
@@ -171,15 +173,19 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 
 // kcp update, input loop
 func (s *UDPSession) update_task() {
-	trigger := time.NewTimer(10 * time.Millisecond)
+	trigger := time.NewTicker(10 * time.Millisecond)
+	var nextupdate uint32
 	defer trigger.Stop()
 	for {
 		select {
 		case <-trigger.C:
-			s.mu.Lock()
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
-			s.kcp.Update(current)
-			trigger.Reset(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
+			s.mu.Lock()
+			if current > nextupdate || s.need_update {
+				s.kcp.Update(current)
+				nextupdate = s.kcp.Check(current)
+			}
+			s.need_update = false
 			s.mu.Unlock()
 			// deadlink detection may fail fast in high packet lost environment
 			// I just ignore it for the moment
@@ -212,6 +218,7 @@ func (s *UDPSession) read_loop() {
 			copy(data, buffer[:n])
 			s.mu.Lock()
 			s.kcp.Input(data)
+			s.need_update = true
 			s.mu.Unlock()
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
@@ -258,6 +265,7 @@ func (l *Listener) monitor() {
 					ch_feed <- func() {
 						s.mu.Lock()
 						s.kcp.Input(data)
+						s.need_update = true
 						s.mu.Unlock()
 					}
 					l.sessions[addr] = s
@@ -267,6 +275,7 @@ func (l *Listener) monitor() {
 				ch_feed <- func() {
 					s.mu.Lock()
 					s.kcp.Input(data)
+					s.need_update = true
 					s.mu.Unlock()
 				}
 			}
