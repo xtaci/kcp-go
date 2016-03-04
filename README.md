@@ -21,5 +21,8 @@ Beta
 2. conn.Write never blocks in KCP, so conn.SetWriteDeadline has no use.(写无阻塞)
 3. KCP doesn't define control messages like SYN/FIN/RST in TCP, a real world example is to use TCP & KCP at the same time, of which TCP does session control(eg. UDP disconnecting.), and UDP does message delivery. (需要结合TCP实现链路控制)
 
+# Related Applications(相关应用)
+1. [kcptun](https://github.com/xtaci/kcptun) -- TCP流转换为KCP+UDP流
+
 # Contribution(关于贡献)
 PR is welcome if the code is short and clean.(欢迎简洁的PR)
