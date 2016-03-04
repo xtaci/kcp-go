@@ -747,9 +747,9 @@ func (kcp *KCP) Update(current uint32) {
 // or optimize ikcp_update when handling massive kcp connections)
 func (kcp *KCP) Check(current uint32) uint32 {
 	ts_flush := kcp.ts_flush
-	tm_flush := 0x7fffffff
-	tm_packet := 0x7fffffff
-	minimal := 0
+	tm_flush := int32(0x7fffffff)
+	tm_packet := int32(0x7fffffff)
+	minimal := uint32(0)
 	if kcp.updated == 0 {
 		return current
 	}
@@ -763,7 +763,7 @@ func (kcp *KCP) Check(current uint32) uint32 {
 		return current
 	}
 
-	tm_flush = int(_itimediff(ts_flush, current))
+	tm_flush = _itimediff(ts_flush, current)
 
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
@@ -771,20 +771,20 @@ func (kcp *KCP) Check(current uint32) uint32 {
 		if diff <= 0 {
 			return current
 		}
-		if diff < int32(tm_packet) {
-			tm_packet = int(diff)
+		if diff < tm_packet {
+			tm_packet = diff
 		}
 	}
 
-	minimal = int(tm_packet)
+	minimal = uint32(tm_packet)
 	if tm_packet >= tm_flush {
-		minimal = int(tm_flush)
+		minimal = uint32(tm_flush)
 	}
-	if uint32(minimal) >= kcp.interval {
-		minimal = int(kcp.interval)
+	if minimal >= kcp.interval {
+		minimal = kcp.interval
 	}
 
-	return current + uint32(minimal)
+	return current + minimal
 }
 
 // change MTU size, default is 1400
