@@ -14,8 +14,10 @@ var (
 	ERR_BROKEN_PIPE = errors.New("broken pipe")
 )
 
+type Mode int
+
 const (
-	MODE_DEFAULT = iota
+	MODE_DEFAULT Mode = iota
 	MODE_NORMAL
 	MODE_FAST
 )
@@ -36,7 +38,7 @@ type (
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -236,7 +238,7 @@ func (s *UDPSession) read_loop() {
 type (
 	Listener struct {
 		conn         *net.UDPConn
-		mode         int
+		mode         Mode
 		sessions     map[string]*UDPSession
 		ch_accepts   chan *UDPSession
 		ch_deadlinks chan net.Addr
@@ -333,7 +335,7 @@ func (l *Listener) Addr() net.Addr {
 // MODE_DEFAULT
 // MODE_NORMAL
 // MODE_FAST
-func Listen(mode int, laddr string) (*Listener, error) {
+func Listen(mode Mode, laddr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
@@ -356,7 +358,7 @@ func Listen(mode int, laddr string) (*Listener, error) {
 
 // Dial connects to the remote address raddr on the network "udp"
 // mode is same as Listen
-func Dial(mode int, raddr string) (*UDPSession, error) {
+func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
