@@ -14,8 +14,10 @@ var (
 	ERR_BROKEN_PIPE = errors.New("broken pipe")
 )
 
+type Mode int
+
 const (
-	MODE_DEFAULT = iota
+	MODE_DEFAULT Mode = iota
 	MODE_NORMAL
 	MODE_FAST
 )
@@ -30,12 +32,13 @@ type (
 		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
 		die           chan struct{}
 		is_closed     bool
+		need_update   bool
 		mu            sync.Mutex
 	}
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, mode int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -122,6 +125,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			b = b[max:]
 		}
 	}
+	s.need_update = true
 	return
 }
 
@@ -171,15 +175,19 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 
 // kcp update, input loop
 func (s *UDPSession) update_task() {
-	trigger := time.NewTimer(10 * time.Millisecond)
+	trigger := time.NewTicker(10 * time.Millisecond)
+	var nextupdate uint32
 	defer trigger.Stop()
 	for {
 		select {
 		case <-trigger.C:
-			s.mu.Lock()
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
-			s.kcp.Update(current)
-			trigger.Reset(time.Duration(s.kcp.Check(current)-current) * time.Millisecond)
+			s.mu.Lock()
+			if current >= nextupdate || s.need_update {
+				s.kcp.Update(current)
+				nextupdate = s.kcp.Check(current)
+			}
+			s.need_update = false
 			s.mu.Unlock()
 			// deadlink detection may fail fast in high packet lost environment
 			// I just ignore it for the moment
@@ -212,6 +220,7 @@ func (s *UDPSession) read_loop() {
 			copy(data, buffer[:n])
 			s.mu.Lock()
 			s.kcp.Input(data)
+			s.need_update = true
 			s.mu.Unlock()
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
@@ -229,7 +238,7 @@ func (s *UDPSession) read_loop() {
 type (
 	Listener struct {
 		conn         *net.UDPConn
-		mode         int
+		mode         Mode
 		sessions     map[string]*UDPSession
 		ch_accepts   chan *UDPSession
 		ch_deadlinks chan net.Addr
@@ -258,6 +267,7 @@ func (l *Listener) monitor() {
 					ch_feed <- func() {
 						s.mu.Lock()
 						s.kcp.Input(data)
+						s.need_update = true
 						s.mu.Unlock()
 					}
 					l.sessions[addr] = s
@@ -267,6 +277,7 @@ func (l *Listener) monitor() {
 				ch_feed <- func() {
 					s.mu.Lock()
 					s.kcp.Input(data)
+					s.need_update = true
 					s.mu.Unlock()
 				}
 			}
@@ -324,7 +335,7 @@ func (l *Listener) Addr() net.Addr {
 // MODE_DEFAULT
 // MODE_NORMAL
 // MODE_FAST
-func Listen(mode int, laddr string) (*Listener, error) {
+func Listen(mode Mode, laddr string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
@@ -347,7 +358,7 @@ func Listen(mode int, laddr string) (*Listener, error) {
 
 // Dial connects to the remote address raddr on the network "udp"
 // mode is same as Listen
-func Dial(mode int, raddr string) (*UDPSession, error) {
+func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
