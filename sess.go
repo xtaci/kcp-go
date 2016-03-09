@@ -73,13 +73,14 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	ticker := time.NewTimer(20 * time.Millisecond)
 	defer ticker.Stop()
 	for range ticker.C {
+		s.mu.Lock()
 		if len(s.sockbuff) > 0 { // copy from buffer
 			n := copy(b, s.sockbuff)
 			s.sockbuff = s.sockbuff[n:]
+			s.mu.Unlock()
 			return n, nil
 		}
 
-		s.mu.Lock()
 		if s.is_closed {
 			s.mu.Unlock()
 			return 0, ERR_BROKEN_PIPE
