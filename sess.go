@@ -6,14 +6,12 @@ import (
 	"math/rand"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
 var (
 	ERR_TIMEOUT     = errors.New("i/o timeout")
 	ERR_BROKEN_PIPE = errors.New("broken pipe")
-	MSG_LEN_MAX     = (IKCP_MTU_DEF - IKCP_OVERHEAD) * 255
 )
 
 type Mode int
@@ -32,13 +30,10 @@ type (
 		local, remote net.Addr
 		rd            time.Time // read deadline
 		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
-		readBuffer    []byte
 		die           chan struct{}
-		closed        int32
+		is_closed     bool
 		need_update   bool
 		mu            sync.Mutex
-		sendChan      chan []byte
-		readChan      chan []byte
 	}
 )
 
@@ -46,13 +41,10 @@ type (
 func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
-	sess.sendChan = make(chan []byte, 20)
-	sess.readChan = make(chan []byte, 20)
 	sess.local = conn.LocalAddr()
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
-	sess.readBuffer = make([]byte, 2048)
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		n, err := conn.WriteToUDP(buf[:size], remote)
 		if err != nil {
@@ -70,105 +62,86 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	}
 
 	go sess.update_task()
+	if l == nil { // it's a client connection
+		go sess.read_loop()
+	}
 	return sess
 }
 
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	for {
-		if s.IsClosed() {
-			return 0, ERR_BROKEN_PIPE
-		}
+	ticker := time.NewTimer(20 * time.Millisecond)
+	defer ticker.Stop()
+	for range ticker.C {
 		if len(s.sockbuff) > 0 { // copy from buffer
 			n := copy(b, s.sockbuff)
 			s.sockbuff = s.sockbuff[n:]
 			return n, nil
 		}
+
 		s.mu.Lock()
-		if n := s.kcp.PeekSize(); n > 0 { // data arrived
-			if cap(s.sockbuff) < n {
-				s.sockbuff = make([]byte, n)
+		if s.is_closed {
+			s.mu.Unlock()
+			return 0, ERR_BROKEN_PIPE
+		}
+
+		if !s.rd.IsZero() {
+			if time.Now().After(s.rd) { // timeout
+				s.mu.Unlock()
+				return 0, ERR_TIMEOUT
 			}
-			s.sockbuff = s.sockbuff[:n]
-			if s.kcp.Recv(s.sockbuff) > 0 { // if Recv() succeded
-				n := copy(b, s.sockbuff)
-				s.sockbuff = s.sockbuff[n:] // store remaining bytes into sockbuff for next read
+		}
+
+		if n := s.kcp.PeekSize(); n > 0 { // data arrived
+			buf := make([]byte, n)
+			if s.kcp.Recv(buf) > 0 { // if Recv() succeded
+				n := copy(b, buf)
+				s.sockbuff = buf[n:] // store remaining bytes into sockbuff for next read
 				s.mu.Unlock()
 				return n, nil
 			}
 		}
 		s.mu.Unlock()
-		if !s.rd.IsZero() {
-			if time.Now().After(s.rd) { // timeout
-				return 0, ERR_TIMEOUT
-			}
-		}
-		bHave := false
-		if s.l == nil {
-			conn := s.conn
-			for {
-				conn.SetReadDeadline(time.Now().Add(time.Second))
-				if n, err := conn.Read(s.readBuffer); err == nil {
-					data := make([]byte, n)
-					copy(data, s.readBuffer[:n])
-					s.mu.Lock()
-					s.kcp.Input(data)
-					s.need_update = true
-					s.mu.Unlock()
-					bHave = true
-					break
-				} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
-				} else {
-					break
-				}
-			}
-		} else {
-			select {
-			case data := <-s.readChan:
-				if s.IsClosed() || len(data) == 0 {
-					return 0, ERR_BROKEN_PIPE
-				}
-				s.mu.Lock()
-				s.kcp.Input(data)
-				s.need_update = true
-				s.mu.Unlock()
-				bHave = true
-			}
-		}
-		if !bHave {
-			time.Sleep(10 * time.Millisecond)
-		}
+		ticker.Reset(20 * time.Millisecond)
 	}
-
 	return 0, ERR_BROKEN_PIPE
 }
 
 // Write implements the Conn Write method.
 func (s *UDPSession) Write(b []byte) (n int, err error) {
-	if s.IsClosed() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.is_closed {
 		return 0, ERR_BROKEN_PIPE
 	}
-	s.sendChan <- b
-	return len(b), nil
+
+	max := int(s.kcp.mss * 255)
+	for {
+		if len(b) <= max { // in most cases
+			s.kcp.Send(b)
+			break
+		} else {
+			s.kcp.Send(b[:max])
+			b = b[max:]
+		}
+	}
+	s.need_update = true
+	return
 }
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
-	if atomic.CompareAndSwapInt32(&s.closed, 0, 1) {
-		atomic.AddInt32(&s.closed, 1)
-		close(s.die)
-		close(s.sendChan)
-		close(s.readChan)
-		if s.l == nil { // client socket close
-			s.conn.Close()
-		}
-		return nil
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.is_closed {
+		return ERR_BROKEN_PIPE
 	}
-	return ERR_BROKEN_PIPE
-}
-
-func (s *UDPSession) IsClosed() bool {
-	return atomic.LoadInt32(&s.closed) != 0
+	close(s.die)
+	s.is_closed = true
+	if s.l == nil { // client socket close
+		s.conn.Close()
+	}
+	return nil
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
@@ -203,49 +176,63 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 // kcp update, input loop
 func (s *UDPSession) update_task() {
 	trigger := time.NewTicker(10 * time.Millisecond)
-	defer trigger.Stop()
 	var nextupdate uint32
+	defer trigger.Stop()
 	for {
 		select {
 		case <-trigger.C:
-			if s.IsClosed() {
-				return
-			}
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
+			s.mu.Lock()
 			if current >= nextupdate || s.need_update {
-				s.mu.Lock()
 				s.kcp.Update(current)
-				s.mu.Unlock()
 				nextupdate = s.kcp.Check(current)
 			}
 			s.need_update = false
-		case b := <-s.sendChan:
-			if s.IsClosed() {
-				return
-			}
-			s.mu.Lock()
-			for {
-				if len(b) <= MSG_LEN_MAX { // in most cases
-					s.kcp.Send(b)
-					break
-				} else {
-					s.kcp.Send(b[:MSG_LEN_MAX])
-					b = b[MSG_LEN_MAX:]
-				}
-			}
-			s.need_update = true
 			s.mu.Unlock()
+			// deadlink detection may fail fast in high packet lost environment
+			// I just ignore it for the moment
+			/*
+				if s.kcp.state != 0 { // deadlink
+					close(s.die)
+				}
+			*/
 		case <-s.die:
 			if s.l != nil { // has listener
 				s.l.ch_deadlinks <- s.remote
 			}
-			break
+			return
 		}
 	}
 }
 
 func (s *UDPSession) GetConv() uint32 {
 	return s.kcp.conv
+}
+
+// read loop for client session
+func (s *UDPSession) read_loop() {
+	conn := s.conn
+	buffer := make([]byte, 4096)
+	for {
+		conn.SetReadDeadline(time.Now().Add(time.Second))
+		if n, err := conn.Read(buffer); err == nil {
+			data := make([]byte, n)
+			copy(data, buffer[:n])
+			s.mu.Lock()
+			s.kcp.Input(data)
+			s.need_update = true
+			s.mu.Unlock()
+		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
+		} else {
+			return
+		}
+
+		select {
+		case <-s.die:
+			return
+		default:
+		}
+	}
 }
 
 type (
@@ -262,6 +249,8 @@ type (
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
 	conn := l.conn
+	ch_feed := make(chan func(), 65535)
+	go l.feed(ch_feed)
 	buffer := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
@@ -275,20 +264,43 @@ func (l *Listener) monitor() {
 				if len(data) >= IKCP_OVERHEAD {
 					ikcp_decode32u(data, &conv) // conversation id
 					s := newUDPSession(conv, l.mode, l, conn, from)
+					ch_feed <- func() {
+						s.mu.Lock()
+						s.kcp.Input(data)
+						s.need_update = true
+						s.mu.Unlock()
+					}
 					l.sessions[addr] = s
 					l.ch_accepts <- s
 				}
-			}
-			if s != nil {
-				s.readChan <- data
+			} else {
+				ch_feed <- func() {
+					s.mu.Lock()
+					s.kcp.Input(data)
+					s.need_update = true
+					s.mu.Unlock()
+				}
 			}
 		}
+
 		select {
 		case deadlink := <-l.ch_deadlinks: // remove deadlinks
 			delete(l.sessions, deadlink.String())
 		case <-l.die: // listener close
 			return
 		default:
+		}
+	}
+}
+
+// feed data from listener to UDPSessions
+func (l *Listener) feed(ch chan func()) {
+	for {
+		select {
+		case f := <-ch:
+			f()
+		case <-l.die:
+			return
 		}
 	}
 }
