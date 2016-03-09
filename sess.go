@@ -324,10 +324,10 @@ func (l *Listener) feed(ch chan func()) {
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
-func (l *Listener) Accept() (net.Conn, error) {
+func (l *Listener) Accept() (*UDPSession, error) {
 	select {
 	case c := <-l.ch_accepts:
-		return net.Conn(c), nil
+		return c, nil
 	case <-l.die:
 		return nil, errors.New("listener stopped")
 	}
