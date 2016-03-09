@@ -138,10 +138,10 @@ type KCP struct {
 	ts_probe, probe_wait                   uint32
 	dead_link, incr                        uint32
 
-	snd_queue []Segment
-	rcv_queue []Segment
-	snd_buf   []Segment
-	rcv_buf   []Segment
+	snd_queue []*Segment
+	rcv_queue []*Segment
+	snd_buf   []*Segment
+	rcv_buf   []*Segment
 
 	acklist []uint32
 
@@ -211,7 +211,7 @@ func (kcp *KCP) PeekSize() (length int) {
 		return -1
 	}
 
-	seg := &kcp.rcv_queue[0]
+	seg := kcp.rcv_queue[0]
 	if seg.frg == 0 {
 		return len(seg.data)
 	}
@@ -221,7 +221,7 @@ func (kcp *KCP) PeekSize() (length int) {
 	}
 
 	for k := range kcp.rcv_queue {
-		seg := &kcp.rcv_queue[k]
+		seg := kcp.rcv_queue[k]
 		length += len(seg.data)
 		if seg.frg == 0 {
 			break
@@ -253,7 +253,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	// merge fragment
 	count := 0
 	for k := range kcp.rcv_queue {
-		seg := &kcp.rcv_queue[k]
+		seg := kcp.rcv_queue[k]
 		copy(buffer, seg.data)
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
@@ -268,9 +268,9 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	// move available data from rcv_buf -> rcv_queue
 	count = 0
 	for k := range kcp.rcv_buf {
-		seg := &kcp.rcv_buf[k]
+		seg := kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
-			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
+			kcp.rcv_queue = append(kcp.rcv_queue, seg)
 			kcp.rcv_nxt++
 			count++
 		} else {
@@ -319,7 +319,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		seg := kcp.acquireSegment(size)
 		copy(seg.data, buffer[:size])
 		seg.frg = uint32(count - i - 1)
-		kcp.snd_queue = append(kcp.snd_queue, *seg)
+		kcp.snd_queue = append(kcp.snd_queue, seg)
 		buffer = buffer[size:]
 	}
 	return 0
@@ -347,7 +347,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 
 func (kcp *KCP) shrink_buf() {
 	if len(kcp.snd_buf) > 0 {
-		seg := &kcp.snd_buf[0]
+		seg := kcp.snd_buf[0]
 		kcp.snd_una = seg.sn
 	} else {
 		kcp.snd_una = kcp.snd_nxt
@@ -360,7 +360,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	}
 
 	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+		seg := kcp.snd_buf[k]
 		if sn == seg.sn {
 			kcp.snd_buf = append(kcp.snd_buf[:k], kcp.snd_buf[k+1:]...)
 			break
@@ -373,7 +373,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 func (kcp *KCP) parse_una(una uint32) {
 	count := 0
 	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+		seg := kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
 			count++
 			kcp.releaseSegment(seg)
@@ -405,7 +405,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	after_idx := -1
 	repeat := false
 	for i := n; i >= 0; i-- {
-		seg := &kcp.rcv_buf[i]
+		seg := kcp.rcv_buf[i]
 		if seg.sn == sn {
 			repeat = true
 			break
@@ -418,9 +418,9 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 
 	if !repeat {
 		if after_idx == -1 {
-			kcp.rcv_buf = append([]Segment{*newseg}, kcp.rcv_buf...)
+			kcp.rcv_buf = append([]*Segment{newseg}, kcp.rcv_buf...)
 		} else {
-			kcp.rcv_buf = append(kcp.rcv_buf[:after_idx+1], append([]Segment{*newseg}, kcp.rcv_buf[after_idx+1:]...)...)
+			kcp.rcv_buf = append(kcp.rcv_buf[:after_idx+1], append([]*Segment{newseg}, kcp.rcv_buf[after_idx+1:]...)...)
 		}
 	} else {
 		kcp.releaseSegment(newseg)
@@ -429,7 +429,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	// move available data from rcv_buf -> rcv_queue
 	count := 0
 	for k := range kcp.rcv_buf {
-		seg := &kcp.rcv_buf[k]
+		seg := kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
 			kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[k])
 			kcp.rcv_nxt++
@@ -666,7 +666,7 @@ func (kcp *KCP) flush() {
 
 	// flush data segments
 	for k := range kcp.snd_buf {
-		segment := &kcp.snd_buf[k]
+		segment := kcp.snd_buf[k]
 		needsend := false
 		if segment.xmit == 0 {
 			needsend = true
@@ -804,7 +804,7 @@ func (kcp *KCP) Check(current uint32) uint32 {
 	tm_flush = _itimediff(ts_flush, current)
 
 	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+		seg := kcp.snd_buf[k]
 		diff := _itimediff(seg.resendts, current)
 		if diff <= 0 {
 			return current
