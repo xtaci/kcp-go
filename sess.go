@@ -84,6 +84,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			s.sockbuff = s.sockbuff[n:]
 			return n, nil
 		}
+		s.mu.Lock()
 		if n := s.kcp.PeekSize(); n > 0 { // data arrived
 			if cap(s.sockbuff) < n {
 				s.sockbuff = make([]byte, n)
@@ -92,9 +93,11 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			if s.kcp.Recv(s.sockbuff) > 0 { // if Recv() succeded
 				n := copy(b, s.sockbuff)
 				s.sockbuff = s.sockbuff[n:] // store remaining bytes into sockbuff for next read
+				s.mu.Unlock()
 				return n, nil
 			}
 		}
+		s.mu.Unlock()
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				return 0, ERR_TIMEOUT
