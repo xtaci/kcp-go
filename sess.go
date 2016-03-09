@@ -78,11 +78,9 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
 		select {
 		case <-ticker.C:
-			goto CHECK
 		case <-s.event_read:
-			goto CHECK
 		}
-	CHECK:
+
 		s.mu.Lock()
 		if len(s.sockbuff) > 0 { // copy from buffer
 			n := copy(b, s.sockbuff)
