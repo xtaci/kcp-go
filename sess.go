@@ -107,13 +107,12 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 		s.mu.Unlock()
 
+		// wait for read event or ticker
 		select {
 		case <-ticker.C:
 		case <-s.event_read:
 		}
 	}
-
-	return 0, ERR_BROKEN_PIPE
 }
 
 // Write implements the Conn Write method.
