@@ -43,7 +43,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
-	sess.event_read = make(chan bool, 1024)
+	sess.event_read = make(chan bool, 1)
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -72,7 +72,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	ticker := time.NewTicker(20 * time.Millisecond)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
