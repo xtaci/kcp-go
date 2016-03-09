@@ -34,6 +34,7 @@ type (
 		is_closed     bool
 		need_update   bool
 		mu            sync.Mutex
+		event_read    chan bool
 	}
 )
 
@@ -42,6 +43,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
+	sess.event_read = make(chan bool, 1024)
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -72,7 +74,15 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	ticker := time.NewTicker(20 * time.Millisecond)
 	defer ticker.Stop()
-	for range ticker.C {
+
+	for {
+		select {
+		case <-ticker.C:
+			goto CHECK
+		case <-s.event_read:
+			goto CHECK
+		}
+	CHECK:
 		s.mu.Lock()
 		if len(s.sockbuff) > 0 { // copy from buffer
 			n := copy(b, s.sockbuff)
@@ -104,6 +114,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 		s.mu.Unlock()
 	}
+
 	return 0, ERR_BROKEN_PIPE
 }
 
@@ -209,6 +220,13 @@ func (s *UDPSession) GetConv() uint32 {
 	return s.kcp.conv
 }
 
+func (s *UDPSession) read_event() {
+	select {
+	case s.event_read <- true:
+	default:
+	}
+}
+
 // read loop for client session
 func (s *UDPSession) read_loop() {
 	conn := s.conn
@@ -222,6 +240,7 @@ func (s *UDPSession) read_loop() {
 			s.kcp.Input(data)
 			s.need_update = true
 			s.mu.Unlock()
+			s.read_event()
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
 			return
@@ -269,6 +288,7 @@ func (l *Listener) monitor() {
 						s.kcp.Input(data)
 						s.need_update = true
 						s.mu.Unlock()
+						s.read_event()
 					}
 					l.sessions[addr] = s
 					l.ch_accepts <- s
@@ -279,6 +299,7 @@ func (l *Listener) monitor() {
 					s.kcp.Input(data)
 					s.need_update = true
 					s.mu.Unlock()
+					s.read_event()
 				}
 			}
 		}
