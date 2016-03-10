@@ -228,10 +228,8 @@ func (s *UDPSession) read_loop() {
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, err := conn.Read(buffer); err == nil {
-			data := make([]byte, n)
-			copy(data, buffer[:n])
 			s.mu.Lock()
-			s.kcp.Input(data)
+			s.kcp.Input(buffer[:n])
 			s.need_update = true
 			s.mu.Unlock()
 			s.read_event()
