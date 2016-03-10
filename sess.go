@@ -58,9 +58,9 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	case MODE_FAST:
 		sess.kcp.NoDelay(1, 10, 2, 1)
 	case MODE_NORMAL:
-		sess.kcp.NoDelay(0, 10, 0, 1)
+		sess.kcp.NoDelay(0, 20, 0, 1)
 	default:
-		sess.kcp.NoDelay(0, 10, 0, 1)
+		sess.kcp.NoDelay(0, 40, 0, 0)
 	}
 
 	go sess.update_task()

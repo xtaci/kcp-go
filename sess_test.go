@@ -150,7 +150,7 @@ func client3(wg *sync.WaitGroup) {
 }
 
 func TestParallel(t *testing.T) {
-	par := 1000
+	par := 200
 	var wg sync.WaitGroup
 	wg.Add(par)
 	fmt.Println("testing parallel", par, "connections")
@@ -161,7 +161,7 @@ func TestParallel(t *testing.T) {
 }
 
 func client4(wg *sync.WaitGroup) {
-	cli, err := Dial(MODE_FAST, port)
+	cli, err := Dial(MODE_NORMAL, port)
 	if err != nil {
 		panic(err)
 	}
