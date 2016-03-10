@@ -7,7 +7,7 @@
 A port of [KCP](https://github.com/skywind3000/kcp) by [skywind3000](https://github.com/skywind3000) in [golang](https://golang.org/)
 
 # Status(版本状态)
-Beta
+1.0 RC
 
 # Features(特性)
 1. 100% compatible with original C version.(100%兼容ikcp.c)
