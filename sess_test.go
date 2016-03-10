@@ -148,3 +148,32 @@ func client3(wg *sync.WaitGroup) {
 	cli.Close()
 	wg.Done()
 }
+
+func TestParallel(t *testing.T) {
+	par := 1000
+	var wg sync.WaitGroup
+	wg.Add(par)
+	fmt.Println("testing parallel", par, "connections")
+	for i := 0; i < par; i++ {
+		go client4(&wg)
+	}
+	wg.Wait()
+}
+
+func client4(wg *sync.WaitGroup) {
+	cli, err := Dial(MODE_FAST, port)
+	if err != nil {
+		panic(err)
+	}
+	const N = 1000
+	buf := make([]byte, 10)
+	for i := 0; i < N; i++ {
+		msg := fmt.Sprintf("hello%v", i)
+		cli.Write([]byte(msg))
+		if _, err := cli.Read(buf); err != nil {
+			break
+		}
+	}
+	cli.Close()
+	wg.Done()
+}
