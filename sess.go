@@ -72,9 +72,6 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 
 // Read implements the Conn Read method.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-
 	for {
 		s.mu.Lock()
 		if len(s.sockbuff) > 0 { // copy from buffer
@@ -107,10 +104,10 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 		s.mu.Unlock()
 
-		// wait for read event or ticker
+		// wait for read event or timeout
 		select {
-		case <-ticker.C:
 		case <-s.event_read:
+		case <-time.After(1 * time.Second):
 		}
 	}
 }
