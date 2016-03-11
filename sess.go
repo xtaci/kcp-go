@@ -95,7 +95,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 
 		if n := s.kcp.PeekSize(); n > 0 { // data arrived
 			buf := make([]byte, n)
-			if s.kcp.Recv(buf) > 0 { // if Recv() succeded
+			if s.kcp.Recv(buf) > 0 { // if Recv() succeeded
 				n := copy(b, buf)
 				s.sockbuff = buf[n:] // store remaining bytes into sockbuff for next read
 				s.mu.Unlock()
