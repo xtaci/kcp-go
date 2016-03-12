@@ -20,6 +20,8 @@ const (
 	MODE_DEFAULT Mode = iota
 	MODE_NORMAL
 	MODE_FAST
+	BASE_PORT = 20000
+	MAX_PORT  = 65535
 )
 
 type (
@@ -376,9 +378,11 @@ func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	udpconn, err := net.ListenUDP("udp", &net.UDPAddr{})
-	if err != nil {
-		return nil, err
+
+	for {
+		port := BASE_PORT + rand.Int()%(MAX_PORT-BASE_PORT)
+		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
+			return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr), nil
+		}
 	}
-	return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr), nil
 }
