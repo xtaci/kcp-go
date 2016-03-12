@@ -20,9 +20,9 @@ const (
 	MODE_DEFAULT Mode = iota
 	MODE_NORMAL
 	MODE_FAST
-	BASE_PORT = 20000
-	MAX_PORT  = 65535
-	WND_SIZE  = 128
+	BASE_PORT        = 20000
+	MAX_PORT         = 65535
+	DEFAULT_WND_SIZE = 128
 )
 
 type (
@@ -56,7 +56,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 			log.Println(err, n)
 		}
 	})
-	sess.kcp.WndSize(WND_SIZE, WND_SIZE)
+	sess.kcp.WndSize(DEFAULT_WND_SIZE, DEFAULT_WND_SIZE)
 	switch mode {
 	case MODE_FAST:
 		sess.kcp.NoDelay(1, 10, 2, 1)
@@ -124,8 +124,8 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 	}
 
 	max := int(s.kcp.mss * 255)
-	if WND_SIZE < 255 {
-		max = int(s.kcp.mss * WND_SIZE)
+	if s.kcp.snd_wnd < 255 {
+		max = int(s.kcp.mss * s.kcp.snd_wnd)
 	}
 	for {
 		if len(b) <= max { // in most cases
@@ -182,6 +182,13 @@ func (s *UDPSession) SetReadDeadline(t time.Time) error {
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
 func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	return nil
+}
+
+// SetWindowSize set maximum window size
+func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.kcp.WndSize(sndwnd, rcvwnd)
 }
 
 // kcp update, input loop
