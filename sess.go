@@ -22,7 +22,7 @@ const (
 	MODE_FAST
 	BASE_PORT = 20000
 	MAX_PORT  = 65535
-	WND_SIZE  = 128
+	WND_SIZE  = 256
 )
 
 type (
