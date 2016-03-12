@@ -22,6 +22,7 @@ const (
 	MODE_FAST
 	BASE_PORT = 20000
 	MAX_PORT  = 65535
+	WND_SIZE  = 128
 )
 
 type (
@@ -55,7 +56,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 			log.Println(err, n)
 		}
 	})
-	sess.kcp.WndSize(128, 128)
+	sess.kcp.WndSize(WND_SIZE, WND_SIZE)
 	switch mode {
 	case MODE_FAST:
 		sess.kcp.NoDelay(1, 10, 2, 1)
@@ -123,6 +124,9 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 	}
 
 	max := int(s.kcp.mss * 255)
+	if WND_SIZE < 255 {
+		max = int(s.kcp.mss * WND_SIZE)
+	}
 	for {
 		if len(b) <= max { // in most cases
 			s.kcp.Send(b)
