@@ -2,7 +2,6 @@ package kcp
 
 import (
 	"fmt"
-	"net"
 	"sync"
 	"testing"
 	"time"
@@ -29,7 +28,8 @@ func init() {
 	go server()
 }
 
-func handle_client(conn net.Conn) {
+func handle_client(conn *UDPSession) {
+	conn.SetWindowSize(1024, 1024)
 	fmt.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 65536)
 	count := 0
@@ -129,6 +129,7 @@ func client3(wg *sync.WaitGroup) {
 	}
 	msg := make([]byte, 1024*1024)
 	buf := make([]byte, 65536)
+	cli.SetWindowSize(1024, 1024)
 	cli.Write(msg)
 	nrecv := 0
 	for {
