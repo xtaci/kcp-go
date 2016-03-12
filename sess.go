@@ -186,11 +186,11 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 
 // kcp update, input loop
 func (s *UDPSession) update_task() {
-	trigger := time.After(0)
+	trigger := time.NewTicker(10 * time.Millisecond)
 	var nextupdate uint32
 	for {
 		select {
-		case <-trigger:
+		case <-trigger.C:
 			current := uint32(time.Now().UnixNano() / int64(time.Millisecond))
 			s.mu.Lock()
 			if current >= nextupdate || s.need_update {
@@ -199,7 +199,6 @@ func (s *UDPSession) update_task() {
 			}
 			s.need_update = false
 			s.mu.Unlock()
-			trigger = time.After(time.Duration(nextupdate-current) * time.Millisecond)
 			// deadlink detection may fail fast in high packet lost environment
 			// I just ignore it for the moment
 			/*
