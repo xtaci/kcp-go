@@ -1,6 +1,8 @@
 package kcp
 
 import (
+	"crypto/cipher"
+	"crypto/des"
 	"errors"
 	"log"
 	"math/rand"
@@ -29,7 +31,8 @@ type (
 	UDPSession struct {
 		kcp           *KCP         // the core ARQ
 		conn          *net.UDPConn // the underlying UDP socket
-		l             *Listener    // point to server listener if it's a server socket
+		crypter       cipher.Block
+		l             *Listener // point to server listener if it's a server socket
 		local, remote net.Addr
 		rd            time.Time // read deadline
 		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
@@ -42,7 +45,7 @@ type (
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr) *UDPSession {
+func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, crypter cipher.Block) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -50,10 +53,16 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
+	sess.crypter = crypter
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
-		n, err := conn.WriteToUDP(buf[:size], remote)
-		if err != nil {
-			log.Println(err, n)
+		if size >= IKCP_OVERHEAD {
+			if sess.crypter != nil {
+				encryptHeader(sess.crypter, buf)
+			}
+			n, err := conn.WriteToUDP(buf[:size], remote)
+			if err != nil {
+				log.Println(err, n)
+			}
 		}
 	})
 	sess.kcp.WndSize(DEFAULT_WND_SIZE, DEFAULT_WND_SIZE)
@@ -239,7 +248,10 @@ func (s *UDPSession) read_loop() {
 	buffer := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
-		if n, err := conn.Read(buffer); err == nil {
+		if n, err := conn.Read(buffer); err == nil && n >= IKCP_OVERHEAD {
+			if s.crypter != nil {
+				decryptHeader(s.crypter, buffer)
+			}
 			s.mu.Lock()
 			s.kcp.Input(buffer[:n])
 			s.need_update = true
@@ -260,6 +272,7 @@ func (s *UDPSession) read_loop() {
 
 type (
 	Listener struct {
+		crypter      cipher.Block // head crypter
 		conn         *net.UDPConn
 		mode         Mode
 		sessions     map[string]*UDPSession
@@ -277,26 +290,27 @@ func (l *Listener) monitor() {
 	buffer := make([]byte, 4096)
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
-		if n, from, err := conn.ReadFromUDP(buffer); err == nil {
+		if n, from, err := conn.ReadFromUDP(buffer); err == nil && n >= IKCP_OVERHEAD {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
+			if l.crypter != nil { // decrypt header
+				decryptHeader(l.crypter, data)
+			}
 			addr := from.String()
 			s, ok := l.sessions[addr]
 			if !ok {
 				var conv uint32
-				if len(data) >= IKCP_OVERHEAD {
-					ikcp_decode32u(data, &conv) // conversation id
-					s := newUDPSession(conv, l.mode, l, conn, from)
-					ch_feed <- func() {
-						s.mu.Lock()
-						s.kcp.Input(data)
-						s.need_update = true
-						s.mu.Unlock()
-						s.read_event()
-					}
-					l.sessions[addr] = s
-					l.ch_accepts <- s
+				ikcp_decode32u(data, &conv) // conversation id
+				s := newUDPSession(conv, l.mode, l, conn, from, l.crypter)
+				ch_feed <- func() {
+					s.mu.Lock()
+					s.kcp.Input(data)
+					s.need_update = true
+					s.mu.Unlock()
+					s.read_event()
 				}
+				l.sessions[addr] = s
+				l.ch_accepts <- s
 			} else {
 				ch_feed <- func() {
 					s.mu.Lock()
@@ -361,6 +375,15 @@ func (l *Listener) Addr() net.Addr {
 // MODE_NORMAL
 // MODE_FAST
 func Listen(mode Mode, laddr string) (*Listener, error) {
+	return ListenEncrypted(mode, laddr, "")
+}
+
+// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp"
+// mode must be one of:
+// MODE_DEFAULT
+// MODE_NORMAL
+// MODE_FAST
+func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
@@ -377,6 +400,14 @@ func Listen(mode Mode, laddr string) (*Listener, error) {
 	l.ch_accepts = make(chan *UDPSession, 10)
 	l.ch_deadlinks = make(chan net.Addr, 10)
 	l.die = make(chan struct{})
+	if key != "" {
+		pass := make([]byte, des.BlockSize)
+		copy(pass, []byte(key))
+		l.crypter, err = des.NewCipher(pass)
+		if err != nil {
+			log.Println(err)
+		}
+	}
 	go l.monitor()
 	return l, nil
 }
@@ -384,6 +415,12 @@ func Listen(mode Mode, laddr string) (*Listener, error) {
 // Dial connects to the remote address raddr on the network "udp"
 // mode is same as Listen
 func Dial(mode Mode, raddr string) (*UDPSession, error) {
+	return DialEncrypted(mode, raddr, "")
+}
+
+// Dial connects to the remote address raddr on the network "udp"
+// mode is same as Listen
+func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
@@ -392,7 +429,30 @@ func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	for {
 		port := BASE_PORT + rand.Int()%(MAX_PORT-BASE_PORT)
 		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
-			return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr), nil
+			var crypter cipher.Block
+			if key != "" {
+				pass := make([]byte, des.BlockSize)
+				copy(pass, []byte(key))
+				crypter, err = des.NewCipher(pass)
+				if err != nil {
+					log.Println(err)
+				}
+			}
+			sess := newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, crypter)
+			return sess, nil
 		}
 	}
+}
+
+// header encryption, 24byte
+func encryptHeader(crypter cipher.Block, header []byte) {
+	crypter.Encrypt(header, header)
+	crypter.Encrypt(header[8:], header[8:])
+	crypter.Encrypt(header[16:], header[16:])
+}
+
+func decryptHeader(crypter cipher.Block, header []byte) {
+	crypter.Decrypt(header, header)
+	crypter.Decrypt(header[8:], header[8:])
+	crypter.Decrypt(header[16:], header[16:])
 }
