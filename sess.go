@@ -369,20 +369,14 @@ func (l *Listener) Addr() net.Addr {
 	return l.conn.LocalAddr()
 }
 
-// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp"
-// mode must be one of:
-// MODE_DEFAULT
-// MODE_NORMAL
-// MODE_FAST
+// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
+// mode must be one of: MODE_DEFAULT,MODE_NORMAL,MODE_FAST
 func Listen(mode Mode, laddr string) (*Listener, error) {
 	return ListenEncrypted(mode, laddr, "")
 }
 
-// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp" with header encryption
-// mode must be one of:
-// MODE_DEFAULT
-// MODE_NORMAL
-// MODE_FAST
+// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp" with header encryption,
+// mode must be one of: MODE_DEFAULT,MODE_NORMAL,MODE_FAST
 func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
@@ -412,14 +406,12 @@ func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	return l, nil
 }
 
-// Dial connects to the remote address raddr on the network "udp"
-// mode is same as Listen
+// Dial connects to the remote address raddr on the network "udp", mode is same as Listen
 func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	return DialEncrypted(mode, raddr, "")
 }
 
-// Dial connects to the remote address raddr on the network "udp" with header encryption
-// mode is same as Listen
+// Dial connects to the remote address raddr on the network "udp" with header encryption, mode is same as Listen
 func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
