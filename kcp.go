@@ -845,13 +845,11 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int) int {
 
 // set maximum window size: sndwnd=32, rcvwnd=32 by default
 func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
-	if kcp != nil {
-		if sndwnd > 0 {
-			kcp.snd_wnd = uint32(sndwnd)
-		}
-		if rcvwnd > 0 {
-			kcp.rcv_wnd = uint32(rcvwnd)
-		}
+	if sndwnd > 0 {
+		kcp.snd_wnd = uint32(sndwnd)
+	}
+	if rcvwnd > 0 {
+		kcp.rcv_wnd = uint32(rcvwnd)
 	}
 	return 0
 }
