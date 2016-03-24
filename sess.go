@@ -1,8 +1,8 @@
 package kcp
 
 import (
+	"crypto/aes"
 	"crypto/cipher"
-	"crypto/des"
 	"errors"
 	"log"
 	"math/rand"
@@ -14,6 +14,7 @@ import (
 var (
 	ERR_TIMEOUT     = errors.New("i/o timeout")
 	ERR_BROKEN_PIPE = errors.New("broken pipe")
+	IV              = []byte{167, 115, 79, 156, 18, 172, 27, 1, 164, 21, 242, 193, 252, 120, 230, 107}
 )
 
 type Mode int
@@ -25,13 +26,14 @@ const (
 	BASE_PORT        = 20000
 	MAX_PORT         = 65535
 	DEFAULT_WND_SIZE = 128
+	XOR_TABLE_SIZE   = 16384
 )
 
 type (
 	UDPSession struct {
 		kcp           *KCP         // the core ARQ
 		conn          *net.UDPConn // the underlying UDP socket
-		crypter       cipher.Block
+		xor_tbl       []byte
 		l             *Listener // point to server listener if it's a server socket
 		local, remote net.Addr
 		rd            time.Time // read deadline
@@ -45,7 +47,7 @@ type (
 )
 
 //  create a new udp session for client or server
-func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, crypter cipher.Block) *UDPSession {
+func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, xor_tbl []byte) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -53,11 +55,11 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
-	sess.crypter = crypter
+	sess.xor_tbl = xor_tbl
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		if size >= IKCP_OVERHEAD {
-			if sess.crypter != nil {
-				encryptHeader(sess.crypter, buf)
+			if sess.xor_tbl != nil {
+				xor(sess.xor_tbl, buf)
 			}
 			n, err := conn.WriteToUDP(buf[:size], remote)
 			if err != nil {
@@ -249,8 +251,8 @@ func (s *UDPSession) read_loop() {
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, err := conn.Read(buffer); err == nil && n >= IKCP_OVERHEAD {
-			if s.crypter != nil {
-				decryptHeader(s.crypter, buffer)
+			if s.xor_tbl != nil {
+				xor(s.xor_tbl, buffer)
 			}
 			s.mu.Lock()
 			s.kcp.Input(buffer[:n])
@@ -272,7 +274,7 @@ func (s *UDPSession) read_loop() {
 
 type (
 	Listener struct {
-		crypter      cipher.Block // head crypter
+		xor_tbl      []byte
 		conn         *net.UDPConn
 		mode         Mode
 		sessions     map[string]*UDPSession
@@ -293,15 +295,15 @@ func (l *Listener) monitor() {
 		if n, from, err := conn.ReadFromUDP(buffer); err == nil && n >= IKCP_OVERHEAD {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			if l.crypter != nil { // decrypt header
-				decryptHeader(l.crypter, data)
+			if l.xor_tbl != nil { // decrypt
+				xor(l.xor_tbl, data)
 			}
 			addr := from.String()
 			s, ok := l.sessions[addr]
 			if !ok {
 				var conv uint32
 				ikcp_decode32u(data, &conv) // conversation id
-				s := newUDPSession(conv, l.mode, l, conn, from, l.crypter)
+				s := newUDPSession(conv, l.mode, l, conn, from, l.xor_tbl)
 				ch_feed <- func() {
 					s.mu.Lock()
 					s.kcp.Input(data)
@@ -375,7 +377,7 @@ func Listen(mode Mode, laddr string) (*Listener, error) {
 	return ListenEncrypted(mode, laddr, "")
 }
 
-// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp" with header encryption,
+// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // mode must be one of: MODE_DEFAULT,MODE_NORMAL,MODE_FAST
 func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
@@ -395,10 +397,13 @@ func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	l.ch_deadlinks = make(chan net.Addr, 10)
 	l.die = make(chan struct{})
 	if key != "" {
-		pass := make([]byte, des.BlockSize)
+		pass := make([]byte, aes.BlockSize)
 		copy(pass, []byte(key))
-		l.crypter, err = des.NewCipher(pass)
-		if err != nil {
+		if block, err := aes.NewCipher(pass); err == nil {
+			l.xor_tbl = make([]byte, XOR_TABLE_SIZE)
+			stream := cipher.NewOFB(block, IV)
+			stream.XORKeyStream(l.xor_tbl, l.xor_tbl)
+		} else {
 			log.Println(err)
 		}
 	}
@@ -411,7 +416,7 @@ func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	return DialEncrypted(mode, raddr, "")
 }
 
-// Dial connects to the remote address raddr on the network "udp" with header encryption, mode is same as Listen
+// Dial connects to the remote address raddr on the network "udp" with packet encryption, mode is same as Listen
 func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
@@ -421,30 +426,35 @@ func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 	for {
 		port := BASE_PORT + rand.Int()%(MAX_PORT-BASE_PORT)
 		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
-			var crypter cipher.Block
+			var xor_tbl []byte
 			if key != "" {
-				pass := make([]byte, des.BlockSize)
+				pass := make([]byte, aes.BlockSize)
 				copy(pass, []byte(key))
-				crypter, err = des.NewCipher(pass)
-				if err != nil {
+				if block, err := aes.NewCipher(pass); err == nil {
+					xor_tbl = make([]byte, XOR_TABLE_SIZE)
+					stream := cipher.NewOFB(block, IV)
+					stream.XORKeyStream(xor_tbl, xor_tbl)
+				} else {
 					log.Println(err)
 				}
+
 			}
-			sess := newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, crypter)
+			sess := newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, xor_tbl)
 			return sess, nil
 		}
 	}
 }
 
-// header encryption, 24byte
-func encryptHeader(crypter cipher.Block, header []byte) {
-	crypter.Encrypt(header, header)
-	crypter.Encrypt(header[8:], header[8:])
-	crypter.Encrypt(header[16:], header[16:])
-}
+// packet encryption
+func xor(xor_tbl []byte, data []byte) {
+	sz := 0
+	if len(xor_tbl) > len(data) {
+		sz = len(data)
+	} else {
+		sz = len(xor_tbl)
+	}
 
-func decryptHeader(crypter cipher.Block, header []byte) {
-	crypter.Decrypt(header, header)
-	crypter.Decrypt(header[8:], header[8:])
-	crypter.Decrypt(header[16:], header[16:])
+	for i := 0; i < sz; i++ {
+		data[i] = data[i] ^ xor_tbl[i]
+	}
 }
