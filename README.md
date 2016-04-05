@@ -6,6 +6,8 @@
 [4]: https://travis-ci.org/xtaci/kcp-go
 [5]: https://goreportcard.com/badge/xtaci/kcp-go
 [6]: https://goreportcard.com/report/xtaci/kcp-go
+Coverage: http://gocover.io/github.com/xtaci/kcp-go            
+
 A port of [KCP](https://github.com/skywind3000/kcp) by [skywind3000](https://github.com/skywind3000) in [golang](https://golang.org/)
 
 # Status  -- 版本状态
