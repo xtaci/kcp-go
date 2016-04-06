@@ -380,7 +380,7 @@ func Listen(mode Mode, laddr string) (*Listener, error) {
 	return ListenEncrypted(mode, laddr, "")
 }
 
-// Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
+// ListenEncrypted listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // mode must be one of: MODE_DEFAULT,MODE_NORMAL,MODE_FAST
 func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
