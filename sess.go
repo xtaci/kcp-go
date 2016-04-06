@@ -20,16 +20,17 @@ var (
 type Mode int
 
 const (
-	MODE_DEFAULT Mode = iota
-	MODE_NORMAL
-	MODE_FAST
-	BASE_PORT        = 20000
-	MAX_PORT         = 65535
-	DEFAULT_WND_SIZE = 128
+	MODE_DEFAULT     Mode    = iota // default mode , slowest
+	MODE_NORMAL                     // normal kcp mode, faster
+	MODE_FAST                       // fastest mode
+	BASE_PORT        = 20000        // minimum port for listening
+	MAX_PORT         = 65535        // maximum port for listening
+	DEFAULT_WND_SIZE = 128          // default window size, in packet
 	XOR_TABLE_SIZE   = 16384
 )
 
 type (
+	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
 		kcp           *KCP         // the core ARQ
 		conn          *net.UDPConn // the underlying UDP socket
@@ -46,7 +47,7 @@ type (
 	}
 )
 
-//  create a new udp session for client or server
+// newUDPSession create a new udp session for client or server
 func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, xor_tbl []byte) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
@@ -233,6 +234,7 @@ func (s *UDPSession) update_task() {
 	}
 }
 
+// Get conversation id of a session
 func (s *UDPSession) GetConv() uint32 {
 	return s.kcp.conv
 }
@@ -273,6 +275,7 @@ func (s *UDPSession) read_loop() {
 }
 
 type (
+	// Listener defines a server listening for connections
 	Listener struct {
 		xor_tbl      []byte
 		conn         *net.UDPConn
@@ -416,7 +419,7 @@ func Dial(mode Mode, raddr string) (*UDPSession, error) {
 	return DialEncrypted(mode, raddr, "")
 }
 
-// Dial connects to the remote address raddr on the network "udp" with packet encryption, mode is same as Listen
+// DialEncrypted connects to the remote address raddr on the network "udp" with packet encryption, mode is same as Listen
 func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {

@@ -1,4 +1,4 @@
-// Package KCP - A Fast and Reliable ARQ Protocol
+// Package kcp - A Fast and Reliable ARQ Protocol
 package kcp
 
 import "encoding/binary"
@@ -119,14 +119,14 @@ func (seg *Segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
-// Create a KCP Segment
+// NewSegment creates a KCP segment
 func NewSegment(size int) *Segment {
 	seg := new(Segment)
 	seg.data = make([]byte, size)
 	return seg
 }
 
-// KCP Connection Definition
+// KCP defines a single KCP connection
 type KCP struct {
 	conv, mtu, mss, state                  uint32
 	snd_una, snd_nxt, rcv_nxt              uint32
@@ -198,7 +198,7 @@ func (kcp *KCP) PeekSize() (length int) {
 	return
 }
 
-// Recv: user/upper level recv: returns size, returns below zero for EAGAIN
+// Recv is user/upper level recv: returns size, returns below zero for EAGAIN
 func (kcp *KCP) Recv(buffer []byte) (n int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
@@ -255,7 +255,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	return
 }
 
-// Send: user/upper level send, returns below zero for error
+// Send is user/upper level send, returns below zero for error
 func (kcp *KCP) Send(buffer []byte) int {
 	var count int
 	if len(buffer) == 0 {
@@ -404,7 +404,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	kcp.rcv_buf = kcp.rcv_buf[count:]
 }
 
-// Input: when you received a low level packet (eg. UDP packet), call it
+// Input when you received a low level packet (eg. UDP packet), call it
 func (kcp *KCP) Input(data []byte) int {
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
