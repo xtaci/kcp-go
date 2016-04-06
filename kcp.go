@@ -1,4 +1,4 @@
-// KCP - A Fast and Reliable ARQ Protocol
+// Package KCP - A Fast and Reliable ARQ Protocol
 package kcp
 
 import "encoding/binary"
@@ -27,7 +27,7 @@ const (
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 )
 
-// In general, Output is a closure which captures conn and calls conn.Write
+// Output is a closure which captures conn and calls conn.Write
 type Output func(buf []byte, size int)
 
 /* encode 8 bits unsigned int */
@@ -90,7 +90,7 @@ func _itimediff(later, earlier uint32) int32 {
 	return (int32)(later - earlier)
 }
 
-// KCP Segment Definition
+// Segment defines a KCP segment
 type Segment struct {
 	conv     uint32
 	cmd      uint32
@@ -119,6 +119,7 @@ func (seg *Segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
+// Create a KCP Segment
 func NewSegment(size int) *Segment {
 	seg := new(Segment)
 	seg.data = make([]byte, size)
@@ -151,7 +152,7 @@ type KCP struct {
 	output     Output
 }
 
-// create a new kcp control object, 'conv' must equal in two endpoint
+// NewKCP create a new kcp control object, 'conv' must equal in two endpoint
 // from the same connection.
 func NewKCP(conv uint32, output Output) *KCP {
 	kcp := new(KCP)
@@ -172,7 +173,7 @@ func NewKCP(conv uint32, output Output) *KCP {
 	return kcp
 }
 
-// check the size of next message in the recv queue
+// PeekSize checks the size of next message in the recv queue
 func (kcp *KCP) PeekSize() (length int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
@@ -197,7 +198,7 @@ func (kcp *KCP) PeekSize() (length int) {
 	return
 }
 
-// user/upper level recv: returns size, returns below zero for EAGAIN
+// Recv: user/upper level recv: returns size, returns below zero for EAGAIN
 func (kcp *KCP) Recv(buffer []byte) (n int) {
 	if len(kcp.rcv_queue) == 0 {
 		return -1
@@ -254,7 +255,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	return
 }
 
-// user/upper level send, returns below zero for error
+// Send: user/upper level send, returns below zero for error
 func (kcp *KCP) Send(buffer []byte) int {
 	var count int
 	if len(buffer) == 0 {
@@ -403,7 +404,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	kcp.rcv_buf = kcp.rcv_buf[count:]
 }
 
-// when you received a low level packet (eg. UDP packet), call it
+// Input: when you received a low level packet (eg. UDP packet), call it
 func (kcp *KCP) Input(data []byte) int {
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
@@ -709,7 +710,7 @@ func (kcp *KCP) flush() {
 	}
 }
 
-// update state (call it repeatedly, every 10ms-100ms), or you can ask
+// Update updates state (call it repeatedly, every 10ms-100ms), or you can ask
 // ikcp_check when to call it again (without ikcp_input/_send calling).
 // 'current' - current timestamp in millisec.
 func (kcp *KCP) Update(current uint32) {
@@ -738,7 +739,7 @@ func (kcp *KCP) Update(current uint32) {
 	}
 }
 
-// Determine when should you invoke ikcp_update:
+// Check determines when should you invoke ikcp_update:
 // returns when you should invoke ikcp_update in millisec, if there
 // is no ikcp_input/_send calling. you can call ikcp_update in that
 // time, instead of call update repeatly.
@@ -787,7 +788,7 @@ func (kcp *KCP) Check(current uint32) uint32 {
 	return current + minimal
 }
 
-// change MTU size, default is 1400
+// SetMtu changes MTU size, default is 1400
 func (kcp *KCP) SetMtu(mtu int) int {
 	if mtu < 50 || mtu < IKCP_OVERHEAD {
 		return -1
@@ -812,6 +813,7 @@ func (kcp *KCP) Interval(interval int) int {
 	return 0
 }
 
+// NoDelay options
 // fastest: ikcp_nodelay(kcp, 1, 20, 2, 1)
 // nodelay: 0:disable(default), 1:enable
 // interval: internal update timer interval in millisec, default is 100ms
@@ -843,7 +845,7 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int) int {
 	return 0
 }
 
-// set maximum window size: sndwnd=32, rcvwnd=32 by default
+// WndSize sets maximum window size: sndwnd=32, rcvwnd=32 by default
 func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 	if sndwnd > 0 {
 		kcp.snd_wnd = uint32(sndwnd)
@@ -854,7 +856,7 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 	return 0
 }
 
-// get how many packet is waiting to be sent
+// WaitSnd gets how many packet is waiting to be sent
 func (kcp *KCP) WaitSnd() int {
 	return len(kcp.snd_buf) + len(kcp.snd_queue)
 }
