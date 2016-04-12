@@ -135,6 +135,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		return 0, ERR_BROKEN_PIPE
 	}
 
+	n = len(b)
 	max := int(s.kcp.mss * 255)
 	if s.kcp.snd_wnd < 255 {
 		max = int(s.kcp.mss * s.kcp.snd_wnd)
