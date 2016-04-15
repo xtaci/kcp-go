@@ -34,7 +34,7 @@ type (
 	UDPSession struct {
 		kcp           *KCP         // the core ARQ
 		conn          *net.UDPConn // the underlying UDP socket
-		xor_tbl       []byte
+		block         cipher.Block
 		l             *Listener // point to server listener if it's a server socket
 		local, remote net.Addr
 		rd            time.Time // read deadline
@@ -48,7 +48,7 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, xor_tbl []byte) *UDPSession {
+func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, block cipher.Block) *UDPSession {
 	sess := new(UDPSession)
 	sess.die = make(chan struct{})
 	sess.local = conn.LocalAddr()
@@ -56,11 +56,11 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
-	sess.xor_tbl = xor_tbl
+	sess.block = block
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		if size >= IKCP_OVERHEAD {
-			if sess.xor_tbl != nil {
-				xor(sess.xor_tbl, buf)
+			if sess.block != nil {
+				encrypt(sess.block, buf[:size])
 			}
 			n, err := conn.WriteToUDP(buf[:size], remote)
 			if err != nil {
@@ -254,8 +254,8 @@ func (s *UDPSession) read_loop() {
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, err := conn.Read(buffer); err == nil && n >= IKCP_OVERHEAD {
-			if s.xor_tbl != nil {
-				xor(s.xor_tbl, buffer)
+			if s.block != nil {
+				decrypt(s.block, buffer[:n])
 			}
 			s.mu.Lock()
 			s.kcp.Input(buffer[:n])
@@ -278,7 +278,7 @@ func (s *UDPSession) read_loop() {
 type (
 	// Listener defines a server listening for connections
 	Listener struct {
-		xor_tbl      []byte
+		block        cipher.Block
 		conn         *net.UDPConn
 		mode         Mode
 		sessions     map[string]*UDPSession
@@ -299,15 +299,15 @@ func (l *Listener) monitor() {
 		if n, from, err := conn.ReadFromUDP(buffer); err == nil && n >= IKCP_OVERHEAD {
 			data := make([]byte, n)
 			copy(data, buffer[:n])
-			if l.xor_tbl != nil { // decrypt
-				xor(l.xor_tbl, data)
+			if l.block != nil { // decrypt
+				decrypt(l.block, data)
 			}
 			addr := from.String()
 			s, ok := l.sessions[addr]
 			if !ok {
 				var conv uint32
 				ikcp_decode32u(data, &conv) // conversation id
-				s := newUDPSession(conv, l.mode, l, conn, from, l.xor_tbl)
+				s := newUDPSession(conv, l.mode, l, conn, from, l.block)
 				ch_feed <- func() {
 					s.mu.Lock()
 					s.kcp.Input(data)
@@ -404,9 +404,7 @@ func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 		pass := make([]byte, aes.BlockSize)
 		copy(pass, []byte(key))
 		if block, err := aes.NewCipher(pass); err == nil {
-			l.xor_tbl = make([]byte, XOR_TABLE_SIZE)
-			stream := cipher.NewOFB(block, IV)
-			stream.XORKeyStream(l.xor_tbl, l.xor_tbl)
+			l.block = block
 		} else {
 			log.Println(err)
 		}
@@ -430,35 +428,58 @@ func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 	for {
 		port := BASE_PORT + rand.Int()%(MAX_PORT-BASE_PORT)
 		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
-			var xor_tbl []byte
 			if key != "" {
 				pass := make([]byte, aes.BlockSize)
 				copy(pass, []byte(key))
 				if block, err := aes.NewCipher(pass); err == nil {
-					xor_tbl = make([]byte, XOR_TABLE_SIZE)
-					stream := cipher.NewOFB(block, IV)
-					stream.XORKeyStream(xor_tbl, xor_tbl)
+					return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, block), nil
 				} else {
 					log.Println(err)
 				}
-
 			}
-			sess := newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, xor_tbl)
-			return sess, nil
+			return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, nil), nil
 		}
 	}
 }
 
-// packet encryption
-func xor(xor_tbl []byte, data []byte) {
-	sz := 0
-	if len(xor_tbl) > len(data) {
-		sz = len(data)
-	} else {
-		sz = len(xor_tbl)
+// packet encryption with local CFB mode
+func encrypt(block cipher.Block, data []byte) {
+	var tbl [aes.BlockSize]byte
+	copy(tbl[:], IV)
+	block.Encrypt(tbl[:], tbl[:])
+	n := len(data) / aes.BlockSize
+	for i := 0; i < n; i++ {
+		base := i * aes.BlockSize
+		for j := 0; j < aes.BlockSize; j++ {
+			data[base+j] = data[base+j] ^ tbl[j]
+		}
+		copy(tbl[:], data[base:])
+		block.Encrypt(tbl[:], tbl[:])
 	}
 
-	for i := 0; i < sz; i++ {
-		data[i] = data[i] ^ xor_tbl[i]
+	for j := n * aes.BlockSize; j < len(data); j++ {
+		data[j] = data[j] ^ tbl[j%aes.BlockSize]
+	}
+}
+
+func decrypt(block cipher.Block, data []byte) {
+	var tbl [aes.BlockSize]byte
+	copy(tbl[:], IV)
+	block.Encrypt(tbl[:], tbl[:])
+	n := len(data) / aes.BlockSize
+	for i := 0; i < n; i++ {
+		base := i * aes.BlockSize
+		var next [aes.BlockSize]byte
+		copy(next[:], data[base:])
+		block.Encrypt(next[:], next[:])
+
+		for j := 0; j < aes.BlockSize; j++ {
+			data[base+j] = data[base+j] ^ tbl[j]
+		}
+		copy(tbl[:], next[:])
+	}
+
+	for j := n * aes.BlockSize; j < len(data); j++ {
+		data[j] = data[j] ^ tbl[j%aes.BlockSize]
 	}
 }
