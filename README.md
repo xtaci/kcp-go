@@ -19,6 +19,7 @@ A port of [KCP](https://github.com/skywind3000/kcp) by [skywind3000](https://git
 2. Instead of container.List, kcp-go made use of slice based internal queue.   -- slice优化的传输队列 
 3. Provides a basic [session manager](https://github.com/xtaci/kcp-go/blob/master/sess.go), compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener).  -- 接口兼容net.Conn/net.Listener
 4. Seperated KCP code and session manager code, you can use kcp.go only without session manager.  -- 独立的会话管理，不影响kcp核心
+5. Highly secure packet encryption without characteristic. -- 高安全的数据包加密，保障信息安全
 
 # Conventions  -- 实现约定
 1. use UDP for packet delivery.   -- 使用UDP传输数据
