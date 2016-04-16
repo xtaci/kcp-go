@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"encoding/binary"
 	"errors"
 	"log"
 	"math/rand"
@@ -60,6 +61,13 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		if size >= IKCP_OVERHEAD {
 			if sess.block != nil {
+				// add pseudo-random header
+				ext := make([]byte, size+aes.BlockSize)
+				binary.LittleEndian.PutUint64(ext, uint64(time.Now().UnixNano()))
+				binary.LittleEndian.PutUint64(ext[8:], uint64(rand.Int63()))
+				copy(ext[aes.BlockSize:], buf)
+				buf = ext
+				size += aes.BlockSize
 				encrypt(sess.block, buf[:size])
 			}
 			n, err := conn.WriteToUDP(buf[:size], remote)
@@ -258,7 +266,7 @@ func (s *UDPSession) read_loop() {
 				decrypt(s.block, buffer[:n])
 			}
 			s.mu.Lock()
-			s.kcp.Input(buffer[:n])
+			s.kcp.Input(buffer[aes.BlockSize:n])
 			s.need_update = true
 			s.mu.Unlock()
 			s.read_event()
@@ -301,6 +309,7 @@ func (l *Listener) monitor() {
 			copy(data, buffer[:n])
 			if l.block != nil { // decrypt
 				decrypt(l.block, data)
+				data = data[aes.BlockSize:] // remove pseudo-random header
 			}
 			addr := from.String()
 			s, ok := l.sessions[addr]
