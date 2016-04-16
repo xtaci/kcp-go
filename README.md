@@ -10,9 +10,6 @@ Coverage: http://gocover.io/github.com/xtaci/kcp-go
 
 A port of [KCP](https://github.com/skywind3000/kcp) by [skywind3000](https://github.com/skywind3000) in [golang](https://golang.org/)
 
-# Status  -- 版本状态
-1.0 Stable
-
 # Features -- 特性
 1. 100% compatible with original C version.     -- 100%兼容ikcp.c，紧跟上游
 2. Pure golang implementation of KCP in a single file [kcp.go](https://github.com/xtaci/kcp-go/blob/master/kcp.go).  --  纯golang单文件实现，能与上游保持完全兼容，也易于提出来独立使用
