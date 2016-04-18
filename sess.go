@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/sha256"
 	"encoding/binary"
 	"errors"
 	"log"
@@ -410,9 +411,8 @@ func ListenEncrypted(mode Mode, laddr string, key string) (*Listener, error) {
 	l.ch_deadlinks = make(chan net.Addr, 10)
 	l.die = make(chan struct{})
 	if key != "" {
-		pass := make([]byte, aes.BlockSize)
-		copy(pass, []byte(key))
-		if block, err := aes.NewCipher(pass); err == nil {
+		pass := sha256.Sum256([]byte(key))
+		if block, err := aes.NewCipher(pass[:]); err == nil {
 			l.block = block
 		} else {
 			log.Println(err)
@@ -438,9 +438,8 @@ func DialEncrypted(mode Mode, raddr string, key string) (*UDPSession, error) {
 		port := BASE_PORT + rand.Int()%(MAX_PORT-BASE_PORT)
 		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
 			if key != "" {
-				pass := make([]byte, aes.BlockSize)
-				copy(pass, []byte(key))
-				if block, err := aes.NewCipher(pass); err == nil {
+				pass := sha256.Sum256([]byte(key))
+				if block, err := aes.NewCipher(pass[:]); err == nil {
 					return newUDPSession(rand.Uint32(), mode, nil, udpconn, udpaddr, block), nil
 				} else {
 					log.Println(err)
