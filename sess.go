@@ -1,13 +1,13 @@
 package kcp
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/md5"
 	crand "crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
-	"hash/crc32"
 	"io"
 	"log"
 	"math/rand"
@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	HEADER_SIZE = aes.BlockSize + crc32.Size
+	HEADER_SIZE = aes.BlockSize + md5.Size
 )
 
 var (
@@ -73,7 +73,8 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 				// header
 				ext := make([]byte, HEADER_SIZE+size)
 				io.ReadFull(crand.Reader, ext[:aes.BlockSize])
-				binary.LittleEndian.PutUint32(ext[aes.BlockSize:], crc32.ChecksumIEEE(buf))
+				checksum := md5.Sum(buf)
+				copy(ext[aes.BlockSize:], checksum[:])
 				copy(ext[HEADER_SIZE:], buf)
 				buf = ext
 				encrypt(sess.block, buf)
@@ -274,10 +275,11 @@ func (s *UDPSession) read_loop() {
 			if s.block != nil && n >= IKCP_OVERHEAD+HEADER_SIZE {
 				decrypt(s.block, data)
 				data = data[aes.BlockSize:]
-				if binary.LittleEndian.Uint32(data) != crc32.ChecksumIEEE(data[crc32.Size:]) {
+				checksum := md5.Sum(data[md5.Size:])
+				if !bytes.Equal(checksum[:], data[:md5.Size]) {
 					continue
 				}
-				data = data[crc32.Size:]
+				data = data[md5.Size:]
 			}
 			s.mu.Lock()
 			s.kcp.Input(data)
@@ -324,10 +326,11 @@ func (l *Listener) monitor() {
 			if l.block != nil && n >= IKCP_OVERHEAD+HEADER_SIZE {
 				decrypt(l.block, data)
 				data = data[aes.BlockSize:]
-				if binary.LittleEndian.Uint32(data) != crc32.ChecksumIEEE(data[crc32.Size:]) {
+				checksum := md5.Sum(data[md5.Size:])
+				if !bytes.Equal(checksum[:], data[:md5.Size]) {
 					continue
 				}
-				data = data[crc32.Size:]
+				data = data[md5.Size:]
 			}
 
 			addr := from.String()
