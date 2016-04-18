@@ -72,7 +72,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 			if sess.block != nil {
 				// header
 				ext := make([]byte, HEADER_SIZE+size)
-				io.ReadFull(crand.Reader, ext[:aes.BlockSize])
+				io.ReadFull(crand.Reader, ext[:aes.BlockSize]) // OTP
 				checksum := md5.Sum(buf)
 				copy(ext[aes.BlockSize:], checksum[:])
 				copy(ext[HEADER_SIZE:], buf)
