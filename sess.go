@@ -3,14 +3,21 @@ package kcp
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	crand "crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
+	"io"
 	"log"
 	"math/rand"
 	"net"
 	"sync"
 	"time"
+)
+
+const (
+	HEADER_SIZE = aes.BlockSize + crc32.Size
 )
 
 var (
@@ -61,17 +68,17 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 	sess.block = block
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		if size >= IKCP_OVERHEAD {
+			buf = buf[:size]
 			if sess.block != nil {
-				// add pseudo-random header
-				ext := make([]byte, size+aes.BlockSize)
-				binary.LittleEndian.PutUint64(ext, uint64(time.Now().UnixNano()))
-				binary.LittleEndian.PutUint64(ext[8:], uint64(rand.Int63()))
-				copy(ext[aes.BlockSize:], buf)
+				// header
+				ext := make([]byte, HEADER_SIZE+size)
+				io.ReadFull(crand.Reader, ext[:aes.BlockSize])
+				binary.LittleEndian.PutUint32(ext[aes.BlockSize:], crc32.ChecksumIEEE(buf))
+				copy(ext[HEADER_SIZE:], buf)
 				buf = ext
-				size += aes.BlockSize
-				encrypt(sess.block, buf[:size])
+				encrypt(sess.block, buf)
 			}
-			n, err := conn.WriteToUDP(buf[:size], remote)
+			n, err := conn.WriteToUDP(buf, remote)
 			if err != nil {
 				log.Println(err, n)
 			}
@@ -263,11 +270,17 @@ func (s *UDPSession) read_loop() {
 	for {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, err := conn.Read(buffer); err == nil && n >= IKCP_OVERHEAD {
-			if s.block != nil {
-				decrypt(s.block, buffer[:n])
+			data := buffer[:n]
+			if s.block != nil && n >= IKCP_OVERHEAD+HEADER_SIZE {
+				decrypt(s.block, data)
+				data = data[aes.BlockSize:]
+				if binary.LittleEndian.Uint32(data) != crc32.ChecksumIEEE(data[crc32.Size:]) {
+					continue
+				}
+				data = data[crc32.Size:]
 			}
 			s.mu.Lock()
-			s.kcp.Input(buffer[aes.BlockSize:n])
+			s.kcp.Input(data)
 			s.need_update = true
 			s.mu.Unlock()
 			s.read_event()
@@ -307,11 +320,16 @@ func (l *Listener) monitor() {
 		conn.SetReadDeadline(time.Now().Add(time.Second))
 		if n, from, err := conn.ReadFromUDP(buffer); err == nil && n >= IKCP_OVERHEAD {
 			data := make([]byte, n)
-			copy(data, buffer[:n])
-			if l.block != nil { // decrypt
+			copy(data, buffer)
+			if l.block != nil && n >= IKCP_OVERHEAD+HEADER_SIZE {
 				decrypt(l.block, data)
-				data = data[aes.BlockSize:] // remove pseudo-random header
+				data = data[aes.BlockSize:]
+				if binary.LittleEndian.Uint32(data) != crc32.ChecksumIEEE(data[crc32.Size:]) {
+					continue
+				}
+				data = data[crc32.Size:]
 			}
+
 			addr := from.String()
 			s, ok := l.sessions[addr]
 			if !ok {
