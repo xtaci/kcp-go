@@ -18,6 +18,31 @@ A port of [KCP](https://github.com/skywind3000/kcp) by [skywind3000](https://git
 4. Seperated KCP code and session manager code, you can use kcp.go only without session manager.  -- 独立的会话管理，不影响kcp核心
 5. Highly secure packet level encryption(AES-256-CFB-MD5-OTP) without signature. -- 高安全的数据包加密，保障公民信息安全
 
+# Encryption Process Diagram -- 加密流程图
+```
+                rand.Reader
+                     +
+                     |
+                     |                 +---------+   PSK   +-----------+
+                  +--v--+              |                               |
+                  | OTP |              |                               |
+                  +--+--+              |                               |
+                     |                 |                               |
++--------+       +---v----+       +----+----+                     +----+----+        +--------+
+|        |       |        |       |         |                     |         |        |        |
+|  DATA  +-------> PACKET +-------->AES+CFB +----> Internet +------>AES+CFB +--------> PACKET |
+|        |       |        |       | ENCRYPT |                     | DECRYPT |        |        |
++---+----+       +---^----+       |         |                     |         |        +---+----+
+    |                |            +---------+                     +---------+            |
+    |           +----+----+                                                              |
+    |           |         |                                                          +---v----+       +--------+
+    +----------->   MD5   |                                                          |        |       |        |
+                |         |                                                          |  MD5   +------->  DATA  |
+                +---------+                                                          | VERIFY |       |        |
+                                                                                     |        |       +--------+
+                                                                                     +--------+
+```
+
 # Conventions  -- 实现约定
 1. use UDP for packet delivery.   -- 使用UDP传输数据
 2. ```conv uint32``` in session manager is a random number initiated by client.   -- conv由客户端产生随机数，用于区分会话
