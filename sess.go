@@ -221,6 +221,13 @@ func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
 	s.kcp.WndSize(sndwnd, rcvwnd)
 }
 
+// SetMtu sets the maximum transmission unit
+func (s *UDPSession) SetMtu(mtu int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.kcp.SetMtu(mtu)
+}
+
 // kcp update, input loop
 func (s *UDPSession) update_task() {
 	trigger := time.NewTicker(10 * time.Millisecond)
