@@ -408,7 +408,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 func (kcp *KCP) Input(data []byte) int {
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
-		return 0
+		return -1
 	}
 
 	for {

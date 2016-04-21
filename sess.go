@@ -269,6 +269,16 @@ func (s *UDPSession) read_event() {
 	}
 }
 
+func (s *UDPSession) kcp_input(data []byte) {
+	s.mu.Lock()
+	n := s.kcp.Input(data)
+	s.need_update = true
+	s.mu.Unlock()
+	if n == 0 {
+		s.read_event()
+	}
+}
+
 // read loop for client session
 func (s *UDPSession) read_loop() {
 	conn := s.conn
@@ -286,11 +296,7 @@ func (s *UDPSession) read_loop() {
 				}
 				data = data[md5.Size:]
 			}
-			s.mu.Lock()
-			s.kcp.Input(data)
-			s.need_update = true
-			s.mu.Unlock()
-			s.read_event()
+			s.kcp_input(data)
 		} else if err, ok := err.(*net.OpError); ok && err.Timeout() {
 		} else {
 			return
@@ -345,21 +351,13 @@ func (l *Listener) monitor() {
 				ikcp_decode32u(data, &conv) // conversation id
 				s := newUDPSession(conv, l.mode, l, conn, from, l.block)
 				ch_feed <- func() {
-					s.mu.Lock()
-					s.kcp.Input(data)
-					s.need_update = true
-					s.mu.Unlock()
-					s.read_event()
+					s.kcp_input(data)
 				}
 				l.sessions[addr] = s
 				l.ch_accepts <- s
 			} else {
 				ch_feed <- func() {
-					s.mu.Lock()
-					s.kcp.Input(data)
-					s.need_update = true
-					s.mu.Unlock()
-					s.read_event()
+					s.kcp_input(data)
 				}
 			}
 		}
