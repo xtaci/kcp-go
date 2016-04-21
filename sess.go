@@ -16,10 +16,6 @@ import (
 	"time"
 )
 
-const (
-	HEADER_SIZE = aes.BlockSize + md5.Size
-)
-
 var (
 	ERR_TIMEOUT     = errors.New("i/o timeout")
 	ERR_BROKEN_PIPE = errors.New("broken pipe")
@@ -36,6 +32,7 @@ const (
 	MAX_PORT         = 65535        // maximum port for listening
 	DEFAULT_WND_SIZE = 128          // default window size, in packet
 	XOR_TABLE_SIZE   = 16384
+	HEADER_SIZE      = aes.BlockSize + md5.Size
 )
 
 type (
@@ -86,6 +83,7 @@ func newUDPSession(conv uint32, mode Mode, l *Listener, conn *net.UDPConn, remot
 		}
 	})
 	sess.kcp.WndSize(DEFAULT_WND_SIZE, DEFAULT_WND_SIZE)
+	sess.kcp.SetMtu(IKCP_MTU_DEF - HEADER_SIZE)
 	switch mode {
 	case MODE_FAST:
 		sess.kcp.NoDelay(1, 10, 2, 1)
