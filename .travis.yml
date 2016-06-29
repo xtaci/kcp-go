@@ -1,0 +1,12 @@
+language: go
+go:
+    - 1.6
+before_install:
+    - go get github.com/mattn/goveralls
+    - go get golang.org/x/tools/cmd/cover
+install:
+    - go get github.com/xtaci/kcp-go
+before_script:
+script:
+    - $HOME/gopath/bin/goveralls -service=travis-ci
+    - exit 0
