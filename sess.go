@@ -302,11 +302,11 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
 }
 
-// SetDSCP sets the DSCP field of IP header
-func (s *UDPSession) SetDSCP(tos int) {
+// SetDSCP sets the 6bit DSCP field of IP header
+func (s *UDPSession) SetDSCP(dscp int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := ipv4.NewConn(s.conn).SetTOS(tos << 2); err != nil {
+	if err := ipv4.NewConn(s.conn).SetTOS(dscp << 2); err != nil {
 		log.Println("dscp:", err)
 	}
 }
