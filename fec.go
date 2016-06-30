@@ -19,7 +19,7 @@ const (
 type (
 	// FEC defines forward error correction for packets
 	FEC struct {
-		rx           []fecPacket // ordered rx queue
+		rx           []fecPacket // ordered receive queue
 		rxlimit      int         // queue size limit
 		dataShards   int
 		parityShards int
@@ -73,7 +73,7 @@ func (fec *FEC) decode(data []byte) fecPacket {
 	pkt.seqid = binary.LittleEndian.Uint32(data)
 	pkt.flag = binary.LittleEndian.Uint16(data[4:])
 	pkt.ts = currentMs()
-	// alloc & copy
+	// allocate memory & copy
 	buf := fec.xmitBuf.Get().([]byte)
 	xorBytes(buf, buf, buf)
 	copy(buf, data[6:])
@@ -213,7 +213,7 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 		}
 	}
 
-	// keep rxlen
+	// keep rxlimit
 	if len(fec.rx) > fec.rxlimit {
 		fec.xmitBuf.Put(fec.rx[0].data) // free
 		fec.rx = fec.rx[1:]
