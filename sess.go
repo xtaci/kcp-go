@@ -4,7 +4,6 @@ import (
 	crand "crypto/rand"
 	"encoding/binary"
 	"errors"
-	"hash/crc32"
 	"io"
 	"log"
 	"math/rand"
@@ -12,6 +11,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/klauspost/crc32"
 
 	"golang.org/x/net/ipv4"
 )
