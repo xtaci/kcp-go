@@ -7,7 +7,15 @@ import (
 )
 
 func TestFECOther(t *testing.T) {
-	t.Log(newFEC(128, 0, 1))
+	if newFEC(128, 0, 1) != nil {
+		t.Fail()
+	}
+	if newFEC(128, 0, 0) != nil {
+		t.Fail()
+	}
+	if newFEC(1, 10, 10) != nil {
+		t.Fail()
+	}
 }
 
 func TestFECNoLost(t *testing.T) {
@@ -38,6 +46,8 @@ func TestFECNoLost(t *testing.T) {
 
 func TestFECLost1(t *testing.T) {
 	fec := newFEC(128, 10, 3)
+	println(fec.paws, fec.paws%13)
+	fec.next = fec.paws - 13
 	for i := 0; i < 100; i += 10 {
 		data := makefecgroup(i, 13)
 		for k := range data[fec.dataShards] {

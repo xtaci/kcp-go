@@ -92,6 +92,8 @@ func client(wg *sync.WaitGroup) {
 		panic(err)
 	}
 	cli.SetNoDelay(1, 20, 2, 1)
+	cli.SetACKNoDelay(true)
+	cli.SetDeadline(time.Now().Add(time.Minute))
 	const N = 100
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
