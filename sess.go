@@ -243,9 +243,7 @@ func (s *UDPSession) Close() error {
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
-func (s *UDPSession) LocalAddr() net.Addr {
-	return s.local
-}
+func (s *UDPSession) LocalAddr() net.Addr { return s.local }
 
 // RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
 func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }

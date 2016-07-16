@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/sha1"
 	"fmt"
+	"log"
 	"sync"
 	"testing"
 	"time"
@@ -39,6 +40,7 @@ func server() {
 	if err != nil {
 		panic(err)
 	}
+	log.Println("listening on:", l.Addr())
 	for {
 		s, err := l.Accept()
 		if err != nil {
@@ -56,6 +58,11 @@ func init() {
 func handle_client(conn *UDPSession) {
 	conn.SetWindowSize(1024, 1024)
 	conn.SetNoDelay(1, 20, 2, 1)
+	conn.SetDSCP(46)
+	conn.SetMtu(1450)
+	conn.SetACKNoDelay(false)
+	conn.SetReadDeadline(time.Now().Add(time.Hour))
+	conn.SetWriteDeadline(time.Now().Add(time.Hour))
 	fmt.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 65536)
 	count := 0
@@ -153,6 +160,8 @@ func client3(wg *sync.WaitGroup) {
 	if err != nil {
 		panic(err)
 	}
+	log.Println("remote:", cli.RemoteAddr(), "local:", cli.LocalAddr())
+	log.Println("conv:", cli.GetConv())
 	cli.SetNoDelay(1, 20, 2, 1)
 	start := time.Now()
 
