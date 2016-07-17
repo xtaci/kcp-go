@@ -76,6 +76,47 @@ func handle_client(conn *UDPSession) {
 	}
 }
 
+func TestTimeout(t *testing.T) {
+	cli, err := DialTest()
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, 10)
+
+	//timeout
+	cli.SetDeadline(time.Now().Add(time.Second))
+	<-time.After(2 * time.Second)
+	n, err := cli.Read(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	n, err = cli.Write(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+}
+
+func TestClose(t *testing.T) {
+	cli, err := DialTest()
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, 10)
+
+	cli.Close()
+	if cli.Close() == nil {
+		t.Fail()
+	}
+	n, err := cli.Write(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	n, err = cli.Read(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+}
+
 func TestSendRecv(t *testing.T) {
 	var wg sync.WaitGroup
 	const par = 1
