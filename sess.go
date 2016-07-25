@@ -287,6 +287,17 @@ func (s *UDPSession) SetMtu(mtu int) {
 	s.kcp.SetMtu(mtu - s.headerSize)
 }
 
+// SetStreamMode toggles the stream mode on/off
+func (s *UDPSession) SetStreamMode(enable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if enable {
+		s.kcp.stream = 1
+	} else {
+		s.kcp.stream = 0
+	}
+}
+
 // SetACKNoDelay changes ack flush option, set true to flush ack immediately,
 func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 	s.mu.Lock()

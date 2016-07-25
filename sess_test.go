@@ -56,6 +56,7 @@ func init() {
 }
 
 func handle_client(conn *UDPSession) {
+	conn.SetStreamMode(true)
 	conn.SetWindowSize(1024, 1024)
 	conn.SetNoDelay(1, 20, 2, 1)
 	conn.SetDSCP(46)
@@ -132,6 +133,7 @@ func client(wg *sync.WaitGroup) {
 	if err != nil {
 		panic(err)
 	}
+	cli.SetStreamMode(true)
 	cli.SetNoDelay(1, 20, 2, 1)
 	cli.SetACKNoDelay(true)
 	cli.SetDeadline(time.Now().Add(time.Minute))

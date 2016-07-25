@@ -148,11 +148,11 @@ type KCP struct {
 
 	acklist []uint32
 
-	buffer     []byte
-	fastresend int32
-	nocwnd     int32
-	logmask    int32
-	output     Output
+	buffer         []byte
+	fastresend     int32
+	nocwnd, stream int32
+	logmask        int32
+	output         Output
 }
 
 // NewKCP create a new kcp control object, 'conv' must equal in two endpoint
@@ -288,7 +288,11 @@ func (kcp *KCP) Send(buffer []byte) int {
 		}
 		seg := NewSegment(size)
 		copy(seg.data, buffer[:size])
-		seg.frg = uint32(count - i - 1)
+		if kcp.stream == 0 {
+			seg.frg = uint32(count - i - 1)
+		} else {
+			seg.frg = 0
+		}
 		kcp.snd_queue = append(kcp.snd_queue, *seg)
 		buffer = buffer[size:]
 	}
