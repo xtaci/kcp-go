@@ -288,9 +288,9 @@ func (kcp *KCP) Send(buffer []byte) int {
 		}
 		seg := NewSegment(size)
 		copy(seg.data, buffer[:size])
-		if kcp.stream == 0 {
+		if kcp.stream == 0 { // message mode
 			seg.frg = uint32(count - i - 1)
-		} else {
+		} else { // stream mode
 			seg.frg = 0
 		}
 		kcp.snd_queue = append(kcp.snd_queue, *seg)
