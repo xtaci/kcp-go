@@ -265,6 +265,31 @@ func (kcp *KCP) Send(buffer []byte) int {
 		return -1
 	}
 
+	// append to previous segment in streaming mode (if possible)
+	if kcp.stream != 0 {
+		n := len(kcp.snd_queue)
+		if n > 0 {
+			old := &kcp.snd_queue[n-1]
+			if len(old.data) < int(kcp.mss) {
+				capacity := int(kcp.mss) - len(old.data)
+				extend := capacity
+				if len(buffer) < capacity {
+					extend = len(buffer)
+				}
+				seg := NewSegment(len(old.data) + extend)
+				seg.frg = 0
+				copy(seg.data, old.data)
+				copy(seg.data[len(old.data):], buffer)
+				buffer = buffer[extend:]
+				kcp.snd_queue[n-1] = *seg
+			}
+		}
+
+		if len(buffer) == 0 {
+			return 0
+		}
+	}
+
 	if len(buffer) < int(kcp.mss) {
 		count = 1
 	} else {
