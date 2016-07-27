@@ -12,7 +12,7 @@
 [9]: https://img.shields.io/badge/KCP-Powered-blue.svg
 [10]: https://github.com/skywind3000/kcp
 
-***A full-featured reliable UDP communication library for various usage***
+***A full-featured reliable UDP communication library.***
 
 # ***Features*** :zap:
 1. Optimized for ***Real-Time Strategy Game***.
