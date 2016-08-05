@@ -7,8 +7,8 @@
 [4]: https://travis-ci.org/xtaci/kcp-go
 [5]: https://goreportcard.com/badge/github.com/xtaci/kcp-go
 [6]: https://goreportcard.com/report/github.com/xtaci/kcp-go
-[7]: https://coveralls.io/repos/github/xtaci/kcp-go/badge.svg?branch=master
-[8]: https://coveralls.io/github/xtaci/kcp-go?branch=master
+[7]: https://codecov.io/gh/xtaci/kcp-go/branch/master/graph/badge.svg
+[8]: https://codecov.io/gh/xtaci/kcp-go
 [9]: https://img.shields.io/badge/KCP-Powered-blue.svg
 [10]: https://github.com/skywind3000/kcp
 
