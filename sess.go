@@ -24,16 +24,17 @@ var (
 )
 
 const (
-	basePort        = 20000 // minimum port for listening
-	maxPort         = 65535 // maximum port for listening
-	defaultWndSize  = 128   // default window size, in packet
-	nonceSize       = 16    // magic number
-	crcSize         = 4     // 4bytes packet checksum
-	cryptHeaderSize = nonceSize + crcSize
-	connTimeout     = 60 * time.Second
-	mtuLimit        = 2048
-	txQueueLimit    = 8192
-	rxFecLimit      = 2048
+	basePort            = 20000 // minimum port for listening
+	maxPort             = 65535 // maximum port for listening
+	defaultWndSize      = 128   // default window size, in packet
+	nonceSize           = 16    // magic number
+	crcSize             = 4     // 4bytes packet checksum
+	cryptHeaderSize     = nonceSize + crcSize
+	connTimeout         = 60 * time.Second
+	mtuLimit            = 2048
+	txQueueLimit        = 8192
+	rxFecLimit          = 2048
+	defaultPingInterval = 10 * time.Second
 )
 
 type (
@@ -58,6 +59,7 @@ type (
 		chUDPOutput   chan []byte
 		headerSize    int
 		ackNoDelay    bool
+		pingInterval  time.Duration
 		xmitBuf       sync.Pool
 	}
 )
@@ -73,6 +75,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.remote = remote
 	sess.conn = conn
+	sess.pingInterval = defaultPingInterval
 	sess.l = l
 	sess.block = block
 	sess.fec = newFEC(rxFecLimit, dataShards, parityShards)
@@ -340,6 +343,13 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	return nil
 }
 
+// SetPing changes parameters to per-connection ping interval; 0 to disable, default to 10s
+func (s *UDPSession) SetPing(interval int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pingInterval = time.Duration(interval) * time.Second
+}
+
 func (s *UDPSession) outputTask() {
 	// offset pre-compute
 	fecOffset := 0
@@ -360,8 +370,10 @@ func (s *UDPSession) outputTask() {
 	}
 
 	// ping
+	var lastPing time.Time
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+
 	for {
 		select {
 		case ext := <-s.chUDPOutput:
@@ -429,13 +441,21 @@ func (s *UDPSession) outputTask() {
 			xorBytes(ext, ext, ext)
 			s.xmitBuf.Put(ext)
 		case <-ticker.C: // only for NAT keep purpose
-			sz := rng.Intn(IKCP_MTU_DEF - s.headerSize - IKCP_OVERHEAD)
-			sz += s.headerSize + IKCP_OVERHEAD
-			ping := make([]byte, sz)
-			io.ReadFull(crand.Reader, ping)
-			n, err := s.conn.WriteTo(ping, s.remote)
-			if err != nil {
-				log.Println(err, n)
+			if len(s.chUDPOutput) == 0 {
+				s.mu.Lock()
+				interval := s.pingInterval
+				s.mu.Unlock()
+				if interval > 0 && time.Now().After(lastPing.Add(interval)) {
+					sz := rng.Intn(IKCP_MTU_DEF - s.headerSize - IKCP_OVERHEAD)
+					sz += s.headerSize + IKCP_OVERHEAD
+					ping := make([]byte, sz)
+					io.ReadFull(crand.Reader, ping)
+					n, err := s.conn.WriteTo(ping, s.remote)
+					if err != nil {
+						log.Println(err, n)
+					}
+					lastPing = time.Now()
+				}
 			}
 		case <-s.die:
 			return
