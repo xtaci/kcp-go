@@ -234,11 +234,11 @@ func (s *UDPSession) Close() error {
 	}
 	close(s.die)
 	s.isClosed = true
+	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	if s.l == nil { // client socket close
-		s.conn.Close()
+		return s.conn.Close()
 	}
 
-	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	return nil
 }
 
