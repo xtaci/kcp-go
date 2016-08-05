@@ -1,12 +1,15 @@
 language: go
 go:
     - tip
+
 before_install:
-    - go get github.com/mattn/goveralls
-    - go get golang.org/x/tools/cmd/cover
+    - go get -t -v ./...
+
 install:
     - go get github.com/xtaci/kcp-go
-before_script:
+
 script:
-    - $HOME/gopath/bin/goveralls -service=travis-ci
-    - exit 0
+    - go test -coverprofile=coverage.txt -covermode=atomic
+
+after_success:
+    - bash <(curl -s https://codecov.io/bash)
