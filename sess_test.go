@@ -40,6 +40,9 @@ func server() {
 	if err != nil {
 		panic(err)
 	}
+
+	l.SetReadBuffer(16 * 1024 * 1024)
+	l.SetWriteBuffer(16 * 1024 * 1024)
 	log.Println("listening on:", l.Addr())
 	for {
 		s, err := l.Accept()
@@ -47,6 +50,9 @@ func server() {
 			panic(err)
 		}
 
+		// coverage test
+		s.SetReadBuffer(16 * 1024 * 1024)
+		s.SetWriteBuffer(16 * 1024 * 1024)
 		go handle_client(s)
 	}
 }
@@ -133,6 +139,8 @@ func client(wg *sync.WaitGroup) {
 	if err != nil {
 		panic(err)
 	}
+	cli.SetReadBuffer(16 * 1024 * 1024)
+	cli.SetWriteBuffer(16 * 1024 * 1024)
 	cli.SetStreamMode(true)
 	cli.SetNoDelay(1, 20, 2, 1)
 	cli.SetACKNoDelay(true)

@@ -34,7 +34,6 @@ const (
 	mtuLimit        = 2048
 	txQueueLimit    = 8192
 	rxFecLimit      = 2048
-	soBuffer        = 16777216
 )
 
 type (
@@ -319,6 +318,26 @@ func (s *UDPSession) SetDSCP(dscp int) {
 	if err := ipv4.NewConn(s.conn).SetTOS(dscp << 2); err != nil {
 		log.Println("dscp:", err)
 	}
+}
+
+// SetReadBuffer sets the socket read buffer
+func (s *UDPSession) SetReadBuffer(bytes int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.l == nil {
+		return s.conn.SetReadBuffer(bytes)
+	}
+	return nil
+}
+
+// SetWriteBuffer sets the socket write buffer
+func (s *UDPSession) SetWriteBuffer(bytes int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.l == nil {
+		return s.conn.SetWriteBuffer(bytes)
+	}
+	return nil
 }
 
 func (s *UDPSession) outputTask() {
@@ -682,6 +701,16 @@ func (l *Listener) receiver(ch chan packet) {
 	}
 }
 
+// SetReadBuffer sets the socket read buffer for the Listener
+func (l *Listener) SetReadBuffer(bytes int) error {
+	return l.conn.SetReadBuffer(bytes)
+}
+
+// SetWriteBuffer sets the socket write buffer for the Listener
+func (l *Listener) SetWriteBuffer(bytes int) error {
+	return l.conn.SetWriteBuffer(bytes)
+}
+
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
 func (l *Listener) Accept() (*UDPSession, error) {
 	select {
@@ -694,12 +723,8 @@ func (l *Listener) Accept() (*UDPSession, error) {
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() error {
-	if err := l.conn.Close(); err == nil {
-		close(l.die)
-		return nil
-	} else {
-		return err
-	}
+	close(l.die)
+	return l.conn.Close()
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
@@ -723,8 +748,6 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 	if err != nil {
 		return nil, err
 	}
-	conn.SetReadBuffer(soBuffer)
-	conn.SetWriteBuffer(soBuffer)
 
 	l := new(Listener)
 	l.conn = conn
@@ -766,8 +789,6 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	for {
 		port := basePort + rng.Int()%(maxPort-basePort)
 		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
-			udpconn.SetReadBuffer(soBuffer)
-			udpconn.SetWriteBuffer(soBuffer)
 			return newUDPSession(rng.Uint32(), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
 		}
 	}
