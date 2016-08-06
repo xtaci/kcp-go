@@ -88,16 +88,13 @@ func (fec *FEC) markData(data []byte) {
 	binary.LittleEndian.PutUint32(data, fec.next)
 	binary.LittleEndian.PutUint16(data[4:], typeData)
 	fec.next++
-	if fec.next >= fec.paws {
-		fec.next = 0
-	}
 }
 
 func (fec *FEC) markFEC(data []byte) {
 	binary.LittleEndian.PutUint32(data, fec.next)
 	binary.LittleEndian.PutUint16(data[4:], typeFEC)
 	fec.next++
-	if fec.next >= fec.paws {
+	if fec.next >= fec.paws { // paws would only occurs in markFEC
 		fec.next = 0
 	}
 }
@@ -226,7 +223,7 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 
 func (fec *FEC) calcECC(data [][]byte, offset, maxlen int) (ecc [][]byte) {
 	if len(data) != fec.shardSize {
-		println("mismatch", len(data), fec.shardSize)
+		log.Println("mismatch", len(data), fec.shardSize)
 		return nil
 	}
 	shards := make([][]byte, fec.shardSize)
