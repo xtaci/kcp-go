@@ -53,7 +53,7 @@ func server() {
 		// coverage test
 		s.SetReadBuffer(16 * 1024 * 1024)
 		s.SetWriteBuffer(16 * 1024 * 1024)
-		s.SetPing(1)
+		s.SetKeepAlive(1)
 		go handleClient(s)
 	}
 }

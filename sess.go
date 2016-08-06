@@ -24,43 +24,43 @@ var (
 )
 
 const (
-	basePort            = 20000 // minimum port for listening
-	maxPort             = 65535 // maximum port for listening
-	defaultWndSize      = 128   // default window size, in packet
-	nonceSize           = 16    // magic number
-	crcSize             = 4     // 4bytes packet checksum
-	cryptHeaderSize     = nonceSize + crcSize
-	connTimeout         = 60 * time.Second
-	mtuLimit            = 2048
-	txQueueLimit        = 8192
-	rxFecLimit          = 2048
-	defaultPingInterval = 10 * time.Second
+	basePort                 = 20000 // minimum port for listening
+	maxPort                  = 65535 // maximum port for listening
+	defaultWndSize           = 128   // default window size, in packet
+	nonceSize                = 16    // magic number
+	crcSize                  = 4     // 4bytes packet checksum
+	cryptHeaderSize          = nonceSize + crcSize
+	connTimeout              = 60 * time.Second
+	mtuLimit                 = 2048
+	txQueueLimit             = 8192
+	rxFecLimit               = 2048
+	defaultKeepAliveInterval = 10 * time.Second
 )
 
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
-		kcp           *KCP         // the core ARQ
-		fec           *FEC         // forward error correction
-		conn          *net.UDPConn // the underlying UDP socket
-		block         BlockCrypt
-		needUpdate    bool
-		l             *Listener // point to server listener if it's a server socket
-		local, remote net.Addr
-		rd            time.Time // read deadline
-		wd            time.Time // write deadline
-		sockbuff      []byte    // kcp receiving is based on packet, I turn it into stream
-		die           chan struct{}
-		isClosed      bool
-		mu            sync.Mutex
-		chReadEvent   chan struct{}
-		chWriteEvent  chan struct{}
-		chTicker      chan time.Time
-		chUDPOutput   chan []byte
-		headerSize    int
-		ackNoDelay    bool
-		pingInterval  time.Duration
-		xmitBuf       sync.Pool
+		kcp               *KCP         // the core ARQ
+		fec               *FEC         // forward error correction
+		conn              *net.UDPConn // the underlying UDP socket
+		block             BlockCrypt
+		needUpdate        bool
+		l                 *Listener // point to server listener if it's a server socket
+		local, remote     net.Addr
+		rd                time.Time // read deadline
+		wd                time.Time // write deadline
+		sockbuff          []byte    // kcp receiving is based on packet, I turn it into stream
+		die               chan struct{}
+		isClosed          bool
+		mu                sync.Mutex
+		chReadEvent       chan struct{}
+		chWriteEvent      chan struct{}
+		chTicker          chan time.Time
+		chUDPOutput       chan []byte
+		headerSize        int
+		ackNoDelay        bool
+		keepAliveInterval time.Duration
+		xmitBuf           sync.Pool
 	}
 )
 
@@ -75,7 +75,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.remote = remote
 	sess.conn = conn
-	sess.pingInterval = defaultPingInterval
+	sess.keepAliveInterval = defaultKeepAliveInterval
 	sess.l = l
 	sess.block = block
 	sess.fec = newFEC(rxFecLimit, dataShards, parityShards)
@@ -343,11 +343,11 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	return nil
 }
 
-// SetPing changes parameters to per-connection ping interval; 0 to disable, default to 10s
-func (s *UDPSession) SetPing(interval int) {
+// SetKeepAlive changes per-connection NAT keepalive interval; 0 to disable, default to 10s
+func (s *UDPSession) SetKeepAlive(interval int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.pingInterval = time.Duration(interval) * time.Second
+	s.keepAliveInterval = time.Duration(interval) * time.Second
 }
 
 func (s *UDPSession) outputTask() {
@@ -369,7 +369,7 @@ func (s *UDPSession) outputTask() {
 		}
 	}
 
-	// ping
+	// keepalive
 	var lastPing time.Time
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -440,10 +440,10 @@ func (s *UDPSession) outputTask() {
 			}
 			xorBytes(ext, ext, ext)
 			s.xmitBuf.Put(ext)
-		case <-ticker.C: // only for NAT keep purpose
+		case <-ticker.C: // NAT keep-alive
 			if len(s.chUDPOutput) == 0 {
 				s.mu.Lock()
-				interval := s.pingInterval
+				interval := s.keepAliveInterval
 				s.mu.Unlock()
 				if interval > 0 && time.Now().After(lastPing.Add(interval)) {
 					sz := rng.Intn(IKCP_MTU_DEF - s.headerSize - IKCP_OVERHEAD)
