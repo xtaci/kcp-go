@@ -176,7 +176,7 @@ func test(mode int) {
 		kcp2.NoDelay(1, 10, 2, 1)
 	}
 
-	var buffer []byte = make([]byte, 2000)
+	buffer := make([]byte, 2000)
 	var hr int32
 
 	ts1 := iclock()
