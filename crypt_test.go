@@ -7,8 +7,8 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-const crypt_key = "testkey"
-const crypt_salt = "kcptest"
+const cryptKey = "testkey"
+const cryptSalt = "kcptest"
 
 func TestAES(t *testing.T) {
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)

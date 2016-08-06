@@ -148,7 +148,7 @@ func test(mode int) {
 	slap := current + 20
 	index := 0
 	next := 0
-	var sumrtt uint32 = 0
+	var sumrtt uint32
 	count := 0
 	maxrtt := 0
 

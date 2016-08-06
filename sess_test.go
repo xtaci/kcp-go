@@ -54,7 +54,7 @@ func server() {
 		s.SetReadBuffer(16 * 1024 * 1024)
 		s.SetWriteBuffer(16 * 1024 * 1024)
 		s.SetPing(1)
-		go handle_client(s)
+		go handleClient(s)
 	}
 }
 
@@ -62,7 +62,7 @@ func init() {
 	go server()
 }
 
-func handle_client(conn *UDPSession) {
+func handleClient(conn *UDPSession) {
 	conn.SetStreamMode(true)
 	conn.SetWindowSize(1024, 1024)
 	conn.SetNoDelay(1, 20, 2, 1)
