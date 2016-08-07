@@ -14,6 +14,7 @@ const (
 	typeData           = 0xf1
 	typeFEC            = 0xf2
 	fecExpire          = 30000 // 30s
+	rxFecLimit         = 2048
 )
 
 type (
@@ -41,16 +42,16 @@ type (
 	}
 )
 
-func newFEC(rxlimit, dataShards, parityShards int) *FEC {
+func NewFEC(dataShards, parityShards int) *FEC {
 	if dataShards <= 0 || parityShards <= 0 {
 		return nil
 	}
-	if rxlimit < dataShards+parityShards {
+	if rxFecLimit < dataShards+parityShards {
 		return nil
 	}
 
 	fec := new(FEC)
-	fec.rxlimit = rxlimit
+	fec.rxlimit = rxFecLimit
 	fec.dataShards = dataShards
 	fec.parityShards = parityShards
 	fec.shardSize = dataShards + parityShards
