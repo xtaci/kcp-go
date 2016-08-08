@@ -138,20 +138,21 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 		fec.rx[insertIdx] = pkt
 	}
 
+	// shard range for current packet
 	shardBegin := pkt.seqid - pkt.seqid%uint32(fec.shardSize)
 	shardEnd := shardBegin + uint32(fec.shardSize) - 1
 
+	// search range of slice indices
 	searchBegin := insertIdx - (fec.shardSize - 1)
 	if searchBegin < 0 {
 		searchBegin = 0
 	}
-
 	searchEnd := insertIdx + (fec.shardSize - 1)
 	if searchEnd >= len(fec.rx) {
 		searchEnd = len(fec.rx) - 1
 	}
 
-	if len(fec.rx) >= fec.dataShards && shardBegin < shardEnd {
+	if searchEnd > searchBegin && searchEnd-searchBegin+1 >= fec.dataShards {
 		numshard := 0
 		numDataShard := 0
 		first := -1
