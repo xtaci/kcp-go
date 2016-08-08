@@ -43,6 +43,7 @@ func server() {
 
 	l.SetReadBuffer(16 * 1024 * 1024)
 	l.SetWriteBuffer(16 * 1024 * 1024)
+	l.SetDSCP(46)
 	log.Println("listening on:", l.Addr())
 	for {
 		s, err := l.Accept()

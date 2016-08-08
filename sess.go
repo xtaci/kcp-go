@@ -318,7 +318,10 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return ipv4.NewConn(s.conn).SetTOS(dscp << 2)
+	if s.l == nil {
+		return ipv4.NewConn(s.conn).SetTOS(dscp << 2)
+	}
+	return nil
 }
 
 // SetReadBuffer sets the socket read buffer
@@ -727,6 +730,11 @@ func (l *Listener) SetReadBuffer(bytes int) error {
 // SetWriteBuffer sets the socket write buffer for the Listener
 func (l *Listener) SetWriteBuffer(bytes int) error {
 	return l.conn.SetWriteBuffer(bytes)
+}
+
+// SetDSCP sets the 6bit DSCP field of IP header
+func (l *Listener) SetDSCP(dscp int) error {
+	return ipv4.NewConn(l.conn).SetTOS(dscp << 2)
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
