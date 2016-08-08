@@ -364,7 +364,9 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if sn == seg.sn {
-			kcp.snd_buf = append(kcp.snd_buf[:k], kcp.snd_buf[k+1:]...)
+			copy(kcp.snd_buf[k:], kcp.snd_buf[k+1:])
+			kcp.snd_buf[len(kcp.snd_buf)-1] = Segment{}
+			kcp.snd_buf = kcp.snd_buf[:len(kcp.snd_buf)-1]
 			break
 		}
 		if _itimediff(sn, seg.sn) < 0 {
