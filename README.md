@@ -18,8 +18,8 @@
 1. Optimized for ***Real-Time Strategy Game***.
 1. Compatible with [skywind3000's](https://github.com/skywind3000) C version with modifications.
 1. ***Cache friendly*** and ***Memory optimized*** design in golang.
-1. A [session manager](https://github.com/xtaci/kcp-go/blob/master/sess.go) has been provided with compatibility with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener).
-1.[FEC(Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) Support with [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction)
+1. A [session manager](https://github.com/xtaci/kcp-go/blob/master/sess.go) has been provided, compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener).
+1. [FEC(Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) Support with [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction)
 1. Packet level encryption support with [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm).
 
 # ***Conventions*** :zap:
