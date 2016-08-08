@@ -315,12 +315,10 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header
-func (s *UDPSession) SetDSCP(dscp int) {
+func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := ipv4.NewConn(s.conn).SetTOS(dscp << 2); err != nil {
-		log.Println("dscp:", err)
-	}
+	return ipv4.NewConn(s.conn).SetTOS(dscp << 2)
 }
 
 // SetReadBuffer sets the socket read buffer
