@@ -23,9 +23,9 @@
 1. Support packet level encryption with [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm).
 
 # ***Conventions*** :zap:
-1. [UDP](https://en.wikipedia.org/wiki/User_Datagram_Protocol)  for packet delivery.
-2. ```conv uint32``` in session manager is a ***random number*** initiated by client.
-3. KCP doesn't define control messages like SYN/ACK/FIN/RST in TCP, a real world example is to use some ***multiplexing*** protocol over session, such as [yamux](https://github.com/hashicorp/yamux), see [kcptun](https://github.com/xtaci/kcptun) for example.
+1. Packet delivery via [UDP](https://en.wikipedia.org/wiki/User_Datagram_Protocol).
+2. Conversation Id: ```conv uint32``` in session manager is a ***random number*** initiated by client.
+3. KCP doesn't define session control messages like SYN/FIN/RST in TCP, a real world example is to use some ***multiplexing*** protocol over session, such as [yamux](https://github.com/hashicorp/yamux), see [kcptun](https://github.com/xtaci/kcptun) for example.
 
 # ***Examples*** :zap:
 Client:   [full demo](https://github.com/xtaci/kcptun/blob/master/client/main.go#L231)
