@@ -141,12 +141,12 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 	shardBegin := pkt.seqid - pkt.seqid%uint32(fec.shardSize)
 	shardEnd := shardBegin + uint32(fec.shardSize) - 1
 
-	searchBegin := insertIdx - fec.shardSize
+	searchBegin := insertIdx - (fec.shardSize - 1)
 	if searchBegin < 0 {
 		searchBegin = 0
 	}
 
-	searchEnd := insertIdx + fec.shardSize
+	searchEnd := insertIdx + (fec.shardSize - 1)
 	if searchEnd >= len(fec.rx) {
 		searchEnd = len(fec.rx) - 1
 	}
