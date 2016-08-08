@@ -314,7 +314,7 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
 }
 
-// SetDSCP sets the 6bit DSCP field of IP header
+// SetDSCP sets the 6bit DSCP field of IP header, no effect if it's accepted from Listener
 func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -324,7 +324,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	return nil
 }
 
-// SetReadBuffer sets the socket read buffer
+// SetReadBuffer sets the socket read buffer, no effect if it's accepted from Listener
 func (s *UDPSession) SetReadBuffer(bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -334,7 +334,7 @@ func (s *UDPSession) SetReadBuffer(bytes int) error {
 	return nil
 }
 
-// SetWriteBuffer sets the socket write buffer
+// SetWriteBuffer sets the socket write buffer, no effect if it's accepted from Listener
 func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
