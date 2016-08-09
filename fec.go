@@ -190,6 +190,9 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 				fec.xmitBuf.Put(fec.rx[i].data)
 			}
 			copy(fec.rx[first:], fec.rx[first+numshard:])
+			for i := 0; i < numshard; i++ { // dereference
+				fec.rx[len(fec.rx)-1-i] = fecPacket{}
+			}
 			fec.rx = fec.rx[:len(fec.rx)-numshard]
 		} else if numshard >= fec.dataShards { // recoverable
 			for k := range shards {
@@ -211,6 +214,9 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 				fec.xmitBuf.Put(fec.rx[i].data)
 			}
 			copy(fec.rx[first:], fec.rx[first+numshard:])
+			for i := 0; i < numshard; i++ { // dereference
+				fec.rx[len(fec.rx)-1-i] = fecPacket{}
+			}
 			fec.rx = fec.rx[:len(fec.rx)-numshard]
 		}
 	}
@@ -218,6 +224,7 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 	// keep rxlimit
 	if len(fec.rx) > fec.rxlimit {
 		fec.xmitBuf.Put(fec.rx[0].data) // free
+		fec.rx[0].data = nil
 		fec.rx = fec.rx[1:]
 	}
 	return
