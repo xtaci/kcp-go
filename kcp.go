@@ -464,7 +464,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 }
 
 // Input when you received a low level packet (eg. UDP packet), call it
-func (kcp *KCP) Input(data []byte) int {
+func (kcp *KCP) Input(data []byte, update_ack bool) int {
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
 		return -1
@@ -507,7 +507,7 @@ func (kcp *KCP) Input(data []byte) int {
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			if _itimediff(kcp.current, ts) >= 0 {
+			if update_ack && _itimediff(kcp.current, ts) >= 0 {
 				kcp.update_ack(_itimediff(kcp.current, ts))
 			}
 			kcp.parse_ack(sn)
