@@ -14,7 +14,8 @@
 [11]: https://img.shields.io/badge/license-MIT-blue.svg
 [12]: LICENSE
 
-***A full-featured reliable UDP communication library.***
+***A full-featured reliable UDP communication library.***      
+[![Claude_Shannon](shannon.jpg)](https://en.wikipedia.org/wiki/Claude_Shannon)
 
 # ***Features*** :zap:
 1. Optimized for ***Real-Time Strategy Game***.
