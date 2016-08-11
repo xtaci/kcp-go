@@ -564,7 +564,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 func (s *UDPSession) receiver(ch chan []byte) {
 	for {
 		data := s.xmitBuf.Get().([]byte)[:mtuLimit]
-		if n, _, err := s.conn.ReadFromUDP(data); err == nil && n >= s.headerSize+IKCP_OVERHEAD {
+		if n, err := s.conn.Read(data); err == nil && n >= s.headerSize+IKCP_OVERHEAD {
 			select {
 			case ch <- data[:n]:
 			case <-s.die:
