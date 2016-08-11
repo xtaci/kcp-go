@@ -823,8 +823,9 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 
 	if udpconn, err := net.DialUDP("udp", nil, udpaddr); err == nil {
 		return newUDPSession(rng.Uint32(), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
+	} else {
+		return nil, err
 	}
-	return nil, err
 }
 
 func currentMs() uint32 {
