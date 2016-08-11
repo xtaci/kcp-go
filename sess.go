@@ -351,6 +351,14 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 	s.keepAliveInterval = time.Duration(interval) * time.Second
 }
 
+// writeTo wraps write method for client & listener
+func (s *UDPSession) writeTo(b []byte, addr net.Addr) (int, error) {
+	if s.l == nil {
+		return s.conn.Write(b)
+	}
+	return s.conn.WriteTo(b, addr)
+}
+
 func (s *UDPSession) outputTask() {
 	// offset pre-compute
 	fecOffset := 0
@@ -421,7 +429,7 @@ func (s *UDPSession) outputTask() {
 			}
 
 			//if rand.Intn(100) < 80 {
-			n, err := s.conn.WriteTo(ext, s.remote)
+			n, err := s.writeTo(ext, s.remote)
 			if err != nil {
 				log.Println(err, n)
 			}
@@ -431,7 +439,7 @@ func (s *UDPSession) outputTask() {
 
 			if ecc != nil {
 				for k := range ecc {
-					n, err := s.conn.WriteTo(ecc[k], s.remote)
+					n, err := s.writeTo(ecc[k], s.remote)
 					if err != nil {
 						log.Println(err, n)
 					}
@@ -451,7 +459,7 @@ func (s *UDPSession) outputTask() {
 					sz += s.headerSize + IKCP_OVERHEAD
 					ping := make([]byte, sz)
 					io.ReadFull(crand.Reader, ping)
-					n, err := s.conn.WriteTo(ping, s.remote)
+					n, err := s.writeTo(ping, s.remote)
 					if err != nil {
 						log.Println(err, n)
 					}
@@ -812,12 +820,11 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	if err != nil {
 		return nil, err
 	}
-	for {
-		port := basePort + rng.Int()%(maxPort-basePort)
-		if udpconn, err := net.ListenUDP("udp", &net.UDPAddr{Port: port}); err == nil {
-			return newUDPSession(rng.Uint32(), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
-		}
+
+	if udpconn, err := net.DialUDP("udp", nil, udpaddr); err == nil {
+		return newUDPSession(rng.Uint32(), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
 	}
+	return nil, err
 }
 
 func currentMs() uint32 {
