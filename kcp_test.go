@@ -182,7 +182,7 @@ func test(mode int) {
 	ts1 := iclock()
 
 	for {
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(1 * time.Millisecond)
 		current = uint32(iclock())
 		kcp1.Update(uint32(iclock()))
 		kcp2.Update(uint32(iclock()))
