@@ -292,7 +292,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		}
 	}
 
-	if len(buffer) < int(kcp.mss) {
+	if len(buffer) <= int(kcp.mss) {
 		count = 1
 	} else {
 		count = (len(buffer) + int(kcp.mss) - 1) / int(kcp.mss)
@@ -748,7 +748,7 @@ func (kcp *KCP) flush() {
 			size := len(buffer) - len(ptr)
 			need := IKCP_OVERHEAD + len(segment.data)
 
-			if size+need >= int(kcp.mtu) {
+			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
 				ptr = buffer
 			}
