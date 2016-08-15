@@ -547,7 +547,7 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 		data = data[length:]
 	}
 
-	if flag != 0 {
+	if flag != 0 && update_ack {
 		kcp.parse_fastack(maxack)
 	}
 
