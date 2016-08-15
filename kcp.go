@@ -2,6 +2,7 @@
 package kcp
 
 import (
+	"container/heap"
 	"encoding/binary"
 	"sync/atomic"
 )
@@ -146,13 +147,32 @@ type KCP struct {
 	snd_buf   []Segment
 	rcv_buf   []Segment
 
-	acklist []uint32
+	acklist ACKList
 
 	buffer         []byte
 	fastresend     int32
 	nocwnd, stream int32
 	logmask        int32
 	output         Output
+}
+
+type ACK struct {
+	sn uint32
+	ts uint32
+}
+
+type ACKList []ACK
+
+func (l ACKList) Len() int            { return len(l) }
+func (l ACKList) Less(i, j int) bool  { return l[i].sn < l[j].sn }
+func (l ACKList) Swap(i, j int)       { l[i], l[j] = l[j], l[i] }
+func (l *ACKList) Push(x interface{}) { *l = append(*l, x.(ACK)) }
+func (l *ACKList) Pop() interface{} {
+	old := *l
+	n := len(old)
+	x := old[n-1]
+	*l = old[0 : n-1]
+	return x
 }
 
 // NewKCP create a new kcp control object, 'conv' must equal in two endpoint
@@ -406,11 +426,7 @@ func (kcp *KCP) parse_una(una uint32) {
 
 // ack append
 func (kcp *KCP) ack_push(sn, ts uint32) {
-	kcp.acklist = append(kcp.acklist, sn, ts)
-}
-
-func (kcp *KCP) ack_get(p int) (sn, ts uint32) {
-	return kcp.acklist[p*2+0], kcp.acklist[p*2+1]
+	heap.Push(&kcp.acklist, ACK{sn, ts})
 }
 
 func (kcp *KCP) parse_data(newseg *Segment) {
@@ -600,15 +616,15 @@ func (kcp *KCP) flush() {
 	seg.una = kcp.rcv_nxt
 
 	// flush acknowledges
-	count := len(kcp.acklist) / 2
 	ptr := buffer
-	for i := 0; i < count; i++ {
+	for kcp.acklist.Len() > 0 {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
 		}
-		seg.sn, seg.ts = kcp.ack_get(i)
+		ack := heap.Pop(&kcp.acklist).(ACK)
+		seg.sn, seg.ts = ack.sn, ack.ts
 		ptr = seg.encode(ptr)
 	}
 	kcp.acklist = nil
@@ -666,7 +682,7 @@ func (kcp *KCP) flush() {
 		cwnd = _imin_(kcp.cwnd, cwnd)
 	}
 
-	count = 0
+	count := 0
 	for k := range kcp.snd_queue {
 		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) >= 0 {
 			break
