@@ -561,14 +561,11 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if n := s.kcp.PeekSize(); n > 0 {
 		s.notifyReadEvent()
 	}
-	s.mu.Unlock()
-
 	if s.ackNoDelay {
-		s.mu.Lock()
 		s.kcp.current = currentMs()
 		s.kcp.flush()
-		s.mu.Unlock()
 	}
+	s.mu.Unlock()
 	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
 }
 
