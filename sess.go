@@ -44,7 +44,6 @@ type (
 		fec               *FEC         // forward error correction
 		conn              *net.UDPConn // the underlying UDP socket
 		block             BlockCrypt
-		needUpdate        bool
 		l                 *Listener // point to server listener if it's a server socket
 		local, remote     net.Addr
 		rd                time.Time // read deadline
@@ -483,20 +482,15 @@ func (s *UDPSession) updateTask() {
 		tc = s.chTicker
 	}
 
-	var nextupdate uint32
 	for {
 		select {
 		case <-tc:
 			s.mu.Lock()
 			current := currentMs()
-			if current >= nextupdate || s.needUpdate {
-				s.kcp.Update(current)
-				nextupdate = s.kcp.Check(current)
-			}
+			s.kcp.Update(current)
 			if s.kcp.WaitSnd() < 2*int(s.kcp.snd_wnd) {
 				s.notifyWriteEvent()
 			}
-			s.needUpdate = false
 			s.mu.Unlock()
 		case <-s.die:
 			if s.l != nil { // has listener
@@ -528,7 +522,6 @@ func (s *UDPSession) notifyWriteEvent() {
 
 func (s *UDPSession) kcpInput(data []byte) {
 	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
-	s.mu.Lock()
 	if s.fec != nil {
 		f := s.fec.decode(data)
 		if f.flag == typeData || f.flag == typeFEC {
@@ -540,8 +533,10 @@ func (s *UDPSession) kcpInput(data []byte) {
 				for k := range recovers {
 					sz := binary.LittleEndian.Uint16(recovers[k])
 					if int(sz) <= len(recovers[k]) && sz >= 2 {
+						s.mu.Lock()
 						s.kcp.current = currentMs()
 						s.kcp.Input(recovers[k][2:sz], false)
+						s.mu.Unlock()
 						atomic.AddUint64(&DefaultSnmp.FECRecovered, 1)
 					} else {
 						atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
@@ -550,23 +545,26 @@ func (s *UDPSession) kcpInput(data []byte) {
 			}
 		}
 		if f.flag == typeData {
+			s.mu.Lock()
 			s.kcp.current = currentMs()
 			s.kcp.Input(data[fecHeaderSizePlus2:], true)
+			s.mu.Unlock()
 		}
-
 	} else {
+		s.mu.Lock()
 		s.kcp.current = currentMs()
 		s.kcp.Input(data, true)
+		s.mu.Unlock()
 	}
 
+	s.notifyReadEvent()
+
 	if s.ackNoDelay {
+		s.mu.Lock()
 		s.kcp.current = currentMs()
 		s.kcp.flush()
-	} else {
-		s.needUpdate = true
+		s.mu.Unlock()
 	}
-	s.mu.Unlock()
-	s.notifyReadEvent()
 }
 
 func (s *UDPSession) receiver(ch chan []byte) {
