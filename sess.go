@@ -521,7 +521,6 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) kcpInput(data []byte) {
-	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
 	if s.fec != nil {
 		f := s.fec.decode(data)
 		if f.flag == typeData || f.flag == typeFEC {
@@ -565,6 +564,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		s.kcp.flush()
 		s.mu.Unlock()
 	}
+	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
 }
 
 func (s *UDPSession) receiver(ch chan []byte) {
