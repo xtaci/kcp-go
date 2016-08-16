@@ -556,7 +556,12 @@ func (s *UDPSession) kcpInput(data []byte) {
 		s.mu.Unlock()
 	}
 
-	s.notifyReadEvent()
+	// notify reader
+	s.mu.Lock()
+	if n := s.kcp.PeekSize(); n > 0 {
+		s.notifyReadEvent()
+	}
+	s.mu.Unlock()
 
 	if s.ackNoDelay {
 		s.mu.Lock()
