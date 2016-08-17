@@ -521,6 +521,7 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) kcpInput(data []byte) {
+	current := currentMs()
 	if s.fec != nil {
 		f := s.fec.decode(data)
 		if f.flag == typeData || f.flag == typeFEC {
@@ -529,29 +530,29 @@ func (s *UDPSession) kcpInput(data []byte) {
 			}
 
 			if recovers := s.fec.input(f); recovers != nil {
+				s.mu.Lock()
+				s.kcp.current = current
 				for k := range recovers {
 					sz := binary.LittleEndian.Uint16(recovers[k])
 					if int(sz) <= len(recovers[k]) && sz >= 2 {
-						s.mu.Lock()
-						s.kcp.current = currentMs()
 						s.kcp.Input(recovers[k][2:sz], false)
-						s.mu.Unlock()
-						atomic.AddUint64(&DefaultSnmp.FECRecovered, 1)
 					} else {
 						atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
 					}
 				}
+				s.mu.Unlock()
+				atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovers)))
 			}
 		}
 		if f.flag == typeData {
 			s.mu.Lock()
-			s.kcp.current = currentMs()
+			s.kcp.current = current
 			s.kcp.Input(data[fecHeaderSizePlus2:], true)
 			s.mu.Unlock()
 		}
 	} else {
 		s.mu.Lock()
-		s.kcp.current = currentMs()
+		s.kcp.current = current
 		s.kcp.Input(data, true)
 		s.mu.Unlock()
 	}
@@ -562,7 +563,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		s.notifyReadEvent()
 	}
 	if s.ackNoDelay {
-		s.kcp.current = currentMs()
+		s.kcp.current = current
 		s.kcp.flush()
 	}
 	s.mu.Unlock()
