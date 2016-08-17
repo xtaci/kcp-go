@@ -18,7 +18,7 @@
 [![Claude_Shannon](shannon.jpg)](https://en.wikipedia.org/wiki/Claude_Shannon)
 
 # ***Frame Format*** :zap:
-![Frame Format](frame.png)
+# <img src="frame.png" alt="Frame Format" height="160px" /> 
 
 # ***Features*** :zap:
 1. Optimized for ***Real-Time Strategy Game***.
