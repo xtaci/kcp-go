@@ -24,11 +24,9 @@ var (
 )
 
 const (
-	basePort                 = 20000 // minimum port for listening
-	maxPort                  = 65535 // maximum port for listening
-	defaultWndSize           = 128   // default window size, in packet
-	nonceSize                = 16    // magic number
-	crcSize                  = 4     // 4bytes packet checksum
+	defaultWndSize           = 128 // default window size, in packet
+	nonceSize                = 16  // magic number
+	crcSize                  = 4   // 4bytes packet checksum
 	cryptHeaderSize          = nonceSize + crcSize
 	connTimeout              = 60 * time.Second
 	mtuLimit                 = 2048
@@ -822,11 +820,11 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, err
 	}
 
-	if udpconn, err := net.DialUDP("udp", nil, udpaddr); err == nil {
-		return newUDPSession(rng.Uint32(), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
-	} else {
+	udpconn, err := net.DialUDP("udp", nil, udpaddr)
+	if err != nil {
 		return nil, err
 	}
+	return newUDPSession(rng.Uint32(), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
 }
 
 func currentMs() uint32 {
