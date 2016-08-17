@@ -43,7 +43,7 @@ type (
 		conn              *net.UDPConn // the underlying UDP socket
 		block             BlockCrypt
 		l                 *Listener // point to server listener if it's a server socket
-		local, remote     net.Addr
+		local, remote     *net.UDPAddr
 		rd                time.Time // read deadline
 		wd                time.Time // write deadline
 		sockbuff          []byte    // kcp receiving is based on packet, I turn it into stream
@@ -67,7 +67,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chTicker = make(chan time.Time, 1)
 	sess.chUDPOutput = make(chan []byte, txQueueLimit)
 	sess.die = make(chan struct{})
-	sess.local = conn.LocalAddr()
+	sess.local = conn.LocalAddr().(*net.UDPAddr)
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.remote = remote
@@ -626,9 +626,9 @@ type (
 		dataShards, parityShards int
 		fec                      *FEC // for fec init test
 		conn                     *net.UDPConn
-		sessions                 map[string]*UDPSession
+		sessions                 map[[18]byte]*UDPSession
 		chAccepts                chan *UDPSession
-		chDeadlinks              chan net.Addr
+		chDeadlinks              chan *net.UDPAddr
 		headerSize               int
 		die                      chan struct{}
 		rxbuf                    sync.Pool
@@ -668,7 +668,7 @@ func (l *Listener) monitor() {
 			}
 
 			if dataValid {
-				addr := from.String()
+				addr := addr2array(from)
 				s, ok := l.sessions[addr]
 				if !ok { // new session
 					var conv uint32
@@ -701,7 +701,7 @@ func (l *Listener) monitor() {
 			xorBytes(raw, raw, raw)
 			l.rxbuf.Put(raw)
 		case deadlink := <-l.chDeadlinks:
-			delete(l.sessions, deadlink.String())
+			delete(l.sessions, addr2array(deadlink))
 		case <-l.die:
 			return
 		case <-ticker.C:
@@ -784,9 +784,9 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 
 	l := new(Listener)
 	l.conn = conn
-	l.sessions = make(map[string]*UDPSession)
+	l.sessions = make(map[[18]byte]*UDPSession)
 	l.chAccepts = make(chan *UDPSession, 1024)
-	l.chDeadlinks = make(chan net.Addr, 1024)
+	l.chDeadlinks = make(chan *net.UDPAddr, 1024)
 	l.die = make(chan struct{})
 	l.dataShards = dataShards
 	l.parityShards = parityShards
@@ -829,4 +829,11 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 
 func currentMs() uint32 {
 	return uint32(time.Now().UnixNano() / int64(time.Millisecond))
+}
+
+func addr2array(addr *net.UDPAddr) [18]byte {
+	var a [18]byte
+	binary.LittleEndian.PutUint16(a[:], uint16(addr.Port))
+	copy(a[2:], addr.IP)
+	return a
 }
