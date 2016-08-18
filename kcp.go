@@ -738,14 +738,14 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			lost = true
 			lostSegs++
-		} else if segment.fastack >= resent {
+		} else if segment.fastack >= resent && segment.xmit == 1 {
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
 			segment.resendts = current + segment.rto
 			change++
 			fastRetransSegs++
-		} else if segment.fastack > 0 && nque == 0 {
+		} else if segment.fastack > 0 && nque == 0 && segment.xmit == 1 {
 			// early retransmit
 			needsend = true
 			segment.xmit++
