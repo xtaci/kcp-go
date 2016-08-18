@@ -735,7 +735,6 @@ func (kcp *KCP) flush() {
 			} else {
 				segment.rto += kcp.rx_rto / 2
 			}
-			segment.rto = _imin_(segment.rto, 4*kcp.rx_rto)
 			segment.resendts = current + segment.rto
 			lost = true
 			lostSegs++
