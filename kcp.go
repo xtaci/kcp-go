@@ -404,7 +404,7 @@ func (kcp *KCP) parse_fastack(sn uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(sn, seg.sn) < 0 {
 			break
-		} else if sn != seg.sn {
+		} else if sn != seg.sn && kcp.current >= seg.ts+kcp.rx_srtt {
 			seg.fastack++
 		}
 	}
@@ -738,14 +738,14 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			lost = true
 			lostSegs++
-		} else if segment.fastack >= resent && segment.xmit == 1 {
+		} else if segment.fastack >= resent {
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
 			segment.resendts = current + segment.rto
 			change++
 			fastRetransSegs++
-		} else if segment.fastack > 0 && nque == 0 && segment.xmit == 1 {
+		} else if segment.fastack > 0 && nque == 0 {
 			// early retransmit
 			needsend = true
 			segment.xmit++
