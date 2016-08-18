@@ -404,7 +404,7 @@ func (kcp *KCP) parse_fastack(sn uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(sn, seg.sn) < 0 {
 			break
-		} else if sn != seg.sn && kcp.current >= seg.ts+kcp.rx_srtt {
+		} else if sn != seg.sn { //  && kcp.current >= seg.ts+kcp.rx_srtt {
 			seg.fastack++
 		}
 	}
