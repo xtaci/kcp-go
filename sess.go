@@ -36,7 +36,7 @@ const (
 	connTimeout              = 60 * time.Second
 	mtuLimit                 = 2048
 	txQueueLimit             = 8192
-	rxFecLimit               = 2048
+	rxFecLimit               = 8192
 	defaultKeepAliveInterval = 10 * time.Second
 )
 
