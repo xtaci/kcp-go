@@ -26,6 +26,23 @@ func DialTest() (*UDPSession, error) {
 	return DialWithOptions(port, block, 10, 3)
 }
 
+func DialTest2() (*UDPSession, error) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	block, _ := NewNoneBlockCrypt(pass)
+	//block, _ := NewSimpleXORBlockCrypt(pass)
+	//block, _ := NewTEABlockCrypt(pass[:16])
+	//block, _ := NewAESBlockCrypt(pass)
+	return DialWithOptions(port, block, 10, 3, OptionWithConvId{1234})
+}
+
+// all uncovered codes
+func TestCoverage(t *testing.T) {
+	x := struct{}{}
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	block, _ := NewAESBlockCrypt(pass)
+	DialWithOptions("127.0.0.1:100000", block, 0, 0, x)
+}
+
 func ListenTest() (*Listener, error) {
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	block, _ := NewNoneBlockCrypt(pass)
@@ -211,7 +228,7 @@ func TestSpeed(t *testing.T) {
 }
 
 func client3(wg *sync.WaitGroup) {
-	cli, err := DialTest()
+	cli, err := DialTest2()
 	if err != nil {
 		panic(err)
 	}

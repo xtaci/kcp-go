@@ -22,6 +22,12 @@ var (
 	errBrokenPipe = errors.New("broken pipe")
 )
 
+// Option defines extra options
+type Option interface{}
+type OptionWithConvId struct {
+	Id uint32
+}
+
 const (
 	defaultWndSize           = 128 // default window size, in packet
 	nonceSize                = 16  // magic number
@@ -815,7 +821,7 @@ func Dial(raddr string) (*UDPSession, error) {
 }
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
-func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
+func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, opts ...Option) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, err
@@ -826,9 +832,18 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, err
 	}
 
-	convid := make([]byte, 4)
-	io.ReadFull(crand.Reader, convid)
-	return newUDPSession(binary.LittleEndian.Uint32(convid), dataShards, parityShards, nil, udpconn, udpaddr, block), nil
+	buf := make([]byte, 4)
+	io.ReadFull(crand.Reader, buf)
+	convid := binary.LittleEndian.Uint32(buf)
+	for k := range opts {
+		switch opt := opts[k].(type) {
+		case OptionWithConvId:
+			convid = opt.Id
+		default:
+			log.Println("unrecognized option", opt)
+		}
+	}
+	return newUDPSession(convid, dataShards, parityShards, nil, udpconn, udpaddr, block), nil
 }
 
 func currentMs() uint32 {
