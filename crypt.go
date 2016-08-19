@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/des"
 	"crypto/sha1"
 
 	"golang.org/x/crypto/blowfish"
@@ -25,6 +26,36 @@ type BlockCrypt interface {
 	// Decrypt decrypts the whole block in src into dst.
 	// Dst and src may point at the same memory.
 	Decrypt(dst, src []byte)
+}
+
+// TripleDESBlockCrypt implements BlockCrypt
+type TripleDESBlockCrypt struct {
+	encbuf []byte
+	decbuf []byte
+	block  cipher.Block
+}
+
+// NewTripleDESBlockCrypt initates AES BlockCrypt by the given key
+func NewTripleDESBlockCrypt(key []byte) (BlockCrypt, error) {
+	c := new(TripleDESBlockCrypt)
+	block, err := des.NewTripleDESCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	c.block = block
+	c.encbuf = make([]byte, des.BlockSize)
+	c.decbuf = make([]byte, 2*des.BlockSize)
+	return c, nil
+}
+
+// Encrypt implements Encrypt interface
+func (c *TripleDESBlockCrypt) Encrypt(dst, src []byte) {
+	encrypt(c.block, dst, src, c.encbuf)
+}
+
+// Decrypt implements Decrypt interface
+func (c *TripleDESBlockCrypt) Decrypt(dst, src []byte) {
+	decrypt(c.block, dst, src, c.decbuf)
 }
 
 // Cast5BlockCrypt implements BlockCrypt

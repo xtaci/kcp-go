@@ -118,3 +118,20 @@ func TestCast5(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestTripleDES(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 24, sha1.New)
+	bc, err := NewTripleDESBlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+}
