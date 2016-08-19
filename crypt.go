@@ -6,6 +6,7 @@ import (
 	"crypto/sha1"
 
 	"golang.org/x/crypto/blowfish"
+	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/tea"
 )
@@ -26,14 +27,44 @@ type BlockCrypt interface {
 	Decrypt(dst, src []byte)
 }
 
-// BlowfishBlockCrypt implements BlockCrypt with AES
+// Cast5BlockCrypt implements BlockCrypt
+type Cast5BlockCrypt struct {
+	encbuf []byte
+	decbuf []byte
+	block  cipher.Block
+}
+
+// NewCast5BlockCrypt initates AES BlockCrypt by the given key
+func NewCast5BlockCrypt(key []byte) (BlockCrypt, error) {
+	c := new(Cast5BlockCrypt)
+	block, err := cast5.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	c.block = block
+	c.encbuf = make([]byte, cast5.BlockSize)
+	c.decbuf = make([]byte, 2*cast5.BlockSize)
+	return c, nil
+}
+
+// Encrypt implements Encrypt interface
+func (c *Cast5BlockCrypt) Encrypt(dst, src []byte) {
+	encrypt(c.block, dst, src, c.encbuf)
+}
+
+// Decrypt implements Decrypt interface
+func (c *Cast5BlockCrypt) Decrypt(dst, src []byte) {
+	decrypt(c.block, dst, src, c.decbuf)
+}
+
+// BlowfishBlockCrypt implements BlockCrypt
 type BlowfishBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
 }
 
-// NewAESBlockCrypt initates AES BlockCrypt by the given key
+// NewBlowfishBlockCrypt initates AES BlockCrypt by the given key
 func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
 	c := new(BlowfishBlockCrypt)
 	block, err := blowfish.NewCipher(key)

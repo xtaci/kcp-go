@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"io"
+	"log"
 	"testing"
 
 	"golang.org/x/crypto/pbkdf2"
@@ -19,10 +20,10 @@ func TestAES(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, 4096)
+	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, 4096)
-	enc := make([]byte, 4096)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
 	bc.Encrypt(enc, data)
 	bc.Decrypt(dec, enc)
 	if !bytes.Equal(data, dec) {
@@ -36,10 +37,10 @@ func TestTEA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, 4096)
+	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, 4096)
-	enc := make([]byte, 4096)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
 	bc.Encrypt(enc, data)
 	bc.Decrypt(dec, enc)
 	if !bytes.Equal(data, dec) {
@@ -49,18 +50,20 @@ func TestTEA(t *testing.T) {
 }
 
 func TestSimpleXOR(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 16, sha1.New)
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	bc, err := NewSimpleXORBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, 4096)
+	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, 4096)
-	enc := make([]byte, 4096)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
 	bc.Encrypt(enc, data)
 	bc.Decrypt(dec, enc)
 	if !bytes.Equal(data, dec) {
+		log.Println(data)
+		log.Println(dec)
 		t.Fail()
 	}
 }
@@ -71,10 +74,10 @@ func TestBlowfish(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, 4096)
+	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, 4096)
-	enc := make([]byte, 4096)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
 	bc.Encrypt(enc, data)
 	bc.Decrypt(dec, enc)
 	if !bytes.Equal(data, dec) {
@@ -88,10 +91,27 @@ func TestNone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	data := make([]byte, 4096)
+	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, 4096)
-	enc := make([]byte, 4096)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+}
+
+func TestCast5(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 16, sha1.New)
+	bc, err := NewCast5BlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
 	bc.Encrypt(enc, data)
 	bc.Decrypt(dec, enc)
 	if !bytes.Equal(data, dec) {
