@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"crypto/sha1"
 
+	"golang.org/x/crypto/blowfish"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/tea"
 )
@@ -23,6 +24,36 @@ type BlockCrypt interface {
 	// Decrypt decrypts the whole block in src into dst.
 	// Dst and src may point at the same memory.
 	Decrypt(dst, src []byte)
+}
+
+// BlowfishBlockCrypt implements BlockCrypt with AES
+type BlowfishBlockCrypt struct {
+	encbuf []byte
+	decbuf []byte
+	block  cipher.Block
+}
+
+// NewAESBlockCrypt initates AES BlockCrypt by the given key
+func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
+	c := new(BlowfishBlockCrypt)
+	block, err := blowfish.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	c.block = block
+	c.encbuf = make([]byte, blowfish.BlockSize)
+	c.decbuf = make([]byte, 2*blowfish.BlockSize)
+	return c, nil
+}
+
+// Encrypt implements Encrypt interface
+func (c *BlowfishBlockCrypt) Encrypt(dst, src []byte) {
+	encrypt(c.block, dst, src, c.encbuf)
+}
+
+// Decrypt implements Decrypt interface
+func (c *BlowfishBlockCrypt) Decrypt(dst, src []byte) {
+	decrypt(c.block, dst, src, c.decbuf)
 }
 
 // AESBlockCrypt implements BlockCrypt with AES
@@ -118,10 +149,14 @@ func NewNoneBlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *NoneBlockCrypt) Encrypt(dst, src []byte) {}
+func (c *NoneBlockCrypt) Encrypt(dst, src []byte) {
+	copy(dst, src)
+}
 
 // Decrypt implements Decrypt interface
-func (c *NoneBlockCrypt) Decrypt(dst, src []byte) {}
+func (c *NoneBlockCrypt) Decrypt(dst, src []byte) {
+	copy(dst, src)
+}
 
 // packet encryption with local CFB mode
 func encrypt(block cipher.Block, dst, src, buf []byte) {

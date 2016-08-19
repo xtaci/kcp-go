@@ -1,7 +1,10 @@
 package kcp
 
 import (
+	"bytes"
+	"crypto/rand"
 	"crypto/sha1"
+	"io"
 	"testing"
 
 	"golang.org/x/crypto/pbkdf2"
@@ -17,12 +20,14 @@ func TestAES(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := make([]byte, 4096)
-	for i := 0; i < 4096; i++ {
-		data[i] = byte(i & 0xff)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, 4096)
+	enc := make([]byte, 4096)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
 	}
-	bc.Encrypt(data, data)
-	bc.Decrypt(data, data)
-	t.Log(data)
 }
 
 func TestTEA(t *testing.T) {
@@ -32,12 +37,15 @@ func TestTEA(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := make([]byte, 4096)
-	for i := 0; i < 4096; i++ {
-		data[i] = byte(i & 0xff)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, 4096)
+	enc := make([]byte, 4096)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
 	}
-	bc.Encrypt(data, data)
-	bc.Decrypt(data, data)
-	t.Log(data)
+
 }
 
 func TestSimpleXOR(t *testing.T) {
@@ -47,10 +55,46 @@ func TestSimpleXOR(t *testing.T) {
 		t.Fatal(err)
 	}
 	data := make([]byte, 4096)
-	for i := 0; i < 4096; i++ {
-		data[i] = byte(i & 0xff)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, 4096)
+	enc := make([]byte, 4096)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
 	}
-	bc.Encrypt(data, data)
-	bc.Decrypt(data, data)
-	t.Log(data)
+}
+
+func TestBlowfish(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	bc, err := NewBlowfishBlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 4096)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, 4096)
+	enc := make([]byte, 4096)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+}
+
+func TestNone(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	bc, err := NewNoneBlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 4096)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, 4096)
+	enc := make([]byte, 4096)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
 }
