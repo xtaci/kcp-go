@@ -9,7 +9,7 @@ install:
     - go get github.com/xtaci/kcp-go
 
 script:
-    - go test -coverprofile=coverage.txt -covermode=atomic
+    - go test -coverprofile=coverage.txt -covermode=atomic -bench .
 
 after_success:
     - bash <(curl -s https://codecov.io/bash)
