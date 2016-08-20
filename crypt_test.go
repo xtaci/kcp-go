@@ -339,3 +339,76 @@ func BenchmarkTwofish(b *testing.B) {
 		bc.Decrypt(dec, enc)
 	}
 }
+
+func TestXTEA(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 16, sha1.New)
+	bc, err := NewXTEABlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+
+}
+
+func BenchmarkXTEA(b *testing.B) {
+	pass := make([]byte, 16)
+	io.ReadFull(rand.Reader, pass)
+	bc, err := NewXTEABlockCrypt(pass)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+
+	for i := 0; i < b.N; i++ {
+		bc.Encrypt(enc, data)
+		bc.Decrypt(dec, enc)
+	}
+}
+
+func TestSalsa20(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	bc, err := NewSalsa20BlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+}
+
+func BenchmarkSalsa20(b *testing.B) {
+	pass := make([]byte, 32)
+	io.ReadFull(rand.Reader, pass)
+	bc, err := NewSalsa20BlockCrypt(pass)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+
+	for i := 0; i < b.N; i++ {
+		bc.Encrypt(enc, data)
+		bc.Decrypt(dec, enc)
+	}
+}
