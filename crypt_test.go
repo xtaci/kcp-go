@@ -135,3 +135,20 @@ func TestTripleDES(t *testing.T) {
 		t.Fail()
 	}
 }
+
+func TestTwofish(t *testing.T) {
+	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	bc, err := NewTwofishBlockCrypt(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+	dec := make([]byte, mtuLimit)
+	enc := make([]byte, mtuLimit)
+	bc.Encrypt(enc, data)
+	bc.Decrypt(dec, enc)
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+}
