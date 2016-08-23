@@ -735,7 +735,11 @@ func (kcp *KCP) flush() {
 			} else {
 				segment.rto += kcp.rx_rto / 2
 			}
-			segment.resendts = current + segment.rto
+			if kcp.nocwnd == 0 {
+				segment.resendts = current + segment.rto
+			} else {
+				segment.resendts = current + kcp.rx_rto
+			}
 			lost = true
 			lostSegs++
 		} else if segment.fastack >= resent {
