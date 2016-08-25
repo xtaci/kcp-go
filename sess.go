@@ -751,7 +751,12 @@ func (l *Listener) SetDSCP(dscp int) error {
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
-func (l *Listener) Accept() (*UDPSession, error) {
+func (l *Listener) Accept() (net.Conn, error) {
+	return l.AcceptKCP()
+}
+
+// AcceptKCP accepts a KCP connection
+func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	select {
 	case c := <-l.chAccepts:
 		return c, nil
