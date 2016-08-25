@@ -4,6 +4,7 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"log"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -43,7 +44,7 @@ func TestCoverage(t *testing.T) {
 	DialWithOptions("127.0.0.1:100000", block, 0, 0, x)
 }
 
-func ListenTest() (*Listener, error) {
+func ListenTest() (net.Listener, error) {
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
@@ -58,10 +59,11 @@ func server() {
 		panic(err)
 	}
 
-	l.SetReadBuffer(16 * 1024 * 1024)
-	l.SetWriteBuffer(16 * 1024 * 1024)
-	l.SetDSCP(46)
-	log.Println("listening on:", l.Addr())
+	kcplistener := l.(*Listener)
+	kcplistener.SetReadBuffer(16 * 1024 * 1024)
+	kcplistener.SetWriteBuffer(16 * 1024 * 1024)
+	kcplistener.SetDSCP(46)
+	log.Println("listening on:", kcplistener)
 	for {
 		s, err := l.Accept()
 		if err != nil {
@@ -69,10 +71,10 @@ func server() {
 		}
 
 		// coverage test
-		s.SetReadBuffer(16 * 1024 * 1024)
-		s.SetWriteBuffer(16 * 1024 * 1024)
-		s.SetKeepAlive(1)
-		go handleClient(s)
+		s.(*UDPSession).SetReadBuffer(16 * 1024 * 1024)
+		s.(*UDPSession).SetWriteBuffer(16 * 1024 * 1024)
+		s.(*UDPSession).SetKeepAlive(1)
+		go handleClient(s.(*UDPSession))
 	}
 }
 
