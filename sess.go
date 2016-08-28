@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -183,13 +184,13 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		s.mu.Lock()
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, errBrokenPipe
+			return 0, fmt.Errorf("UDPSession/Write %v", errBrokenPipe)
 		}
 
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) { // timeout
 				s.mu.Unlock()
-				return 0, errTimeout
+				return 0, fmt.Errorf("UDPSession/Write %v", errTimeout)
 			}
 		}
 
@@ -786,11 +787,11 @@ func Listen(laddr string) (*Listener, error) {
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ListenWithOptions/ResolveUDPAddr %v", err)
 	}
 	conn, err := net.ListenUDP("udp", udpaddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ListenWithOptions/ListenUDP %v", err)
 	}
 
 	l := new(Listener)
@@ -828,12 +829,12 @@ func Dial(raddr string) (*UDPSession, error) {
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, opts ...Option) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DialWithOptions/ResolveUDPAddr %v", err)
 	}
 
 	udpconn, err := net.DialUDP("udp", nil, udpaddr)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DialWithOptions/DialUDP %v", err)
 	}
 
 	buf := make([]byte, 4)
