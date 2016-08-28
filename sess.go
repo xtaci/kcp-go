@@ -782,11 +782,11 @@ func Listen(laddr string) (*Listener, error) {
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
 	conn, err := net.ListenUDP("udp", udpaddr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "net.ListenUDP")
 	}
 
 	l := new(Listener)
@@ -824,12 +824,12 @@ func Dial(raddr string) (*UDPSession, error) {
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, opts ...Option) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
 
 	udpconn, err := net.DialUDP("udp", nil, udpaddr)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
 	buf := make([]byte, 4)
