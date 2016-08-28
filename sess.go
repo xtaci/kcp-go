@@ -3,8 +3,6 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
-	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -12,14 +10,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pkg/errors"
+
 	"github.com/klauspost/crc32"
 
 	"golang.org/x/net/ipv4"
-)
-
-var (
-	errTimeout    = errors.New("i/o timeout")
-	errBrokenPipe = errors.New("broken pipe")
 )
 
 // Option defines extra options
@@ -138,13 +133,13 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, errBrokenPipe
+			return 0, errors.New("broken pipe")
 		}
 
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				s.mu.Unlock()
-				return 0, errTimeout
+				return 0, errors.New("i/o timeout")
 			}
 		}
 
@@ -184,13 +179,13 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		s.mu.Lock()
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, fmt.Errorf("UDPSession/Write %v", errBrokenPipe)
+			return 0, errors.New("broken pipe")
 		}
 
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) { // timeout
 				s.mu.Unlock()
-				return 0, fmt.Errorf("UDPSession/Write %v", errTimeout)
+				return 0, errors.New("i/o timeout")
 			}
 		}
 
@@ -234,7 +229,7 @@ func (s *UDPSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.isClosed {
-		return errBrokenPipe
+		return errors.New("broken pipe")
 	}
 	close(s.die)
 	s.isClosed = true
@@ -787,11 +782,11 @@ func Listen(laddr string) (*Listener, error) {
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
-		return nil, fmt.Errorf("ListenWithOptions/ResolveUDPAddr %v", err)
+		return nil, err
 	}
 	conn, err := net.ListenUDP("udp", udpaddr)
 	if err != nil {
-		return nil, fmt.Errorf("ListenWithOptions/ListenUDP %v", err)
+		return nil, err
 	}
 
 	l := new(Listener)
@@ -829,12 +824,12 @@ func Dial(raddr string) (*UDPSession, error) {
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, opts ...Option) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, fmt.Errorf("DialWithOptions/ResolveUDPAddr %v", err)
+		return nil, err
 	}
 
 	udpconn, err := net.DialUDP("udp", nil, udpaddr)
 	if err != nil {
-		return nil, fmt.Errorf("DialWithOptions/DialUDP %v", err)
+		return nil, err
 	}
 
 	buf := make([]byte, 4)
