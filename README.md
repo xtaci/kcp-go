@@ -33,7 +33,7 @@ kcp-go is a full-featured reliable UDP communication library for golang. It prov
 
 1. Data is delivered via [UDP](https://en.wikipedia.org/wiki/User_Datagram_Protocol).
 2. The conversation id ```conv uint32``` in session manager should be a ***random number*** initiated by client.
-3. KCP doesn't define session control messages like SYN/FIN/RST in TCP, a real world example is to use some ***multiplexing*** protocol over session, such as [yamux](https://github.com/hashicorp/yamux), see [kcptun](https://github.com/xtaci/kcptun) for example.
+3. KCP doesn't define session control messages like SYN/FIN/RST in TCP, a real world example is to use some ***multiplexing*** protocol over session, such as [smux](https://github.com/xtaci/smux), see [kcptun](https://github.com/xtaci/kcptun) for example.
 
 ## Documentation
 
