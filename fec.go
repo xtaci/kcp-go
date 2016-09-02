@@ -2,7 +2,6 @@ package kcp
 
 import (
 	"encoding/binary"
-	"log"
 	"sync"
 
 	"github.com/klauspost/reedsolomon"
@@ -57,7 +56,6 @@ func newFEC(rxlimit, dataShards, parityShards int) *FEC {
 	fec.paws = (0xffffffff/uint32(fec.shardSize) - 1) * uint32(fec.shardSize)
 	enc, err := reedsolomon.New(dataShards, parityShards)
 	if err != nil {
-		log.Println(err)
 		return nil
 	}
 	fec.enc = enc
@@ -205,8 +203,6 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 						recovered = append(recovered, shards[k])
 					}
 				}
-			} else {
-				log.Println(err)
 			}
 
 			for i := first; i < first+numshard; i++ { // free
@@ -231,7 +227,6 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 
 func (fec *FEC) calcECC(data [][]byte, offset, maxlen int) (ecc [][]byte) {
 	if len(data) != fec.shardSize {
-		log.Println("mismatch", len(data), fec.shardSize)
 		return nil
 	}
 	shards := make([][]byte, fec.shardSize)
@@ -240,7 +235,6 @@ func (fec *FEC) calcECC(data [][]byte, offset, maxlen int) (ecc [][]byte) {
 	}
 
 	if err := fec.enc.Encode(shards); err != nil {
-		log.Println(err)
 		return nil
 	}
 	return data[fec.dataShards:]

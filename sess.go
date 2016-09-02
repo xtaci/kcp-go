@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"io"
-	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -680,13 +679,10 @@ func (l *Listener) monitor() {
 					}
 
 					if convValid {
-						if s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block); s != nil {
-							s.kcpInput(data)
-							l.sessions[addr] = s
-							l.chAccepts <- s
-						} else {
-							log.Println("cannot create session")
-						}
+						s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
+						s.kcpInput(data)
+						l.sessions[addr] = s
+						l.chAccepts <- s
 					}
 				} else {
 					s.kcpInput(data)
@@ -833,7 +829,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		case OptionWithConvId:
 			convid = opt.Id
 		default:
-			log.Println("unrecognized option", opt)
+			return nil, errors.New("unrecognized option")
 		}
 	}
 	return newUDPSession(convid, dataShards, parityShards, nil, udpconn, udpaddr, block), nil
