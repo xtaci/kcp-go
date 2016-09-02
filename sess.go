@@ -426,22 +426,18 @@ func (s *UDPSession) outputTask() {
 			}
 
 			//if rand.Intn(100) < 80 {
-			n, err := s.writeTo(ext, s.remote)
-			if err != nil {
-				log.Println(err, n)
+			if n, err := s.writeTo(ext, s.remote); err == nil {
+				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 			}
-			atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 			//}
 
 			if ecc != nil {
 				for k := range ecc {
-					n, err := s.writeTo(ecc[k], s.remote)
-					if err != nil {
-						log.Println(err, n)
+					if n, err := s.writeTo(ecc[k], s.remote); err == nil {
+						atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+						atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 					}
-					atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-					atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 				}
 			}
 			xorBytes(ext, ext, ext)
@@ -458,10 +454,7 @@ func (s *UDPSession) outputTask() {
 					sz := rnd%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
 					ping := make([]byte, sz)
 					io.ReadFull(rand.Reader, ping)
-					n, err := s.writeTo(ping, s.remote)
-					if err != nil {
-						log.Println(err, n)
-					}
+					s.writeTo(ping, s.remote)
 					lastPing = time.Now()
 				}
 			}
