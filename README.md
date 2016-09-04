@@ -1,4 +1,5 @@
 # kcp-go
+
 [![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Go Report Card][5]][6] [![Coverage Statusd][7]][8]
 
 [1]: https://godoc.org/github.com/xtaci/kcp-go?status.svg
@@ -18,7 +19,7 @@
 
 ## Introduction
 
-kcp-go is a full-featured reliable UDP communication library for golang. It provides with ***reliability*** same as TCP and ***advanced controls*** over sessions.
+kcp-go is a full-featured ***reliable-UDP*** library for golang. It provides ***reliable, ordered, and error-checked*** delivery of a stream of octets between applications running on hosts communicating over an IP network.
 
 ## Features
 
