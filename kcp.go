@@ -736,7 +736,7 @@ func (kcp *KCP) flush() {
 				segment.rto += kcp.rx_rto / 2
 			}
 			if kcp.nocwnd == 0 {
-				segment.resendts = current + segment.rto
+				segment.resendts = current + segment.rto + rtomin
 			} else {
 				segment.resendts = current + kcp.rx_rto
 			}
