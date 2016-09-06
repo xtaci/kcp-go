@@ -486,7 +486,10 @@ func (s *UDPSession) updateTask() {
 			s.mu.Unlock()
 		case <-s.die:
 			if s.l != nil { // has listener
-				s.l.chDeadlinks <- s.remote
+				select {
+				case s.l.chDeadlinks <- s.remote:
+				case <-s.l.die:
+				}
 			}
 			return
 		}
