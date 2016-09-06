@@ -18,6 +18,8 @@ import (
 
 // Option defines extra options
 type Option interface{}
+
+// OptionWithConvId defines conversation id
 type OptionWithConvId struct {
 	Id uint32
 }
@@ -27,7 +29,6 @@ const (
 	nonceSize                = 16  // magic number
 	crcSize                  = 4   // 4bytes packet checksum
 	cryptHeaderSize          = nonceSize + crcSize
-	connTimeout              = 60 * time.Second
 	mtuLimit                 = 2048
 	txQueueLimit             = 8192
 	rxFecLimit               = 8192
@@ -38,30 +39,30 @@ type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
 		kcp               *KCP         // the core ARQ
+		l                 *Listener    // point to server listener if it's a server socket
 		fec               *FEC         // forward error correction
 		conn              *net.UDPConn // the underlying UDP socket
 		block             BlockCrypt
-		l                 *Listener // point to server listener if it's a server socket
 		local, remote     net.Addr
 		rd                time.Time // read deadline
 		wd                time.Time // write deadline
 		sockbuff          []byte    // kcp receiving is based on packet, I turn it into stream
 		die               chan struct{}
-		isClosed          bool
-		mu                sync.Mutex
 		chReadEvent       chan struct{}
 		chWriteEvent      chan struct{}
 		chTicker          chan time.Time
 		chUDPOutput       chan []byte
 		headerSize        int
 		ackNoDelay        bool
+		isClosed          bool
 		keepAliveInterval time.Duration
 		xmitBuf           sync.Pool
+		mu                sync.Mutex
 	}
 )
 
 // newUDPSession create a new udp session for client or server
-func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn *net.UDPConn, remote *net.UDPAddr, block BlockCrypt) *UDPSession {
+func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn *net.UDPConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.chTicker = make(chan time.Time, 1)
 	sess.chUDPOutput = make(chan []byte, txQueueLimit)
