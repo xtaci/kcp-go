@@ -256,9 +256,7 @@ func (c *SimpleXORBlockCrypt) Encrypt(dst, src []byte) { xorBytes(dst, src, c.xo
 func (c *SimpleXORBlockCrypt) Decrypt(dst, src []byte) { xorBytes(dst, src, c.xortbl) }
 
 // NoneBlockCrypt simple returns the plaintext
-type NoneBlockCrypt struct {
-	xortbl []byte
-}
+type NoneBlockCrypt struct{}
 
 // NewNoneBlockCrypt initate by the given key
 func NewNoneBlockCrypt(key []byte) (BlockCrypt, error) {

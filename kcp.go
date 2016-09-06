@@ -134,13 +134,16 @@ func NewSegment(size int) *Segment {
 type KCP struct {
 	conv, mtu, mss, state                  uint32
 	snd_una, snd_nxt, rcv_nxt              uint32
-	ts_recent, ts_lastack, ssthresh        uint32
+	ssthresh                               uint32
 	rx_rttval, rx_srtt, rx_rto, rx_minrto  uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
 	current, interval, ts_flush, xmit      uint32
 	nodelay, updated                       uint32
 	ts_probe, probe_wait                   uint32
 	dead_link, incr                        uint32
+
+	fastresend     int32
+	nocwnd, stream int32
 
 	snd_queue []Segment
 	rcv_queue []Segment
@@ -149,18 +152,17 @@ type KCP struct {
 
 	acklist ACKList
 
-	buffer         []byte
-	fastresend     int32
-	nocwnd, stream int32
-	logmask        int32
-	output         Output
+	buffer []byte
+	output Output
 }
 
+// ACK packet to return
 type ACK struct {
 	sn uint32
 	ts uint32
 }
 
+// ACKList is heapified
 type ACKList []ACK
 
 func (l ACKList) Len() int            { return len(l) }
@@ -348,7 +350,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 
 // https://tools.ietf.org/html/rfc6298
 func (kcp *KCP) update_ack(rtt int32) {
-	var rto uint32 = 0
+	var rto uint32
 	if kcp.rx_srtt == 0 {
 		kcp.rx_srtt = uint32(rtt)
 		kcp.rx_rttval = uint32(rtt) / 2
