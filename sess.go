@@ -24,6 +24,14 @@ type OptionWithConvId struct {
 	Id uint32
 }
 
+type errTimeout struct {
+	error
+}
+
+func (errTimeout) Timeout() bool   { return true }
+func (errTimeout) Temporary() bool { return true }
+func (errTimeout) Error() string   { return "i/o timeout" }
+
 const (
 	defaultWndSize           = 128 // default window size, in packet
 	nonceSize                = 16  // magic number
@@ -139,7 +147,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) { // timeout
 				s.mu.Unlock()
-				return 0, errors.New("i/o timeout")
+				return 0, errTimeout{}
 			}
 		}
 
@@ -185,7 +193,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) { // timeout
 				s.mu.Unlock()
-				return 0, errors.New("i/o timeout")
+				return 0, errTimeout{}
 			}
 		}
 
