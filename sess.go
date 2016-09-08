@@ -46,10 +46,10 @@ const (
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
-		kcp               *KCP         // the core ARQ
-		l                 *Listener    // point to server listener if it's a server socket
-		fec               *FEC         // forward error correction
-		conn              *net.UDPConn // the underlying UDP socket
+		kcp               *KCP           // the core ARQ
+		l                 *Listener      // point to server listener if it's a server socket
+		fec               *FEC           // forward error correction
+		conn              net.PacketConn // the underlying packet socket
 		block             BlockCrypt
 		local, remote     net.Addr
 		rd                time.Time // read deadline
@@ -67,10 +67,18 @@ type (
 		xmitBuf           sync.Pool
 		mu                sync.Mutex
 	}
+
+	setReadBuffer interface {
+		SetReadBuffer(bytes int) error
+	}
+
+	setWriteBuffer interface {
+		SetWriteBuffer(bytes int) error
+	}
 )
 
 // newUDPSession create a new udp session for client or server
-func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn *net.UDPConn, remote net.Addr, block BlockCrypt) *UDPSession {
+func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.chTicker = make(chan time.Time, 1)
 	sess.chUDPOutput = make(chan []byte, txQueueLimit)
@@ -324,7 +332,9 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.l == nil {
-		return ipv4.NewConn(s.conn).SetTOS(dscp << 2)
+		if nc, ok := s.conn.(net.Conn); ok {
+			return ipv4.NewConn(nc).SetTOS(dscp << 2)
+		}
 	}
 	return nil
 }
@@ -334,7 +344,9 @@ func (s *UDPSession) SetReadBuffer(bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.l == nil {
-		return s.conn.SetReadBuffer(bytes)
+		if nc, ok := s.conn.(setReadBuffer); ok {
+			return nc.SetReadBuffer(bytes)
+		}
 	}
 	return nil
 }
@@ -344,7 +356,9 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.l == nil {
-		return s.conn.SetWriteBuffer(bytes)
+		if nc, ok := s.conn.(setWriteBuffer); ok {
+			return nc.SetWriteBuffer(bytes)
+		}
 	}
 	return nil
 }
@@ -359,7 +373,9 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 // writeTo wraps write method for client & listener
 func (s *UDPSession) writeTo(b []byte, addr net.Addr) (int, error) {
 	if s.l == nil {
-		return s.conn.Write(b)
+		if nc, ok := s.conn.(io.Writer); ok {
+			return nc.Write(b)
+		}
 	}
 	return s.conn.WriteTo(b, addr)
 }
@@ -577,7 +593,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 func (s *UDPSession) receiver(ch chan []byte) {
 	for {
 		data := s.xmitBuf.Get().([]byte)[:mtuLimit]
-		if n, err := s.conn.Read(data); err == nil && n >= s.headerSize+IKCP_OVERHEAD {
+		if n, _, err := s.conn.ReadFrom(data); err == nil && n >= s.headerSize+IKCP_OVERHEAD {
 			select {
 			case ch <- data[:n]:
 			case <-s.die:
@@ -631,7 +647,7 @@ type (
 		block                    BlockCrypt
 		dataShards, parityShards int
 		fec                      *FEC // for fec init test
-		conn                     *net.UDPConn
+		conn                     net.PacketConn
 		sessions                 map[string]*UDPSession
 		chAccepts                chan *UDPSession
 		chDeadlinks              chan net.Addr
@@ -641,7 +657,7 @@ type (
 	}
 
 	packet struct {
-		from *net.UDPAddr
+		from net.Addr
 		data []byte
 	}
 )
@@ -722,7 +738,7 @@ func (l *Listener) monitor() {
 func (l *Listener) receiver(ch chan packet) {
 	for {
 		data := l.rxbuf.Get().([]byte)[:mtuLimit]
-		if n, from, err := l.conn.ReadFromUDP(data); err == nil && n >= l.headerSize+IKCP_OVERHEAD {
+		if n, from, err := l.conn.ReadFrom(data); err == nil && n >= l.headerSize+IKCP_OVERHEAD {
 			ch <- packet{from, data[:n]}
 		} else if err != nil {
 			return
@@ -734,17 +750,26 @@ func (l *Listener) receiver(ch chan packet) {
 
 // SetReadBuffer sets the socket read buffer for the Listener
 func (l *Listener) SetReadBuffer(bytes int) error {
-	return l.conn.SetReadBuffer(bytes)
+	if nc, ok := l.conn.(setReadBuffer); ok {
+		return nc.SetReadBuffer(bytes)
+	}
+	return nil
 }
 
 // SetWriteBuffer sets the socket write buffer for the Listener
 func (l *Listener) SetWriteBuffer(bytes int) error {
-	return l.conn.SetWriteBuffer(bytes)
+	if nc, ok := l.conn.(setWriteBuffer); ok {
+		return nc.SetWriteBuffer(bytes)
+	}
+	return nil
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header
 func (l *Listener) SetDSCP(dscp int) error {
-	return ipv4.NewConn(l.conn).SetTOS(dscp << 2)
+	if nc, ok := l.conn.(net.Conn); ok {
+		return ipv4.NewConn(nc).SetTOS(dscp << 2)
+	}
+	return nil
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
