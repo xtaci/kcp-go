@@ -51,7 +51,7 @@ type (
 		fec               *FEC           // forward error correction
 		conn              net.PacketConn // the underlying packet socket
 		block             BlockCrypt
-		local, remote     net.Addr
+		remote            net.Addr
 		rd                time.Time // read deadline
 		wd                time.Time // write deadline
 		sockbuff          []byte    // kcp receiving is based on packet, I turn it into stream
@@ -83,7 +83,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chTicker = make(chan time.Time, 1)
 	sess.chUDPOutput = make(chan []byte, txQueueLimit)
 	sess.die = make(chan struct{})
-	sess.local = conn.LocalAddr()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.remote = remote
@@ -258,7 +257,7 @@ func (s *UDPSession) Close() error {
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
-func (s *UDPSession) LocalAddr() net.Addr { return s.local }
+func (s *UDPSession) LocalAddr() net.Addr { return s.conn.LocalAddr() }
 
 // RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
 func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
