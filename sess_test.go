@@ -24,7 +24,7 @@ func DialTest() (*UDPSession, error) {
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	return DialWithOptions(port, block, 10, 3)
+	return DialWithOptions(port, block, NewFEC(rxFecLimit, 10, 3))
 }
 
 func DialTest2() (*UDPSession, error) {
@@ -33,7 +33,7 @@ func DialTest2() (*UDPSession, error) {
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	return DialWithOptions(port, block, 10, 3, OptionWithConvId{1234})
+	return DialWithOptions(port, block, NewFEC(rxFecLimit, 10, 3), OptionWithConvId{1234})
 }
 
 // all uncovered codes
@@ -41,7 +41,7 @@ func TestCoverage(t *testing.T) {
 	x := struct{}{}
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	block, _ := NewAESBlockCrypt(pass)
-	DialWithOptions("127.0.0.1:100000", block, 0, 0, x)
+	DialWithOptions("127.0.0.1:100000", block, NewFEC(rxFecLimit, 0, 0), x)
 }
 
 func ListenTest() (net.Listener, error) {
@@ -50,7 +50,7 @@ func ListenTest() (net.Listener, error) {
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	return ListenWithOptions(port, block, 10, 3)
+	return ListenWithOptions(port, block, NewFEC(rxFecLimit, 10, 3))
 }
 
 func server() {

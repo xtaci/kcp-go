@@ -40,7 +40,7 @@ type (
 	}
 )
 
-func newFEC(rxlimit, dataShards, parityShards int) *FEC {
+func NewFEC(rxlimit, dataShards, parityShards int) *FEC {
 	if dataShards <= 0 || parityShards <= 0 {
 		return nil
 	}
