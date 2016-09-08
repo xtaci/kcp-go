@@ -63,7 +63,7 @@ func server() {
 	kcplistener.SetReadBuffer(16 * 1024 * 1024)
 	kcplistener.SetWriteBuffer(16 * 1024 * 1024)
 	kcplistener.SetDSCP(46)
-	log.Println("listening on:", kcplistener)
+	log.Println("listening on:", kcplistener.conn.LocalAddr())
 	for {
 		s, err := l.Accept()
 		if err != nil {
