@@ -654,6 +654,8 @@ type (
 		headerSize               int
 		die                      chan struct{}
 		rxbuf                    sync.Pool
+		rd                       atomic.Value
+		wd                       atomic.Value
 	}
 
 	packet struct {
@@ -779,12 +781,38 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
+	var timeout <-chan time.Time
+	if tdeadline, ok := l.rd.Load().(time.Time); ok && !tdeadline.IsZero() {
+		timeout = time.After(tdeadline.Sub(time.Now()))
+	}
+
 	select {
+	case <-timeout:
+		return nil, &errTimeout{}
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
 		return nil, errors.New("listener stopped")
 	}
+}
+
+// SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
+func (l *Listener) SetDeadline(t time.Time) error {
+	l.SetReadDeadline(t)
+	l.SetWriteDeadline(t)
+	return nil
+}
+
+// SetReadDeadline implements the Conn SetReadDeadline method.
+func (l *Listener) SetReadDeadline(t time.Time) error {
+	l.rd.Store(t)
+	return nil
+}
+
+// SetWriteDeadline implements the Conn SetWriteDeadline method.
+func (l *Listener) SetWriteDeadline(t time.Time) error {
+	l.wd.Store(t)
+	return nil
 }
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
