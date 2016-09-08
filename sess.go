@@ -109,6 +109,8 @@ func newUDPSession(remote net.Addr, opts ...Option) (*UDPSession, error) {
 			sess.fec = typedOpt
 		case OptionWithConvId:
 			conv = typedOpt.Id
+		case net.PacketConn:
+			sess.conn = typedOpt
 		default:
 			return nil, fmt.Errorf("unrecognized option: %#v", typedOpt)
 		}
@@ -854,12 +856,6 @@ func (l *Listener) Addr() net.Addr {
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
 func Listen(laddr string) (*Listener, error) {
-	return ListenWithOptions(laddr)
-}
-
-// ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
-// dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
-func ListenWithOptions(laddr string, opts ...Option) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
@@ -868,9 +864,12 @@ func ListenWithOptions(laddr string, opts ...Option) (*Listener, error) {
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ListenUDP")
 	}
+	return ListenWithOptions(conn)
+}
 
+// ListenWithOptions listens for incoming KCP packets on the connection and options provided.
+func ListenWithOptions(opts ...Option) (*Listener, error) {
 	l := new(Listener)
-	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
 	l.chAccepts = make(chan *UDPSession, 1024)
 	l.chDeadlinks = make(chan net.Addr, 1024)
@@ -881,12 +880,18 @@ func ListenWithOptions(laddr string, opts ...Option) (*Listener, error) {
 			l.block = typedOpt
 		case *FEC:
 			l.fec = typedOpt
+		case net.PacketConn:
+			l.conn = typedOpt
 		default:
 			return nil, fmt.Errorf("unrecognized option: %#v", typedOpt)
 		}
 	}
 	l.rxbuf.New = func() interface{} {
 		return make([]byte, mtuLimit)
+	}
+
+	if l.conn == nil {
+		return nil, errors.New("no connection provided. Please provide a net.PacketConn as one of the options.")
 	}
 
 	// calculate header size
