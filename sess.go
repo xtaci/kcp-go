@@ -102,7 +102,7 @@ func newUDPSession(remote net.Addr, opts ...Option) (*UDPSession, error) {
 			sess.l = typedOpt
 			sess.conn = typedOpt.conn
 			sess.block = typedOpt.block
-			sess.fec = typedOpt.fec
+			sess.fec = newFEC(typedOpt.fec.rxlimit, typedOpt.fec.dataShards, typedOpt.fec.parityShards)
 		case BlockCrypt:
 			sess.block = typedOpt
 		case *FEC:
