@@ -31,32 +31,31 @@ type BlockCrypt interface {
 	Decrypt(dst, src []byte)
 }
 
-// Salsa20BlockCrypt implements BlockCrypt
-type Salsa20BlockCrypt struct {
+type salsa20BlockCrypt struct {
 	key [32]byte
 }
 
 // NewSalsa20BlockCrypt initates BlockCrypt by the given key
 func NewSalsa20BlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(Salsa20BlockCrypt)
+	c := new(salsa20BlockCrypt)
 	copy(c.key[:], key)
 	return c, nil
 }
 
 // Encrypt implements Encrypt interface
-func (c *Salsa20BlockCrypt) Encrypt(dst, src []byte) {
+func (c *salsa20BlockCrypt) Encrypt(dst, src []byte) {
 	salsa20.XORKeyStream(dst[8:], src[8:], src[:8], &c.key)
 	copy(dst[:8], src[:8])
 }
 
 // Decrypt implements Decrypt interface
-func (c *Salsa20BlockCrypt) Decrypt(dst, src []byte) {
+func (c *salsa20BlockCrypt) Decrypt(dst, src []byte) {
 	salsa20.XORKeyStream(dst[8:], src[8:], src[:8], &c.key)
 	copy(dst[:8], src[:8])
 }
 
-// TwofishBlockCrypt implements BlockCrypt
-type TwofishBlockCrypt struct {
+// twofishBlockCrypt implements BlockCrypt
+type twofishBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -64,7 +63,7 @@ type TwofishBlockCrypt struct {
 
 // NewTwofishBlockCrypt initates BlockCrypt by the given key
 func NewTwofishBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(TwofishBlockCrypt)
+	c := new(twofishBlockCrypt)
 	block, err := twofish.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -76,13 +75,13 @@ func NewTwofishBlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *TwofishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *twofishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *TwofishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *twofishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// TripleDESBlockCrypt implements BlockCrypt
-type TripleDESBlockCrypt struct {
+// tripleDESBlockCrypt implements BlockCrypt
+type tripleDESBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -90,7 +89,7 @@ type TripleDESBlockCrypt struct {
 
 // NewTripleDESBlockCrypt initates BlockCrypt by the given key
 func NewTripleDESBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(TripleDESBlockCrypt)
+	c := new(tripleDESBlockCrypt)
 	block, err := des.NewTripleDESCipher(key)
 	if err != nil {
 		return nil, err
@@ -102,13 +101,13 @@ func NewTripleDESBlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *TripleDESBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *tripleDESBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *TripleDESBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *tripleDESBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// Cast5BlockCrypt implements BlockCrypt
-type Cast5BlockCrypt struct {
+// cast5BlockCrypt implements BlockCrypt
+type cast5BlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -116,7 +115,7 @@ type Cast5BlockCrypt struct {
 
 // NewCast5BlockCrypt initates BlockCrypt by the given key
 func NewCast5BlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(Cast5BlockCrypt)
+	c := new(cast5BlockCrypt)
 	block, err := cast5.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -128,13 +127,13 @@ func NewCast5BlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *Cast5BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *cast5BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *Cast5BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *cast5BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// BlowfishBlockCrypt implements BlockCrypt
-type BlowfishBlockCrypt struct {
+// blowfishBlockCrypt implements BlockCrypt
+type blowfishBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -142,7 +141,7 @@ type BlowfishBlockCrypt struct {
 
 // NewBlowfishBlockCrypt initates BlockCrypt by the given key
 func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(BlowfishBlockCrypt)
+	c := new(blowfishBlockCrypt)
 	block, err := blowfish.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -154,13 +153,13 @@ func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *BlowfishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *blowfishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *BlowfishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *blowfishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// AESBlockCrypt implements BlockCrypt
-type AESBlockCrypt struct {
+// aesBlockCrypt implements BlockCrypt
+type aesBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -168,7 +167,7 @@ type AESBlockCrypt struct {
 
 // NewAESBlockCrypt initates BlockCrypt by the given key
 func NewAESBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(AESBlockCrypt)
+	c := new(aesBlockCrypt)
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -180,13 +179,13 @@ func NewAESBlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *AESBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *aesBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *AESBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *aesBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// TEABlockCrypt implements BlockCrypt
-type TEABlockCrypt struct {
+// teaBlockCrypt implements BlockCrypt
+type teaBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -194,7 +193,7 @@ type TEABlockCrypt struct {
 
 // NewTEABlockCrypt initate BlockCrypt by the given key
 func NewTEABlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(TEABlockCrypt)
+	c := new(teaBlockCrypt)
 	block, err := tea.NewCipherWithRounds(key, 16)
 	if err != nil {
 		return nil, err
@@ -206,13 +205,13 @@ func NewTEABlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *TEABlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *teaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *TEABlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *teaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// XTEABlockCrypt implements BlockCrypt
-type XTEABlockCrypt struct {
+// xteaABlockCrypt implements BlockCrypt
+type xteaBlockCrypt struct {
 	encbuf []byte
 	decbuf []byte
 	block  cipher.Block
@@ -220,7 +219,7 @@ type XTEABlockCrypt struct {
 
 // NewXTEABlockCrypt initate BlockCrypt by the given key
 func NewXTEABlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(XTEABlockCrypt)
+	c := new(xteaBlockCrypt)
 	block, err := xtea.NewCipher(key)
 	if err != nil {
 		return nil, err
@@ -232,42 +231,42 @@ func NewXTEABlockCrypt(key []byte) (BlockCrypt, error) {
 }
 
 // Encrypt implements Encrypt interface
-func (c *XTEABlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
+func (c *xteaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
 
 // Decrypt implements Decrypt interface
-func (c *XTEABlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *xteaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
 
-// SimpleXORBlockCrypt implements BlockCrypt
-type SimpleXORBlockCrypt struct {
+// simpleXORBlockCrypt implements BlockCrypt
+type simpleXORBlockCrypt struct {
 	xortbl []byte
 }
 
 // NewSimpleXORBlockCrypt initate BlockCrypt by the given key
 func NewSimpleXORBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(SimpleXORBlockCrypt)
+	c := new(simpleXORBlockCrypt)
 	c.xortbl = pbkdf2.Key(key, []byte(saltxor), 32, mtuLimit, sha1.New)
 	return c, nil
 }
 
 // Encrypt implements Encrypt interface
-func (c *SimpleXORBlockCrypt) Encrypt(dst, src []byte) { xorBytes(dst, src, c.xortbl) }
+func (c *simpleXORBlockCrypt) Encrypt(dst, src []byte) { xorBytes(dst, src, c.xortbl) }
 
 // Decrypt implements Decrypt interface
-func (c *SimpleXORBlockCrypt) Decrypt(dst, src []byte) { xorBytes(dst, src, c.xortbl) }
+func (c *simpleXORBlockCrypt) Decrypt(dst, src []byte) { xorBytes(dst, src, c.xortbl) }
 
-// NoneBlockCrypt simple returns the plaintext
-type NoneBlockCrypt struct{}
+// noneBlockCrypt simple returns the plaintext
+type noneBlockCrypt struct{}
 
 // NewNoneBlockCrypt initate by the given key
 func NewNoneBlockCrypt(key []byte) (BlockCrypt, error) {
-	return new(NoneBlockCrypt), nil
+	return new(noneBlockCrypt), nil
 }
 
 // Encrypt implements Encrypt interface
-func (c *NoneBlockCrypt) Encrypt(dst, src []byte) { copy(dst, src) }
+func (c *noneBlockCrypt) Encrypt(dst, src []byte) { copy(dst, src) }
 
 // Decrypt implements Decrypt interface
-func (c *NoneBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
+func (c *noneBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
 
 // packet encryption with local CFB mode
 func encrypt(block cipher.Block, dst, src, buf []byte) {

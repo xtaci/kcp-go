@@ -150,26 +150,24 @@ type KCP struct {
 	snd_buf   []Segment
 	rcv_buf   []Segment
 
-	acklist ACKList
+	acklist ackList
 
 	buffer []byte
 	output Output
 }
 
-// ACK packet to return
-type ACK struct {
+type ackItem struct {
 	sn uint32
 	ts uint32
 }
 
-// ACKList is heapified
-type ACKList []ACK
+type ackList []ackItem
 
-func (l ACKList) Len() int            { return len(l) }
-func (l ACKList) Less(i, j int) bool  { return l[i].sn < l[j].sn }
-func (l ACKList) Swap(i, j int)       { l[i], l[j] = l[j], l[i] }
-func (l *ACKList) Push(x interface{}) { *l = append(*l, x.(ACK)) }
-func (l *ACKList) Pop() interface{} {
+func (l ackList) Len() int            { return len(l) }
+func (l ackList) Less(i, j int) bool  { return l[i].sn < l[j].sn }
+func (l ackList) Swap(i, j int)       { l[i], l[j] = l[j], l[i] }
+func (l *ackList) Push(x interface{}) { *l = append(*l, x.(ackItem)) }
+func (l *ackList) Pop() interface{} {
 	old := *l
 	n := len(old)
 	x := old[n-1]
@@ -428,7 +426,7 @@ func (kcp *KCP) parse_una(una uint32) {
 
 // ack append
 func (kcp *KCP) ack_push(sn, ts uint32) {
-	heap.Push(&kcp.acklist, ACK{sn, ts})
+	heap.Push(&kcp.acklist, ackItem{sn, ts})
 }
 
 func (kcp *KCP) parse_data(newseg *Segment) {
@@ -625,7 +623,7 @@ func (kcp *KCP) flush() {
 			kcp.output(buffer, size)
 			ptr = buffer
 		}
-		ack := heap.Pop(&kcp.acklist).(ACK)
+		ack := heap.Pop(&kcp.acklist).(ackItem)
 		seg.sn, seg.ts = ack.sn, ack.ts
 		ptr = seg.encode(ptr)
 	}
