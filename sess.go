@@ -823,7 +823,7 @@ func (l *Listener) Addr() net.Addr {
 }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
-func Listen(laddr string) (*Listener, error) {
+func Listen(laddr string) (net.Listener, error) {
 	return ListenWithOptions(laddr, nil, 0, 0)
 }
 
@@ -866,7 +866,7 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 }
 
 // Dial connects to the remote address "raddr" on the network "udp"
-func Dial(raddr string) (*UDPSession, error) {
+func Dial(raddr string) (net.Conn, error) {
 	return DialWithOptions(raddr, nil, 0, 0)
 }
 
