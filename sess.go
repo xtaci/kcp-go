@@ -882,9 +882,8 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
-	buf := make([]byte, 4)
-	io.ReadFull(rand.Reader, buf)
-	convid := binary.LittleEndian.Uint32(buf)
+	var convid uint32
+	binary.Read(rand.Reader, binary.LittleEndian, &convid)
 	for k := range opts {
 		switch opt := opts[k].(type) {
 		case OptionWithConvId:
