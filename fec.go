@@ -239,3 +239,10 @@ func (fec *FEC) calcECC(data [][]byte, offset, maxlen int) (ecc [][]byte) {
 	}
 	return data[fec.dataShards:]
 }
+
+func (fec *FEC) clone() *FEC {
+	if fec == nil {
+		return nil
+	}
+	return newFEC(fec.rxlimit, fec.dataShards, fec.parityShards)
+}
