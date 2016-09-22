@@ -80,9 +80,8 @@ type (
 
 // newUDPSession create a new udp session for client or server
 func newUDPSession(remote net.Addr, opts ...Option) (*UDPSession, error) {
-	buf := make([]byte, 4)
-	io.ReadFull(rand.Reader, buf)
-	conv := binary.LittleEndian.Uint32(buf)
+	var conv uint32
+	binary.Read(rand.Reader, binary.LittleEndian, &conv)
 
 	sess := new(UDPSession)
 	sess.chTicker = make(chan time.Time, 1)
