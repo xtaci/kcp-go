@@ -450,11 +450,10 @@ func (s *UDPSession) outputTask() {
 				interval := s.keepAliveInterval
 				s.mu.Unlock()
 				if interval > 0 && time.Now().After(lastPing.Add(interval)) {
-					buf := make([]byte, 2)
-					io.ReadFull(rand.Reader, buf)
-					rnd := int(binary.LittleEndian.Uint16(buf))
-					sz := rnd%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
-					ping := make([]byte, sz)
+					var rnd uint16
+					binary.Read(rand.Reader, binary.LittleEndian, &rnd)
+					sz := int(rnd)%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
+					ping := make([]byte, sz) // randomized ping packet
 					io.ReadFull(rand.Reader, ping)
 					s.conn.WriteTo(ping, s.remote)
 					lastPing = time.Now()
