@@ -366,16 +366,6 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 	s.keepAliveInterval = time.Duration(interval) * time.Second
 }
 
-// writeTo wraps write method for client & listener
-func (s *UDPSession) writeTo(b []byte, addr net.Addr) (int, error) {
-	if s.l == nil {
-		if nc, ok := s.conn.(io.Writer); ok {
-			return nc.Write(b)
-		}
-	}
-	return s.conn.WriteTo(b, addr)
-}
-
 func (s *UDPSession) outputTask() {
 	// offset pre-compute
 	fecOffset := 0
@@ -446,7 +436,7 @@ func (s *UDPSession) outputTask() {
 			}
 
 			//if rand.Intn(100) < 80 {
-			if n, err := s.writeTo(ext, s.remote); err == nil {
+			if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
 				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 			}
@@ -454,7 +444,7 @@ func (s *UDPSession) outputTask() {
 
 			if ecc != nil {
 				for k := range ecc {
-					if n, err := s.writeTo(ecc[k], s.remote); err == nil {
+					if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
 						atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 						atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 					}
@@ -474,7 +464,7 @@ func (s *UDPSession) outputTask() {
 					sz := rnd%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
 					ping := make([]byte, sz)
 					io.ReadFull(rand.Reader, ping)
-					s.writeTo(ping, s.remote)
+					s.conn.WriteTo(ping, s.remote)
 					lastPing = time.Now()
 				}
 			}
@@ -892,9 +882,23 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 			return nil, errors.New("unrecognized option")
 		}
 	}
-	return newUDPSession(convid, dataShards, parityShards, nil, udpconn, udpaddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, &ConnectedUDPConn{udpconn}, udpaddr, block), nil
 }
+
+// CreateSession creates a KCP compatiable session with provided underlying connection
 
 func currentMs() uint32 {
 	return uint32(time.Now().UnixNano() / int64(time.Millisecond))
+}
+
+// ConnectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
+// to Write syscalls that are 4 times faster on some OS'es. This should only be
+// used for connections that were produced by a net.Dial* call.
+type ConnectedUDPConn struct {
+	*net.UDPConn
+}
+
+// WriteTo redirects all writes to the Write syscall, which is 4 times faster.
+func (c *ConnectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+	return c.Write(b)
 }
