@@ -829,6 +829,11 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 		return nil, errors.Wrap(err, "net.ListenUDP")
 	}
 
+	return ServeConn(block, dataShards, parityShards, conn)
+}
+
+// ServeConn serve KCP protocol for a single connection
+func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*Listener, error) {
 	l := new(Listener)
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
@@ -872,6 +877,16 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
+	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn}, opts...)
+}
+
+// NewClient establishes a session over a connection
+func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn, opts ...Option) (*UDPSession, error) {
+	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+	}
+
 	var convid uint32
 	binary.Read(rand.Reader, binary.LittleEndian, &convid)
 	for k := range opts {
@@ -882,10 +897,8 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 			return nil, errors.New("unrecognized option")
 		}
 	}
-	return newUDPSession(convid, dataShards, parityShards, nil, &ConnectedUDPConn{udpconn}, udpaddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
 }
-
-// CreateSession creates a KCP compatiable session with provided underlying connection
 
 func currentMs() uint32 {
 	return uint32(time.Now().UnixNano() / int64(time.Millisecond))
