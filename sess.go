@@ -880,7 +880,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn}, opts...)
 }
 
-// NewClient establishes a session over a connection
+// NewConn establishes a session over a connection
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn, opts ...Option) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
