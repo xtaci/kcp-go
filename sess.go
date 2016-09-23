@@ -832,7 +832,7 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 	return ServeConn(block, dataShards, parityShards, conn)
 }
 
-// ServeConn serve KCP protocol for a single connection
+// ServeConn serves KCP protocol for a single packet connection.
 func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*Listener, error) {
 	l := new(Listener)
 	l.conn = conn
@@ -880,7 +880,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn}, opts...)
 }
 
-// NewConn establishes a session over a connection
+// NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn, opts ...Option) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
