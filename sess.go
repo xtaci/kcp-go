@@ -16,14 +16,6 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// Option defines extra options
-type Option interface{}
-
-// OptionWithConvId defines conversation id
-type OptionWithConvId struct {
-	Id uint32
-}
-
 type errTimeout struct {
 	error
 }
@@ -866,7 +858,7 @@ func Dial(raddr string) (net.Conn, error) {
 }
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
-func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, opts ...Option) (*UDPSession, error) {
+func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
@@ -877,11 +869,11 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
-	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn}, opts...)
+	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn})
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
-func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn, opts ...Option) (*UDPSession, error) {
+func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
@@ -889,14 +881,6 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 
 	var convid uint32
 	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	for k := range opts {
-		switch opt := opts[k].(type) {
-		case OptionWithConvId:
-			convid = opt.Id
-		default:
-			return nil, errors.New("unrecognized option")
-		}
-	}
 	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
 }
 
