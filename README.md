@@ -81,6 +81,10 @@ ok  	github.com/xtaci/kcp-go	0.600s
 2. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
 3. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
 
+## Status
+
+Production Ready
+
 ## Donation
 
 ![donate](donate.png)          
