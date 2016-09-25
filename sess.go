@@ -392,11 +392,12 @@ func (s *UDPSession) outputTask() {
 				binary.LittleEndian.PutUint16(ext[szOffset:], uint16(len(ext[szOffset:])))
 
 				// copy data to fec group
-				xorBytes(fecGroup[fecCnt], fecGroup[fecCnt], fecGroup[fecCnt])
+				sz := len(ext)
 				copy(fecGroup[fecCnt], ext)
+				xorBytes(fecGroup[fecCnt][sz:], fecGroup[fecCnt][sz:], fecGroup[fecCnt][sz:])
 				fecCnt++
-				if len(ext) > fecMaxSize {
-					fecMaxSize = len(ext)
+				if sz > fecMaxSize {
+					fecMaxSize = sz
 				}
 
 				//  calculate Reed-Solomon Erasure Code
