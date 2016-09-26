@@ -445,7 +445,6 @@ func (s *UDPSession) outputTask() {
 					}
 				}
 			}
-			xorBytes(ext, ext, ext)
 			s.xmitBuf.Put(ext)
 		case <-ticker.C: // NAT keep-alive
 			if len(s.chUDPOutput) == 0 {
@@ -613,7 +612,6 @@ func (s *UDPSession) readLoop() {
 			if dataValid {
 				s.kcpInput(data)
 			}
-			xorBytes(raw, raw, raw)
 			s.xmitBuf.Put(raw)
 		case <-s.die:
 			return
@@ -699,7 +697,6 @@ func (l *Listener) monitor() {
 				}
 			}
 
-			xorBytes(raw, raw, raw)
 			l.rxbuf.Put(raw)
 		case deadlink := <-l.chDeadlinks:
 			delete(l.sessions, deadlink.String())
