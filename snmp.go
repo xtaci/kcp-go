@@ -12,6 +12,7 @@ type Snmp struct {
 	CurrEstab        uint64
 	InErrs           uint64
 	InCsumErrors     uint64 // checksum errors
+	KCPInErrors      uint64 // packet iput error count from kcp
 	InSegs           uint64
 	OutSegs          uint64
 	OutBytes         uint64 // udp bytes sent

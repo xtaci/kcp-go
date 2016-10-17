@@ -534,7 +534,9 @@ func (s *UDPSession) kcpInput(data []byte) {
 				for k := range recovers {
 					sz := binary.LittleEndian.Uint16(recovers[k])
 					if int(sz) <= len(recovers[k]) && sz >= 2 {
-						s.kcp.Input(recovers[k][2:sz], false)
+						if ret := s.kcp.Input(recovers[k][2:sz], false); ret != 0 {
+							atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+						}
 					} else {
 						atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
 					}
@@ -546,13 +548,17 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if f.flag == typeData {
 			s.mu.Lock()
 			s.kcp.current = current
-			s.kcp.Input(data[fecHeaderSizePlus2:], true)
+			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true); ret != 0 {
+				atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+			}
 			s.mu.Unlock()
 		}
 	} else {
 		s.mu.Lock()
 		s.kcp.current = current
-		s.kcp.Input(data, true)
+		if ret := s.kcp.Input(data, true); ret != 0 {
+			atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+		}
 		s.mu.Unlock()
 	}
 

@@ -87,7 +87,11 @@ func TestFECLost2(t *testing.T) {
 			fec.markFEC(ecc[k])
 		}
 		t.Log("ecc:", ecc)
-		lost1, lost2 := rand.Intn(13), rand.Intn(13)
+		lost1 := rand.Intn(13)
+		lost2 := rand.Intn(13)
+		for lost2 == lost1 {
+			lost2 = rand.Intn(13)
+		}
 		t.Log(" lost1:", data[lost1])
 		t.Log(" lost2:", data[lost2])
 		for k := range data {
