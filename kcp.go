@@ -249,7 +249,6 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
 		count++
-		seg.data = nil
 		if seg.frg == 0 {
 			break
 		}
@@ -261,14 +260,13 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
-			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
 			kcp.rcv_nxt++
 			count++
-			seg.data = nil
 		} else {
 			break
 		}
 	}
+	kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
 	kcp.rcv_buf = kcp.rcv_buf[count:]
 
 	// fast recover
@@ -416,7 +414,6 @@ func (kcp *KCP) parse_una(una uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
 			count++
-			seg.data = nil
 		} else {
 			break
 		}
@@ -468,14 +465,13 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
 		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
-			kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[k])
 			kcp.rcv_nxt++
 			count++
-			seg.data = nil
 		} else {
 			break
 		}
 	}
+	kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
 	kcp.rcv_buf = kcp.rcv_buf[count:]
 }
 
