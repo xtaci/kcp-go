@@ -430,7 +430,6 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	sn := newseg.sn
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
-		atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 		return
 	}
 
@@ -544,7 +543,11 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 					seg.una = una
 					copy(seg.data, data[:length])
 					kcp.parse_data(seg)
+				} else {
+					atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 				}
+			} else {
+				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
 		} else if cmd == IKCP_CMD_WASK {
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
