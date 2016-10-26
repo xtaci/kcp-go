@@ -161,18 +161,24 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		var timeout <-chan time.Time
+		var timeout *time.Timer
+		var c <-chan time.Time
 		if !s.rd.IsZero() {
 			delay := s.rd.Sub(time.Now())
-			timeout = time.After(delay)
+			timeout = time.NewTimer(delay)
+			c = timeout.C
 		}
 		s.mu.Unlock()
 
 		// wait for read event or timeout
 		select {
 		case <-s.chReadEvent:
-		case <-timeout:
+		case <-c:
 		case <-s.die:
+		}
+
+		if timeout != nil {
+			timeout.Stop()
 		}
 	}
 }
@@ -212,18 +218,24 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		var timeout <-chan time.Time
+		var timeout *time.Timer
+		var c <-chan time.Time
 		if !s.wd.IsZero() {
 			delay := s.wd.Sub(time.Now())
-			timeout = time.After(delay)
+			timeout = time.NewTimer(delay)
+			c = timeout.C
 		}
 		s.mu.Unlock()
 
 		// wait for write event or timeout
 		select {
 		case <-s.chWriteEvent:
-		case <-timeout:
+		case <-c:
 		case <-s.die:
+		}
+
+		if timeout != nil {
+			timeout.Stop()
 		}
 	}
 }
