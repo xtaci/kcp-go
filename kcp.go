@@ -4,6 +4,7 @@ package kcp
 import (
 	"container/heap"
 	"encoding/binary"
+	"sync"
 	"sync/atomic"
 )
 
@@ -123,13 +124,6 @@ func (seg *Segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
-// NewSegment creates a KCP segment
-func NewSegment(size int) *Segment {
-	seg := new(Segment)
-	seg.data = make([]byte, size)
-	return seg
-}
-
 // KCP defines a single KCP connection
 type KCP struct {
 	conv, mtu, mss, state                  uint32
@@ -152,8 +146,9 @@ type KCP struct {
 
 	acklist ackList
 
-	buffer []byte
-	output Output
+	buffer  []byte
+	output  Output
+	xmitBuf sync.Pool
 }
 
 type ackItem struct {
@@ -193,7 +188,22 @@ func NewKCP(conv uint32, output Output) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
+	kcp.xmitBuf.New = func() interface{} {
+		return make([]byte, mtuLimit)
+	}
 	return kcp
+}
+
+// newSegment creates a KCP segment
+func (kcp *KCP) newSegment(size int) *Segment {
+	seg := new(Segment)
+	seg.data = kcp.xmitBuf.Get().([]byte)[:size]
+	return seg
+}
+
+// delSegment recycles a KCP segment
+func (kcp *KCP) delSegment(seg *Segment) {
+	kcp.xmitBuf.Put(seg.data)
 }
 
 // PeekSize checks the size of next message in the recv queue
@@ -249,6 +259,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
 		count++
+		kcp.delSegment(seg)
 		if seg.frg == 0 {
 			break
 		}
@@ -296,12 +307,13 @@ func (kcp *KCP) Send(buffer []byte) int {
 				if len(buffer) < capacity {
 					extend = len(buffer)
 				}
-				seg := NewSegment(len(old.data) + extend)
+				seg := kcp.newSegment(len(old.data) + extend)
 				seg.frg = 0
 				copy(seg.data, old.data)
 				copy(seg.data[len(old.data):], buffer)
 				buffer = buffer[extend:]
 				kcp.snd_queue[n-1] = *seg
+				kcp.delSegment(old)
 			}
 		}
 
@@ -331,7 +343,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		} else {
 			size = len(buffer)
 		}
-		seg := NewSegment(size)
+		seg := kcp.newSegment(size)
 		copy(seg.data, buffer[:size])
 		if kcp.stream == 0 { // message mode
 			seg.frg = uint32(count - i - 1)
@@ -382,6 +394,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if sn == seg.sn {
+			kcp.delSegment(seg)
 			copy(kcp.snd_buf[k:], kcp.snd_buf[k+1:])
 			kcp.snd_buf[len(kcp.snd_buf)-1] = Segment{}
 			kcp.snd_buf = kcp.snd_buf[:len(kcp.snd_buf)-1]
@@ -413,6 +426,7 @@ func (kcp *KCP) parse_una(una uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
+			kcp.delSegment(seg)
 			count++
 		} else {
 			break
@@ -430,6 +444,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 	sn := newseg.sn
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
+		kcp.delSegment(newseg)
 		return
 	}
 
@@ -457,6 +472,8 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 			copy(kcp.rcv_buf[insert_idx+1:], kcp.rcv_buf[insert_idx:])
 			kcp.rcv_buf[insert_idx] = *newseg
 		}
+	} else {
+		kcp.delSegment(newseg)
 	}
 
 	// move available data from rcv_buf -> rcv_queue
@@ -533,7 +550,7 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
-					seg := NewSegment(int(length))
+					seg := kcp.newSegment(int(length))
 					seg.conv = conv
 					seg.cmd = uint32(cmd)
 					seg.frg = uint32(frg)
