@@ -312,8 +312,8 @@ func (kcp *KCP) Send(buffer []byte) int {
 				copy(seg.data, old.data)
 				copy(seg.data[len(old.data):], buffer)
 				buffer = buffer[extend:]
-				kcp.snd_queue[n-1] = *seg
 				kcp.delSegment(old)
+				kcp.snd_queue[n-1] = *seg
 			}
 		}
 
