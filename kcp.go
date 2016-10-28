@@ -712,8 +712,6 @@ func (kcp *KCP) flush() {
 		newseg.una = kcp.rcv_nxt
 		newseg.resendts = current
 		newseg.rto = kcp.rx_rto
-		newseg.fastack = 0
-		newseg.xmit = 0
 		kcp.snd_buf = append(kcp.snd_buf, newseg)
 		kcp.snd_nxt++
 		count++
