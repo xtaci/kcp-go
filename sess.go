@@ -387,13 +387,15 @@ func (s *UDPSession) outputTask() {
 	szOffset := fecOffset + fecHeaderSize
 
 	// fec data group
+	var cacheLine []byte
 	var fecGroup [][]byte
 	var fecCnt int
 	var fecMaxSize int
 	if s.fec != nil {
+		cacheLine = make([]byte, s.fec.shardSize*mtuLimit)
 		fecGroup = make([][]byte, s.fec.shardSize)
 		for k := range fecGroup {
-			fecGroup[k] = make([]byte, mtuLimit)
+			fecGroup[k] = cacheLine[k*mtuLimit : (k+1)*mtuLimit]
 		}
 	}
 
