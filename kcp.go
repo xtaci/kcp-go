@@ -4,7 +4,6 @@ package kcp
 import (
 	"container/heap"
 	"encoding/binary"
-	"sync"
 	"sync/atomic"
 )
 
@@ -146,9 +145,8 @@ type KCP struct {
 
 	acklist ackList
 
-	buffer  []byte
-	output  Output
-	xmitBuf sync.Pool
+	buffer []byte
+	output Output
 }
 
 type ackItem struct {
@@ -188,22 +186,19 @@ func NewKCP(conv uint32, output Output) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
-	kcp.xmitBuf.New = func() interface{} {
-		return make([]byte, mtuLimit)
-	}
 	return kcp
 }
 
 // newSegment creates a KCP segment
 func (kcp *KCP) newSegment(size int) *Segment {
 	seg := new(Segment)
-	seg.data = kcp.xmitBuf.Get().([]byte)[:size]
+	seg.data = xmitBuf.Get().([]byte)[:size]
 	return seg
 }
 
 // delSegment recycles a KCP segment
 func (kcp *KCP) delSegment(seg *Segment) {
-	kcp.xmitBuf.Put(seg.data)
+	xmitBuf.Put(seg.data)
 }
 
 // PeekSize checks the size of next message in the recv queue

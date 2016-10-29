@@ -35,6 +35,16 @@ const (
 	defaultKeepAliveInterval = 10 * time.Second
 )
 
+var (
+	xmitBuf sync.Pool
+)
+
+func init() {
+	xmitBuf.New = func() interface{} {
+		return make([]byte, mtuLimit)
+	}
+}
+
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
@@ -56,7 +66,6 @@ type (
 		ackNoDelay        bool
 		isClosed          bool
 		keepAliveInterval time.Duration
-		xmitBuf           sync.Pool
 		mu                sync.Mutex
 	}
 
@@ -83,9 +92,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.l = l
 	sess.block = block
 	sess.fec = newFEC(rxFecLimit, dataShards, parityShards)
-	sess.xmitBuf.New = func() interface{} {
-		return make([]byte, mtuLimit)
-	}
 	// calculate header size
 	if sess.block != nil {
 		sess.headerSize += cryptHeaderSize
@@ -96,7 +102,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		if size >= IKCP_OVERHEAD {
-			ext := sess.xmitBuf.Get().([]byte)[:sess.headerSize+size]
+			ext := xmitBuf.Get().([]byte)[:sess.headerSize+size]
 			copy(ext[sess.headerSize:], buf)
 			select {
 			case sess.chUDPOutput <- ext:
@@ -457,7 +463,7 @@ func (s *UDPSession) outputTask() {
 					}
 				}
 			}
-			s.xmitBuf.Put(ext)
+			xmitBuf.Put(ext)
 		case <-ticker.C: // NAT keep-alive
 			if len(s.chUDPOutput) == 0 {
 				s.mu.Lock()
@@ -589,7 +595,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 func (s *UDPSession) receiver(ch chan []byte) {
 	for {
-		data := s.xmitBuf.Get().([]byte)[:mtuLimit]
+		data := xmitBuf.Get().([]byte)[:mtuLimit]
 		if n, _, err := s.conn.ReadFrom(data); err == nil && n >= s.headerSize+IKCP_OVERHEAD {
 			select {
 			case ch <- data[:n]:
@@ -630,7 +636,7 @@ func (s *UDPSession) readLoop() {
 			if dataValid {
 				s.kcpInput(data)
 			}
-			s.xmitBuf.Put(raw)
+			xmitBuf.Put(raw)
 		case <-s.die:
 			return
 		}
