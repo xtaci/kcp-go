@@ -415,8 +415,8 @@ func (s *UDPSession) outputTask() {
 
 				// copy data to fec group
 				sz := len(ext)
+				fecGroup[fecCnt] = fecGroup[fecCnt][:sz]
 				copy(fecGroup[fecCnt], ext)
-				xorBytes(fecGroup[fecCnt][sz:], fecGroup[fecCnt][sz:], fecGroup[fecCnt][sz:])
 				fecCnt++
 				if sz > fecMaxSize {
 					fecMaxSize = sz
@@ -424,6 +424,11 @@ func (s *UDPSession) outputTask() {
 
 				//  calculate Reed-Solomon Erasure Code
 				if fecCnt == s.fec.dataShards {
+					for i := 0; i < s.fec.dataShards; i++ {
+						shard := fecGroup[i]
+						slen := len(shard)
+						xorBytes(shard[slen:fecMaxSize], shard[slen:fecMaxSize], shard[slen:fecMaxSize])
+					}
 					ecc = s.fec.calcECC(fecGroup, szOffset, fecMaxSize)
 					for k := range ecc {
 						s.fec.markFEC(ecc[k][fecOffset:])
