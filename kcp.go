@@ -760,7 +760,7 @@ func (kcp *KCP) flush() {
 			change++
 			fastRetransSegs++
 		} else if segment.fastack > 0 && !hasPending &&
-			_itimediff(segment.resendts, current) < int32(kcp.rx_rto/2) {
+			_itimediff(segment.resendts, current) < 3*int32(kcp.rx_rto/4) {
 			// early retransmit
 			needsend = true
 			segment.xmit++
