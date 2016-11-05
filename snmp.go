@@ -4,25 +4,26 @@ import "sync/atomic"
 
 // Snmp defines network statistics indicator
 type Snmp struct {
-	BytesSent       uint64 // payload bytes sent
-	BytesReceived   uint64
-	MaxConn         uint64
-	ActiveOpens     uint64
-	PassiveOpens    uint64
-	CurrEstab       uint64
-	InErrs          uint64
-	InCsumErrors    uint64 // checksum errors
-	KCPInErrors     uint64 // packet iput error count from kcp
-	InSegs          uint64
-	OutSegs         uint64
-	OutBytes        uint64 // udp bytes sent
-	RetransSegs     uint64
-	FastRetransSegs uint64
-	LostSegs        uint64
-	RepeatSegs      uint64
-	FECRecovered    uint64
-	FECErrs         uint64
-	FECSegs         uint64 // fec segments received
+	BytesSent        uint64 // payload bytes sent
+	BytesReceived    uint64
+	MaxConn          uint64
+	ActiveOpens      uint64
+	PassiveOpens     uint64
+	CurrEstab        uint64
+	InErrs           uint64
+	InCsumErrors     uint64 // checksum errors
+	KCPInErrors      uint64 // packet iput error count from kcp
+	InSegs           uint64
+	OutSegs          uint64
+	OutBytes         uint64 // udp bytes sent
+	RetransSegs      uint64
+	FastRetransSegs  uint64
+	EarlyRetransSegs uint64
+	LostSegs         uint64
+	RepeatSegs       uint64
+	FECRecovered     uint64
+	FECErrs          uint64
+	FECSegs          uint64 // fec segments received
 }
 
 func newSnmp() *Snmp {
@@ -45,6 +46,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.OutBytes = atomic.LoadUint64(&s.OutBytes)
 	d.RetransSegs = atomic.LoadUint64(&s.RetransSegs)
 	d.FastRetransSegs = atomic.LoadUint64(&s.FastRetransSegs)
+	d.EarlyRetransSegs = atomic.LoadUint64(&s.EarlyRetransSegs)
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
 	d.FECSegs = atomic.LoadUint64(&s.FECSegs)

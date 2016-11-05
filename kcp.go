@@ -725,7 +725,8 @@ func (kcp *KCP) flush() {
 	}
 
 	// flush data segments
-	var lostSegs, fastRetransSegs uint64
+	nque := len(kcp.snd_queue)
+	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	for k := range kcp.snd_buf {
 		segment := &kcp.snd_buf[k]
 		needsend := false
@@ -753,6 +754,14 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			change++
 			fastRetransSegs++
+		} else if segment.fastack > 0 && nque == 0 {
+			// early retransmit
+			needsend = true
+			segment.xmit++
+			segment.fastack = 0
+			segment.resendts = current + segment.rto
+			change++
+			earlyRetransSegs++
 		}
 
 		if needsend {
@@ -778,8 +787,9 @@ func (kcp *KCP) flush() {
 		}
 	}
 
-	atomic.AddUint64(&DefaultSnmp.RetransSegs, lostSegs+fastRetransSegs)
+	atomic.AddUint64(&DefaultSnmp.RetransSegs, lostSegs+fastRetransSegs+earlyRetransSegs)
 	atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
+	atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
 	atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
 
 	// flash remain segments
