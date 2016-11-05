@@ -205,7 +205,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			}
 		}
 
-		if s.kcp.WaitSnd() < 2*int(s.kcp.snd_wnd) {
+		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 			n = len(b)
 			max := s.kcp.mss << 8
 			for {

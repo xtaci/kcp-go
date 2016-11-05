@@ -714,6 +714,12 @@ func (kcp *KCP) flush() {
 	}
 	kcp.snd_queue = kcp.snd_queue[count:]
 
+	// flag pending data
+	hasPending := false
+	if count > 0 {
+		hasPending = true
+	}
+
 	// calculate resent
 	resent := uint32(kcp.fastresend)
 	if kcp.fastresend <= 0 {
@@ -725,7 +731,6 @@ func (kcp *KCP) flush() {
 	}
 
 	// flush data segments
-	nque := len(kcp.snd_queue)
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	for k := range kcp.snd_buf {
 		segment := &kcp.snd_buf[k]
@@ -754,7 +759,8 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			change++
 			fastRetransSegs++
-		} else if segment.fastack > 0 && nque == 0 {
+		} else if segment.fastack > 0 && !hasPending &&
+			_itimediff(segment.resendts, current) < int32(kcp.rx_rto/2) {
 			// early retransmit
 			needsend = true
 			segment.xmit++
