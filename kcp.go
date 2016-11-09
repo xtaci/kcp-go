@@ -635,8 +635,10 @@ func (kcp *KCP) flush() {
 			ptr = buffer
 		}
 		ack := heap.Pop(&kcp.acklist).(ackItem)
-		seg.sn, seg.ts = ack.sn, ack.ts
-		ptr = seg.encode(ptr)
+		if ack.sn > kcp.rcv_nxt || kcp.acklist.Len() == 0 {
+			seg.sn, seg.ts = ack.sn, ack.ts
+			ptr = seg.encode(ptr)
+		}
 	}
 	kcp.acklist = nil
 
