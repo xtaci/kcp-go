@@ -35,6 +35,10 @@ const (
 	defaultKeepAliveInterval = 10 * time.Second
 )
 
+const (
+	errBrokenPipe = "broken pipe"
+)
+
 var (
 	xmitBuf sync.Pool
 )
@@ -143,7 +147,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, errors.New("broken pipe")
+			return 0, errors.New(errBrokenPipe)
 		}
 
 		if !s.rd.IsZero() {
@@ -195,7 +199,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		s.mu.Lock()
 		if s.isClosed {
 			s.mu.Unlock()
-			return 0, errors.New("broken pipe")
+			return 0, errors.New(errBrokenPipe)
 		}
 
 		if !s.wd.IsZero() {
@@ -251,7 +255,7 @@ func (s *UDPSession) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.isClosed {
-		return errors.New("broken pipe")
+		return errors.New(errBrokenPipe)
 	}
 	close(s.die)
 	s.isClosed = true
@@ -800,7 +804,7 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
-		return nil, errors.New("listener stopped")
+		return nil, errors.New(errBrokenPipe)
 	}
 }
 
