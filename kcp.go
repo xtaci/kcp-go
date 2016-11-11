@@ -695,6 +695,7 @@ func (kcp *KCP) flush() {
 		cwnd = _imin_(kcp.cwnd, cwnd)
 	}
 
+	// sliding window, controlled by snd_nxt && sna_una+cwnd
 	count := 0
 	for k := range kcp.snd_queue {
 		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) >= 0 {
