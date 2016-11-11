@@ -604,8 +604,8 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 }
 
 func (kcp *KCP) wnd_unused() int32 {
-	if wnd := int(kcp.rcv_wnd) - len(kcp.rcv_queue) - len(kcp.rcv_buf); wnd >= 0 {
-		return int32(wnd)
+	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
+		return int32(int(kcp.rcv_wnd) - len(kcp.rcv_queue))
 	}
 	return 0
 }
