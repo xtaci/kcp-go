@@ -31,7 +31,7 @@ const (
 	cryptHeaderSize          = nonceSize + crcSize
 	mtuLimit                 = 2048
 	txQueueLimit             = 8192
-	rxFecLimit               = 8192
+	rxFECMulti               = 3 // FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
 	defaultKeepAliveInterval = 10 * time.Second
 )
 
@@ -95,7 +95,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.keepAliveInterval = defaultKeepAliveInterval
 	sess.l = l
 	sess.block = block
-	sess.fec = newFEC(rxFecLimit, dataShards, parityShards)
+	sess.fec = newFEC(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
 	// calculate header size
 	if sess.block != nil {
 		sess.headerSize += cryptHeaderSize
@@ -869,7 +869,7 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.dataShards = dataShards
 	l.parityShards = parityShards
 	l.block = block
-	l.fec = newFEC(rxFecLimit, dataShards, parityShards)
+	l.fec = newFEC(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
 	l.rxbuf.New = func() interface{} {
 		return make([]byte, mtuLimit)
 	}
