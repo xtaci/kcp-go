@@ -24,7 +24,7 @@ kcp-go is a full-featured ***reliable-UDP*** library for golang. It provides ***
 ## Features
 
 1. Optimized for ***Real-Time Strategy Game***.
-1. Compatible with [skywind3000's](https://github.com/skywind3000) C version with optimizations for golang.
+1. Compatible with [skywind3000's](https://github.com/skywind3000) C version with optimizations.
 1. ***Cache friendly*** and ***Memory optimized*** design in golang.
 1. Compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener).
 1. [FEC(Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) Support with [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction)
