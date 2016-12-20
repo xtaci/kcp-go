@@ -257,6 +257,8 @@ func client3(wg *sync.WaitGroup) {
 		cli.Close()
 		fmt.Println("time for 16MB rtt with encryption", time.Now().Sub(start))
 		fmt.Printf("%+v\n", DefaultSnmp.Copy())
+		fmt.Println(DefaultSnmp.Header())
+		fmt.Println(DefaultSnmp.ToSlice())
 		wg.Done()
 	}()
 	msg := make([]byte, 4096)

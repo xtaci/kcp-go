@@ -1,6 +1,9 @@
 package kcp
 
-import "sync/atomic"
+import (
+	"fmt"
+	"sync/atomic"
+)
 
 // Snmp defines network statistics indicator
 type Snmp struct {
@@ -31,6 +34,59 @@ func newSnmp() *Snmp {
 	return new(Snmp)
 }
 
+func (s *Snmp) Header() []string {
+	return []string{
+		"BytesSent",
+		"BytesReceived",
+		"MaxConn",
+		"ActiveOpens",
+		"PassiveOpens",
+		"CurrEstab",
+		"InErrs",
+		"InCsumErrors",
+		"KCPInErrors",
+		"InSegs",
+		"OutSegs",
+		"InBytes",
+		"OutBytes",
+		"RetransSegs",
+		"FastRetransSegs",
+		"EarlyRetransSegs",
+		"LostSegs",
+		"RepeatSegs",
+		"FECSegs",
+		"FECErrs",
+		"FECRecovered",
+	}
+}
+
+func (s *Snmp) ToSlice() []string {
+	snmp := s.Copy()
+	return []string{
+		fmt.Sprint(snmp.BytesSent),
+		fmt.Sprint(snmp.BytesReceived),
+		fmt.Sprint(snmp.MaxConn),
+		fmt.Sprint(snmp.ActiveOpens),
+		fmt.Sprint(snmp.PassiveOpens),
+		fmt.Sprint(snmp.CurrEstab),
+		fmt.Sprint(snmp.InErrs),
+		fmt.Sprint(snmp.InCsumErrors),
+		fmt.Sprint(snmp.KCPInErrors),
+		fmt.Sprint(snmp.InSegs),
+		fmt.Sprint(snmp.OutSegs),
+		fmt.Sprint(snmp.InBytes),
+		fmt.Sprint(snmp.OutBytes),
+		fmt.Sprint(snmp.RetransSegs),
+		fmt.Sprint(snmp.FastRetransSegs),
+		fmt.Sprint(snmp.EarlyRetransSegs),
+		fmt.Sprint(snmp.LostSegs),
+		fmt.Sprint(snmp.RepeatSegs),
+		fmt.Sprint(snmp.FECSegs),
+		fmt.Sprint(snmp.FECErrs),
+		fmt.Sprint(snmp.FECRecovered),
+	}
+}
+
 // Copy make a copy of current snmp snapshot
 func (s *Snmp) Copy() *Snmp {
 	d := newSnmp()
@@ -42,6 +98,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.CurrEstab = atomic.LoadUint64(&s.CurrEstab)
 	d.InErrs = atomic.LoadUint64(&s.InErrs)
 	d.InCsumErrors = atomic.LoadUint64(&s.InCsumErrors)
+	d.KCPInErrors = atomic.LoadUint64(&s.KCPInErrors)
 	d.InSegs = atomic.LoadUint64(&s.InSegs)
 	d.OutSegs = atomic.LoadUint64(&s.OutSegs)
 	d.InBytes = atomic.LoadUint64(&s.InBytes)
