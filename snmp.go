@@ -114,6 +114,31 @@ func (s *Snmp) Copy() *Snmp {
 	return d
 }
 
+// Reset values to zero
+func (s *Snmp) Reset() {
+	atomic.StoreUint64(&s.BytesSent, 0)
+	atomic.StoreUint64(&s.BytesReceived, 0)
+	atomic.StoreUint64(&s.MaxConn, 0)
+	atomic.StoreUint64(&s.ActiveOpens, 0)
+	atomic.StoreUint64(&s.PassiveOpens, 0)
+	atomic.StoreUint64(&s.CurrEstab, 0)
+	atomic.StoreUint64(&s.InErrs, 0)
+	atomic.StoreUint64(&s.InCsumErrors, 0)
+	atomic.StoreUint64(&s.KCPInErrors, 0)
+	atomic.StoreUint64(&s.InSegs, 0)
+	atomic.StoreUint64(&s.OutSegs, 0)
+	atomic.StoreUint64(&s.InBytes, 0)
+	atomic.StoreUint64(&s.OutBytes, 0)
+	atomic.StoreUint64(&s.RetransSegs, 0)
+	atomic.StoreUint64(&s.FastRetransSegs, 0)
+	atomic.StoreUint64(&s.EarlyRetransSegs, 0)
+	atomic.StoreUint64(&s.LostSegs, 0)
+	atomic.StoreUint64(&s.RepeatSegs, 0)
+	atomic.StoreUint64(&s.FECSegs, 0)
+	atomic.StoreUint64(&s.FECErrs, 0)
+	atomic.StoreUint64(&s.FECRecovered, 0)
+}
+
 // DefaultSnmp is the global KCP connection statistics collector
 var DefaultSnmp *Snmp
 

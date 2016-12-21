@@ -259,6 +259,8 @@ func client3(wg *sync.WaitGroup) {
 		fmt.Printf("%+v\n", DefaultSnmp.Copy())
 		fmt.Println(DefaultSnmp.Header())
 		fmt.Println(DefaultSnmp.ToSlice())
+		DefaultSnmp.Reset()
+		fmt.Println(DefaultSnmp.ToSlice())
 		wg.Done()
 	}()
 	msg := make([]byte, 4096)
