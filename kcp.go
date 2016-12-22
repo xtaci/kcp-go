@@ -755,9 +755,9 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			lost = true
 			lostSegs++
-		} else if segment.fastack >= resent {
+		} else if segment.fastack >= resent { // fast retransmit
 			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= int32(kcp.rx_srtt) { // rtt
+			if _itimediff(current, lastsend) >= int32(kcp.rx_srtt) {
 				needsend = true
 				segment.xmit++
 				segment.fastack = 0
@@ -767,7 +767,7 @@ func (kcp *KCP) flush() {
 			}
 		} else if segment.fastack > 0 && !hasPending { // early retransmit
 			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= int32(kcp.rx_srtt) { //	1/4 rtt
+			if _itimediff(current, lastsend) >= int32(kcp.rx_srtt) {
 				needsend = true
 				segment.xmit++
 				segment.fastack = 0
