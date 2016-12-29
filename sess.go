@@ -36,7 +36,8 @@ const (
 )
 
 const (
-	errBrokenPipe = "broken pipe"
+	errBrokenPipe       = "broken pipe"
+	errInvalidOperation = "invalid operation"
 )
 
 var (
@@ -348,7 +349,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 			return ipv4.NewConn(nc).SetTOS(dscp << 2)
 		}
 	}
-	return nil
+	return errors.New(errInvalidOperation)
 }
 
 // SetReadBuffer sets the socket read buffer, no effect if it's accepted from Listener
@@ -360,7 +361,7 @@ func (s *UDPSession) SetReadBuffer(bytes int) error {
 			return nc.SetReadBuffer(bytes)
 		}
 	}
-	return nil
+	return errors.New(errInvalidOperation)
 }
 
 // SetWriteBuffer sets the socket write buffer, no effect if it's accepted from Listener
@@ -372,7 +373,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 			return nc.SetWriteBuffer(bytes)
 		}
 	}
-	return nil
+	return errors.New(errInvalidOperation)
 }
 
 // SetKeepAlive changes per-connection NAT keepalive interval; 0 to disable, default to 10s
@@ -768,7 +769,7 @@ func (l *Listener) SetReadBuffer(bytes int) error {
 	if nc, ok := l.conn.(setReadBuffer); ok {
 		return nc.SetReadBuffer(bytes)
 	}
-	return nil
+	return errors.New(errInvalidOperation)
 }
 
 // SetWriteBuffer sets the socket write buffer for the Listener
@@ -776,7 +777,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	if nc, ok := l.conn.(setWriteBuffer); ok {
 		return nc.SetWriteBuffer(bytes)
 	}
-	return nil
+	return errors.New(errInvalidOperation)
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header
@@ -784,7 +785,7 @@ func (l *Listener) SetDSCP(dscp int) error {
 	if nc, ok := l.conn.(net.Conn); ok {
 		return ipv4.NewConn(nc).SetTOS(dscp << 2)
 	}
-	return nil
+	return errors.New(errInvalidOperation)
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
