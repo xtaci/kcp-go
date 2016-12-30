@@ -19,7 +19,7 @@
 
 ## Introduction
 
-kcp-go is a full-featured ***reliable-UDP*** library for golang. It provides ***reliable, ordered, and error-checked*** delivery of a stream of octets between applications running on hosts communicating over an IP network.
+kcp-go is a full-featured ***Reliable-UDP*** library for golang. It provides ***reliable, ordered, and error-checked*** delivery of a stream of octets between applications running on hosts communicating over an IP network.
 
 ## Features
 
