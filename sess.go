@@ -460,12 +460,12 @@ func (s *UDPSession) outputTask() {
 				}
 			}
 
-			//if rand.Intn(100) < 80 {
+			// if mrand.Intn(100) < 50 {
 			if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
 				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 			}
-			//}
+			// }
 
 			if ecc != nil {
 				for k := range ecc {
@@ -561,18 +561,30 @@ func (s *UDPSession) kcpInput(data []byte) {
 			if recovers := s.fec.input(f); recovers != nil {
 				s.mu.Lock()
 				s.kcp.current = current
-				for k := range recovers {
-					sz := binary.LittleEndian.Uint16(recovers[k])
-					if int(sz) <= len(recovers[k]) && sz >= 2 {
-						if ret := s.kcp.Input(recovers[k][2:sz], false); ret != 0 {
-							atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+
+				kcpInErrors := uint64(0)
+				fecErrs := uint64(0)
+				fecRecovered := uint64(0)
+				for _, r := range recovers {
+					if len(r) >= 2 { // must be larger than 2bytes
+						sz := binary.LittleEndian.Uint16(r)
+						if int(sz) <= len(r) && sz >= 2 {
+							if ret := s.kcp.Input(r[2:sz], false); ret == 0 {
+								fecRecovered++
+							} else {
+								kcpInErrors++
+							}
+						} else {
+							fecErrs++
 						}
 					} else {
-						atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
+						fecErrs++
 					}
 				}
 				s.mu.Unlock()
-				atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovers)))
+				atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
+				atomic.AddUint64(&DefaultSnmp.FECErrs, fecErrs)
+				atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 			}
 		}
 		if f.flag == typeData {

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +19,12 @@ const salt = "kcptest"
 
 var key = []byte("testkey")
 var fec = 4
+
+func init() {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
+}
 
 func DialTest() (*UDPSession, error) {
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
