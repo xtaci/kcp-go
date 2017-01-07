@@ -415,7 +415,7 @@ func (s *UDPSession) outputTask() {
 			var ecc [][]byte
 			if s.fec != nil {
 				s.fec.markData(ext[fecOffset:])
-				// explicit size
+				// explicit size, including 2bytes size itself.
 				binary.LittleEndian.PutUint16(ext[szOffset:], uint16(len(ext[szOffset:])))
 
 				// copy data to fec group
