@@ -28,7 +28,7 @@ type Snmp struct {
 	FECRecovered     uint64 // correct packets recovered from FEC
 	FECErrs          uint64 // incorrect packets recovered from FEC
 	FECSegs          uint64 // FEC segments received
-	FECLostSegs      uint64 // number of lost data shards
+	FECShortShards   uint64 // number of data shards that's not enough for recovery
 }
 
 func newSnmp() *Snmp {
@@ -58,7 +58,7 @@ func (s *Snmp) Header() []string {
 		"FECSegs",
 		"FECErrs",
 		"FECRecovered",
-		"FECLostSegs",
+		"FECShortShards",
 	}
 }
 
@@ -86,7 +86,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.FECSegs),
 		fmt.Sprint(snmp.FECErrs),
 		fmt.Sprint(snmp.FECRecovered),
-		fmt.Sprint(snmp.FECLostSegs),
+		fmt.Sprint(snmp.FECShortShards),
 	}
 }
 
@@ -114,7 +114,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.FECSegs = atomic.LoadUint64(&s.FECSegs)
 	d.FECErrs = atomic.LoadUint64(&s.FECErrs)
 	d.FECRecovered = atomic.LoadUint64(&s.FECRecovered)
-	d.FECLostSegs = atomic.LoadUint64(&s.FECLostSegs)
+	d.FECShortShards = atomic.LoadUint64(&s.FECShortShards)
 	return d
 }
 
@@ -141,7 +141,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.FECSegs, 0)
 	atomic.StoreUint64(&s.FECErrs, 0)
 	atomic.StoreUint64(&s.FECRecovered, 0)
-	atomic.StoreUint64(&s.FECLostSegs, 0)
+	atomic.StoreUint64(&s.FECShortShards, 0)
 }
 
 // DefaultSnmp is the global KCP connection statistics collector

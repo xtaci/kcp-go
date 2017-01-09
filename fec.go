@@ -215,7 +215,7 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 	// keep rxlimit
 	if len(fec.rx) > fec.rxlimit {
 		if fec.rx[0].flag == typeData { // record unrecoverable data
-			atomic.AddUint64(&DefaultSnmp.FECLostSegs, 1)
+			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
 		xmitBuf.Put(fec.rx[0].data) // free
 		fec.rx[0].data = nil
