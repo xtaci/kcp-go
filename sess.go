@@ -460,21 +460,25 @@ func (s *UDPSession) outputTask() {
 				}
 			}
 
+			nbytes := 0
+			nsegs := 0
 			// if mrand.Intn(100) < 50 {
 			if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
-				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
+				nbytes += n
+				nsegs++
 			}
 			// }
 
 			if ecc != nil {
 				for k := range ecc {
 					if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
-						atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-						atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
+						nbytes += n
+						nsegs++
 					}
 				}
 			}
+			atomic.AddUint64(&DefaultSnmp.OutSegs, uint64(nsegs))
+			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 			xmitBuf.Put(ext)
 		case <-ticker.C: // NAT keep-alive
 			if len(s.chUDPOutput) == 0 {
