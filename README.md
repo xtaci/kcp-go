@@ -75,18 +75,14 @@ PASS
 ok  	github.com/xtaci/kcp-go	0.600s
 ```
 
+## Who is using this?
+
+1. https://github.com/xtaci/kcptun
+2. https://github.com/getlantern/lantern
+3. https://github.com/smallnest/rpcx
+
 ## Links
 
 1. https://github.com/xtaci/libkcp -- Official client library for iOS/Android(C++11)
 2. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
 3. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
-
-## Status
-
-Production Ready
-
-## Donation
-
-![donate](donate.png)          
-
-All donations on this project will be used to support the development of [gonet/2](http://gonet2.github.io/).
