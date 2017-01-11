@@ -1,4 +1,5 @@
-# kcp-go
+<img src="kcp-go.png" alt="kcp-go" height="50px" />
+
 
 [![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Go Report Card][5]][6] [![Coverage Statusd][7]][8]
 
