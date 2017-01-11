@@ -83,6 +83,6 @@ ok  	github.com/xtaci/kcp-go	0.600s
 
 ## Links
 
-1. https://github.com/xtaci/libkcp -- Official client library for iOS/Android(C++11)
+1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
 2. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
 3. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
