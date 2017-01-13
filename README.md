@@ -41,7 +41,7 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 
 ## Specification
 
-<img src="frame.png" alt="Frame Format" height="120px" />
+<img src="frame.png" alt="Frame Format" height="109px" />
 
 ## Usage
 
