@@ -29,6 +29,7 @@ const (
 	IKCP_THRESH_MIN  = 2
 	IKCP_PROBE_INIT  = 7000   // 7 secs to probe window size
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
+	IKCP_RTT_RESET   = 60000
 )
 
 // Output is a closure which captures conn and calls conn.Write
@@ -129,6 +130,7 @@ type KCP struct {
 	snd_una, snd_nxt, rcv_nxt              uint32
 	ssthresh                               uint32
 	rx_rttval, rx_srtt, rx_rto, rx_minrto  uint32
+	rx_maxrtt, ts_rtt_reset                uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
 	interval, ts_flush, xmit               uint32
 	nodelay, updated                       uint32
@@ -370,6 +372,17 @@ func (kcp *KCP) update_ack(rtt int32) {
 	}
 	rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
 	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+
+	// RTO is the max RTT, and will reset periodically
+	if currentMs()-kcp.ts_rtt_reset > IKCP_RTT_RESET {
+		kcp.rx_maxrtt = kcp.rx_minrto
+		kcp.ts_rtt_reset = currentMs()
+	}
+
+	if rtt > int32(kcp.rx_maxrtt) {
+		kcp.rx_maxrtt = uint32(rtt)
+	}
+	kcp.rx_rto = kcp.rx_maxrtt
 }
 
 func (kcp *KCP) shrink_buf() {
@@ -728,9 +741,6 @@ func (kcp *KCP) flush() {
 		resent = 0xffffffff
 	}
 	rtomin := (kcp.rx_rto >> 3)
-	if kcp.nodelay != 0 {
-		rtomin = 0
-	}
 
 	// flush data segments
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
