@@ -32,7 +32,7 @@ const (
 	mtuLimit                 = 2048
 	txQueueLimit             = 8192
 	rxFECMulti               = 3 // FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
-	defaultKeepAliveInterval = 10 * time.Second
+	defaultKeepAliveInterval = 10
 )
 
 const (
@@ -70,7 +70,7 @@ type (
 		headerSize        int
 		ackNoDelay        bool
 		isClosed          bool
-		keepAliveInterval time.Duration
+		keepAliveInterval int32
 		mu                sync.Mutex
 	}
 
@@ -87,7 +87,7 @@ type (
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.chTicker = make(chan time.Time, 1)
-	sess.chUDPOutput = make(chan []byte, txQueueLimit)
+	sess.chUDPOutput = make(chan []byte)
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
@@ -378,9 +378,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 
 // SetKeepAlive changes per-connection NAT keepalive interval; 0 to disable, default to 10s
 func (s *UDPSession) SetKeepAlive(interval int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.keepAliveInterval = time.Duration(interval) * time.Second
+	atomic.StoreInt32(&s.keepAliveInterval, int32(interval))
 }
 
 func (s *UDPSession) outputTask() {
@@ -482,9 +480,7 @@ func (s *UDPSession) outputTask() {
 			xmitBuf.Put(ext)
 		case <-ticker.C: // NAT keep-alive
 			if len(s.chUDPOutput) == 0 {
-				s.mu.Lock()
-				interval := s.keepAliveInterval
-				s.mu.Unlock()
+				interval := time.Duration(atomic.LoadInt32(&s.keepAliveInterval)) * time.Second
 				if interval > 0 && time.Now().After(lastPing.Add(interval)) {
 					var rnd uint16
 					binary.Read(rand.Reader, binary.LittleEndian, &rnd)
