@@ -353,25 +353,27 @@ func (kcp *KCP) Send(buffer []byte) int {
 	return 0
 }
 
-// https://tools.ietf.org/html/rfc6298
 func (kcp *KCP) update_ack(rtt int32) {
-	var rto uint32
-	if kcp.rx_srtt == 0 {
-		kcp.rx_srtt = uint32(rtt)
-		kcp.rx_rttval = uint32(rtt) / 2
-	} else {
-		delta := rtt - int32(kcp.rx_srtt)
-		if delta < 0 {
-			delta = -delta
+	// https://tools.ietf.org/html/rfc6298
+	/*
+		var rto uint32
+		if kcp.rx_srtt == 0 {
+			kcp.rx_srtt = uint32(rtt)
+			kcp.rx_rttval = uint32(rtt) / 2
+		} else {
+			delta := rtt - int32(kcp.rx_srtt)
+			if delta < 0 {
+				delta = -delta
+			}
+			kcp.rx_rttval = (3*kcp.rx_rttval + uint32(delta)) / 4
+			kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
+			if kcp.rx_srtt < 1 {
+				kcp.rx_srtt = 1
+			}
 		}
-		kcp.rx_rttval = (3*kcp.rx_rttval + uint32(delta)) / 4
-		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
-		if kcp.rx_srtt < 1 {
-			kcp.rx_srtt = 1
-		}
-	}
-	rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
-	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+		rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
+		kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+	*/
 
 	// RTO is the max RTT, and will reset periodically
 	if currentMs()-kcp.ts_rtt_reset > IKCP_RTT_RESET {
