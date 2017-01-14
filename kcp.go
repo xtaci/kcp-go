@@ -355,36 +355,33 @@ func (kcp *KCP) Send(buffer []byte) int {
 
 func (kcp *KCP) update_ack(rtt int32) {
 	// https://tools.ietf.org/html/rfc6298
-	/*
-		var rto uint32
-		if kcp.rx_srtt == 0 {
-			kcp.rx_srtt = uint32(rtt)
-			kcp.rx_rttval = uint32(rtt) / 2
-		} else {
-			delta := rtt - int32(kcp.rx_srtt)
-			if delta < 0 {
-				delta = -delta
-			}
-			kcp.rx_rttval = (3*kcp.rx_rttval + uint32(delta)) / 4
-			kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
-			if kcp.rx_srtt < 1 {
-				kcp.rx_srtt = 1
-			}
+	var rto uint32
+	if kcp.rx_srtt == 0 {
+		kcp.rx_srtt = uint32(rtt)
+		kcp.rx_rttval = uint32(rtt) / 2
+	} else {
+		delta := rtt - int32(kcp.rx_srtt)
+		if delta < 0 {
+			delta = -delta
 		}
-		rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
-		kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
-	*/
+		kcp.rx_rttval = (3*kcp.rx_rttval + uint32(delta)) / 4
+		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
+		if kcp.rx_srtt < 1 {
+			kcp.rx_srtt = 1
+		}
+	}
+	rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
+	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
 
 	// RTO is the max RTT, and will reset periodically
 	if currentMs()-kcp.ts_rtt_reset > IKCP_RTT_RESET {
-		kcp.rx_maxrtt = kcp.rx_minrto
+		kcp.rx_maxrtt = kcp.rx_rto
 		kcp.ts_rtt_reset = currentMs()
 	}
 
 	if rtt > int32(kcp.rx_maxrtt) {
 		kcp.rx_maxrtt = uint32(rtt)
 	}
-	kcp.rx_rto = kcp.rx_maxrtt
 }
 
 func (kcp *KCP) shrink_buf() {
@@ -742,7 +739,6 @@ func (kcp *KCP) flush() {
 	if kcp.fastresend <= 0 {
 		resent = 0xffffffff
 	}
-	rtomin := (kcp.rx_rto >> 3)
 
 	// flush data segments
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
@@ -753,7 +749,7 @@ func (kcp *KCP) flush() {
 			needsend = true
 			segment.xmit++
 			segment.rto = kcp.rx_rto
-			segment.resendts = currentMs() + segment.rto + rtomin
+			segment.resendts = currentMs() + kcp.rx_maxrtt
 		} else if _itimediff(currentMs(), segment.resendts) >= 0 {
 			needsend = true
 			segment.xmit++
