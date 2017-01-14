@@ -222,7 +222,6 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 					b = b[max:]
 				}
 			}
-			s.kcp.current = currentMs()
 			s.kcp.flush()
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
@@ -512,8 +511,7 @@ func (s *UDPSession) updateTask() {
 		select {
 		case <-tc:
 			s.mu.Lock()
-			current := currentMs()
-			s.kcp.Update(current)
+			s.kcp.Update()
 			if s.kcp.WaitSnd() < 2*int(s.kcp.snd_wnd) {
 				s.notifyWriteEvent()
 			}
@@ -550,7 +548,6 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) kcpInput(data []byte) {
-	current := currentMs()
 	if s.fec != nil {
 		f := s.fec.decode(data)
 		if f.flag == typeData || f.flag == typeFEC {
@@ -560,8 +557,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 			if recovers := s.fec.input(f); recovers != nil {
 				s.mu.Lock()
-				s.kcp.current = current
-
 				kcpInErrors := uint64(0)
 				fecErrs := uint64(0)
 				fecRecovered := uint64(0)
@@ -589,7 +584,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 		}
 		if f.flag == typeData {
 			s.mu.Lock()
-			s.kcp.current = current
 			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true); ret != 0 {
 				atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
 			}
@@ -597,7 +591,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 		}
 	} else {
 		s.mu.Lock()
-		s.kcp.current = current
 		if ret := s.kcp.Input(data, true); ret != 0 {
 			atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
 		}
@@ -610,7 +603,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 		s.notifyReadEvent()
 	}
 	if s.ackNoDelay {
-		s.kcp.current = current
 		s.kcp.flush()
 	}
 	s.mu.Unlock()

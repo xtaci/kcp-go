@@ -130,7 +130,7 @@ type KCP struct {
 	ssthresh                               uint32
 	rx_rttval, rx_srtt, rx_rto, rx_minrto  uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
-	current, interval, ts_flush, xmit      uint32
+	interval, ts_flush, xmit               uint32
 	nodelay, updated                       uint32
 	ts_probe, probe_wait                   uint32
 	dead_link, incr                        uint32
@@ -530,8 +530,8 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			if update_ack && _itimediff(kcp.current, ts) >= 0 {
-				kcp.update_ack(_itimediff(kcp.current, ts))
+			if update_ack && _itimediff(currentMs(), ts) >= 0 {
+				kcp.update_ack(_itimediff(currentMs(), ts))
 			}
 			kcp.parse_ack(sn)
 			kcp.shrink_buf()
@@ -612,7 +612,6 @@ func (kcp *KCP) wnd_unused() int32 {
 
 // flush pending data
 func (kcp *KCP) flush() {
-	current := kcp.current
 	buffer := kcp.buffer
 	change := 0
 	lost := false
@@ -646,9 +645,9 @@ func (kcp *KCP) flush() {
 	if kcp.rmt_wnd == 0 {
 		if kcp.probe_wait == 0 {
 			kcp.probe_wait = IKCP_PROBE_INIT
-			kcp.ts_probe = kcp.current + kcp.probe_wait
+			kcp.ts_probe = currentMs() + kcp.probe_wait
 		} else {
-			if _itimediff(kcp.current, kcp.ts_probe) >= 0 {
+			if _itimediff(currentMs(), kcp.ts_probe) >= 0 {
 				if kcp.probe_wait < IKCP_PROBE_INIT {
 					kcp.probe_wait = IKCP_PROBE_INIT
 				}
@@ -656,7 +655,7 @@ func (kcp *KCP) flush() {
 				if kcp.probe_wait > IKCP_PROBE_LIMIT {
 					kcp.probe_wait = IKCP_PROBE_LIMIT
 				}
-				kcp.ts_probe = kcp.current + kcp.probe_wait
+				kcp.ts_probe = currentMs() + kcp.probe_wait
 				kcp.probe |= IKCP_ASK_SEND
 			}
 		}
@@ -705,10 +704,10 @@ func (kcp *KCP) flush() {
 		newseg.conv = kcp.conv
 		newseg.cmd = IKCP_CMD_PUSH
 		newseg.wnd = seg.wnd
-		newseg.ts = current
+		newseg.ts = currentMs()
 		newseg.sn = kcp.snd_nxt
 		newseg.una = kcp.rcv_nxt
-		newseg.resendts = current
+		newseg.resendts = newseg.ts
 		newseg.rto = kcp.rx_rto
 		kcp.snd_buf = append(kcp.snd_buf, newseg)
 		kcp.snd_nxt++
@@ -742,8 +741,8 @@ func (kcp *KCP) flush() {
 			needsend = true
 			segment.xmit++
 			segment.rto = kcp.rx_rto
-			segment.resendts = current + segment.rto + rtomin
-		} else if _itimediff(current, segment.resendts) >= 0 {
+			segment.resendts = currentMs() + segment.rto + rtomin
+		} else if _itimediff(currentMs(), segment.resendts) >= 0 {
 			needsend = true
 			segment.xmit++
 			kcp.xmit++
@@ -752,33 +751,33 @@ func (kcp *KCP) flush() {
 			} else {
 				segment.rto += kcp.rx_rto / 2
 			}
-			segment.resendts = current + segment.rto
+			segment.resendts = currentMs() + segment.rto
 			lost = true
 			lostSegs++
 		} else if segment.fastack >= resent { // fast retransmit
 			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= int32(kcp.rx_rto/4) {
+			if _itimediff(currentMs(), lastsend) >= int32(kcp.rx_rto/4) {
 				needsend = true
 				segment.xmit++
 				segment.fastack = 0
-				segment.resendts = current + segment.rto
+				segment.resendts = currentMs() + segment.rto
 				change++
 				fastRetransSegs++
 			}
 		} else if segment.fastack > 0 && !hasPending { // early retransmit
 			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= int32(kcp.rx_rto/4) {
+			if _itimediff(currentMs(), lastsend) >= int32(kcp.rx_rto/4) {
 				needsend = true
 				segment.xmit++
 				segment.fastack = 0
-				segment.resendts = current + segment.rto
+				segment.resendts = currentMs() + segment.rto
 				change++
 				earlyRetransSegs++
 			}
 		}
 
 		if needsend {
-			segment.ts = current
+			segment.ts = currentMs()
 			segment.wnd = seg.wnd
 			segment.una = kcp.rcv_nxt
 
@@ -842,27 +841,25 @@ func (kcp *KCP) flush() {
 // Update updates state (call it repeatedly, every 10ms-100ms), or you can ask
 // ikcp_check when to call it again (without ikcp_input/_send calling).
 // 'current' - current timestamp in millisec.
-func (kcp *KCP) Update(current uint32) {
+func (kcp *KCP) Update() {
 	var slap int32
-
-	kcp.current = current
 
 	if kcp.updated == 0 {
 		kcp.updated = 1
-		kcp.ts_flush = kcp.current
+		kcp.ts_flush = currentMs()
 	}
 
-	slap = _itimediff(kcp.current, kcp.ts_flush)
+	slap = _itimediff(currentMs(), kcp.ts_flush)
 
 	if slap >= 10000 || slap < -10000 {
-		kcp.ts_flush = kcp.current
+		kcp.ts_flush = currentMs()
 		slap = 0
 	}
 
 	if slap >= 0 {
 		kcp.ts_flush += kcp.interval
-		if _itimediff(kcp.current, kcp.ts_flush) >= 0 {
-			kcp.ts_flush = kcp.current + kcp.interval
+		if _itimediff(currentMs(), kcp.ts_flush) >= 0 {
+			kcp.ts_flush = currentMs() + kcp.interval
 		}
 		kcp.flush()
 	}
