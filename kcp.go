@@ -489,6 +489,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 
 // Input when you received a low level packet (eg. UDP packet), call it
 func (kcp *KCP) Input(data []byte, update_ack bool) int {
+	current := currentMs()
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
 		return -1
@@ -531,8 +532,8 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			if update_ack && _itimediff(currentMs(), ts) >= 0 {
-				kcp.update_ack(_itimediff(currentMs(), ts))
+			if update_ack && _itimediff(current, ts) >= 0 {
+				kcp.update_ack(_itimediff(current, ts))
 			}
 			kcp.parse_ack(sn)
 			kcp.shrink_buf()
@@ -735,7 +736,7 @@ func (kcp *KCP) flush() {
 	// flush data segments
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	for k := range kcp.snd_buf {
-		current := current
+		current := currentMs()
 		segment := &kcp.snd_buf[k]
 		needsend := false
 		if segment.xmit == 0 {
@@ -851,7 +852,7 @@ func (kcp *KCP) Update() {
 		kcp.ts_flush = current
 	}
 
-	slap = _itimediff(currentMs(), kcp.ts_flush)
+	slap = _itimediff(current, kcp.ts_flush)
 
 	if slap >= 10000 || slap < -10000 {
 		kcp.ts_flush = current
