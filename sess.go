@@ -30,7 +30,7 @@ const (
 	crcSize                  = 4   // 4bytes packet checksum
 	cryptHeaderSize          = nonceSize + crcSize
 	mtuLimit                 = 2048
-	txQueueLimit             = 8192
+	rxQueueLimit             = 8192
 	rxFECMulti               = 3 // FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
 	defaultKeepAliveInterval = 10
 )
@@ -628,7 +628,7 @@ func (s *UDPSession) receiver(ch chan []byte) {
 
 // read loop for client session
 func (s *UDPSession) readLoop() {
-	chPacket := make(chan []byte, txQueueLimit)
+	chPacket := make(chan []byte, rxQueueLimit)
 	go s.receiver(chPacket)
 
 	for {
@@ -685,7 +685,7 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	chPacket := make(chan packet, txQueueLimit)
+	chPacket := make(chan packet, rxQueueLimit)
 	go l.receiver(chPacket)
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
