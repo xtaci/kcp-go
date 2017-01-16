@@ -478,17 +478,15 @@ func (s *UDPSession) outputTask() {
 			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 			xmitBuf.Put(ext)
 		case <-ticker.C: // NAT keep-alive
-			if len(s.chUDPOutput) == 0 {
-				interval := time.Duration(atomic.LoadInt32(&s.keepAliveInterval)) * time.Second
-				if interval > 0 && time.Now().After(lastPing.Add(interval)) {
-					var rnd uint16
-					binary.Read(rand.Reader, binary.LittleEndian, &rnd)
-					sz := int(rnd)%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
-					ping := make([]byte, sz) // randomized ping packet
-					io.ReadFull(rand.Reader, ping)
-					s.conn.WriteTo(ping, s.remote)
-					lastPing = time.Now()
-				}
+			interval := time.Duration(atomic.LoadInt32(&s.keepAliveInterval)) * time.Second
+			if interval > 0 && time.Now().After(lastPing.Add(interval)) {
+				var rnd uint16
+				binary.Read(rand.Reader, binary.LittleEndian, &rnd)
+				sz := int(rnd)%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
+				ping := make([]byte, sz) // randomized ping packet
+				io.ReadFull(rand.Reader, ping)
+				s.conn.WriteTo(ping, s.remote)
+				lastPing = time.Now()
 			}
 		case <-s.die:
 			return
