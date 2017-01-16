@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"hash/crc32"
 	"io"
 	"net"
 	"sync"
@@ -10,9 +11,6 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
-
-	"github.com/klauspost/crc32"
-
 	"golang.org/x/net/ipv4"
 )
 
