@@ -29,7 +29,6 @@ const (
 	IKCP_THRESH_MIN  = 2
 	IKCP_PROBE_INIT  = 7000   // 7 secs to probe window size
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
-	IKCP_RTT_RESET   = 60000
 )
 
 // Output is a closure which captures conn and calls conn.Write
