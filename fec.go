@@ -26,6 +26,7 @@ type (
 		next         uint32 // next seqid
 		enc          reedsolomon.Encoder
 		shards       [][]byte
+		shards2      [][]byte // for calcECC
 		shardsflag   []bool
 		paws         uint32 // Protect Against Wrapped Sequence numbers
 		lastCheck    uint32
@@ -59,6 +60,7 @@ func newFEC(rxlimit, dataShards, parityShards int) *FEC {
 	}
 	fec.enc = enc
 	fec.shards = make([][]byte, fec.shardSize)
+	fec.shards2 = make([][]byte, fec.shardSize)
 	fec.shardsflag = make([]bool, fec.shardSize)
 	return fec
 }
@@ -228,7 +230,7 @@ func (fec *FEC) calcECC(data [][]byte, offset, maxlen int) (ecc [][]byte) {
 	if len(data) != fec.shardSize {
 		return nil
 	}
-	shards := make([][]byte, fec.shardSize)
+	shards := fec.shards2
 	for k := range shards {
 		shards[k] = data[k][offset:maxlen]
 	}
