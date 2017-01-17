@@ -157,7 +157,7 @@ type ackItem struct {
 type ackList []ackItem
 
 func (l ackList) Len() int            { return len(l) }
-func (l ackList) Less(i, j int) bool  { return l[i].sn < l[j].sn }
+func (l ackList) Less(i, j int) bool  { return l[i].ts < l[j].ts }
 func (l ackList) Swap(i, j int)       { l[i], l[j] = l[j], l[i] }
 func (l *ackList) Push(x interface{}) { *l = append(*l, x.(ackItem)) }
 func (l *ackList) Pop() interface{} {
