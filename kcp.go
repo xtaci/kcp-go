@@ -619,6 +619,7 @@ func (kcp *KCP) flush() {
 			kcp.output(buffer, size)
 			ptr = buffer
 		}
+		// filter jitters caused by bufferbloat
 		if ack.sn >= kcp.rcv_nxt || len(kcp.acklist)-1 == i {
 			seg.sn, seg.ts = ack.sn, ack.ts
 			ptr = seg.encode(ptr)
