@@ -862,7 +862,8 @@ func (kcp *KCP) Update() {
 // Important to reduce unnacessary ikcp_update invoking. use it to
 // schedule ikcp_update (eg. implementing an epoll-like mechanism,
 // or optimize ikcp_update when handling massive kcp connections)
-func (kcp *KCP) Check(current uint32) uint32 {
+func (kcp *KCP) Check() uint32 {
+	current := currentMs()
 	ts_flush := kcp.ts_flush
 	tm_flush := int32(0x7fffffff)
 	tm_packet := int32(0x7fffffff)
