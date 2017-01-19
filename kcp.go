@@ -473,14 +473,15 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 
 // Input when you received a low level packet (eg. UDP packet), call it
 func (kcp *KCP) Input(data []byte, update_ack bool) int {
-	current := currentMs()
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
 		return -1
 	}
 
 	var maxack uint32
+	var recentack uint32
 	var flag int
+
 	for {
 		var ts, sn, length, una, conv uint32
 		var wnd uint16
@@ -516,9 +517,6 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			if update_ack && _itimediff(current, ts) >= 0 {
-				kcp.update_ack(_itimediff(current, ts))
-			}
 			kcp.parse_ack(sn)
 			kcp.shrink_buf()
 			if flag == 0 {
@@ -527,6 +525,7 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 			} else if _itimediff(sn, maxack) > 0 {
 				maxack = sn
 			}
+			recentack = ts
 		} else if cmd == IKCP_CMD_PUSH {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
@@ -560,8 +559,12 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 		data = data[length:]
 	}
 
+	current := currentMs()
 	if flag != 0 && update_ack {
 		kcp.parse_fastack(maxack)
+		if _itimediff(current, recentack) >= 0 {
+			kcp.update_ack(_itimediff(current, recentack))
+		}
 	}
 
 	if _itimediff(kcp.snd_una, una) > 0 {
