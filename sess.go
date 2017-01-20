@@ -510,7 +510,7 @@ func (s *UDPSession) updateTask() {
 		case <-tc:
 			s.mu.Lock()
 			s.kcp.Update()
-			if s.kcp.WaitSnd() < 2*int(s.kcp.snd_wnd) {
+			if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 				s.notifyWriteEvent()
 			}
 			s.mu.Unlock()
@@ -546,22 +546,20 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) kcpInput(data []byte) {
-	kcpInErrors := uint64(0)
-	fecErrs := uint64(0)
-	fecRecovered := uint64(0)
+	var kcpInErrors, fecErrs, fecRecovered, fecSegs uint64
 
 	if s.fec != nil {
 		f := s.fec.decode(data)
 		s.mu.Lock()
 		if f.flag == typeData {
 			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true); ret != 0 {
-				atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+				kcpInErrors++
 			}
 		}
 
 		if f.flag == typeData || f.flag == typeFEC {
 			if f.flag == typeFEC {
-				atomic.AddUint64(&DefaultSnmp.FECSegs, 1)
+				fecSegs++
 			}
 
 			if recovers := s.fec.input(f); recovers != nil {
@@ -595,7 +593,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	} else {
 		s.mu.Lock()
 		if ret := s.kcp.Input(data, true); ret != 0 {
-			atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+			kcpInErrors++
 		}
 		// notify reader
 		if n := s.kcp.PeekSize(); n > 0 {
@@ -609,6 +607,9 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
+	if fecSegs > 0 {
+		atomic.AddUint64(&DefaultSnmp.FECSegs, fecSegs)
+	}
 	if kcpInErrors > 0 {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 	}
