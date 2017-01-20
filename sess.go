@@ -502,7 +502,7 @@ func (s *UDPSession) updateTask() {
 		select {
 		case <-tc:
 			s.mu.Lock()
-			s.kcp.Update()
+			s.kcp.flush()
 			if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 				s.notifyWriteEvent()
 			}

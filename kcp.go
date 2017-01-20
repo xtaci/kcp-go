@@ -605,9 +605,6 @@ func (kcp *KCP) flush() {
 	change := 0
 	lost := false
 
-	if kcp.updated == 0 {
-		return
-	}
 	var seg Segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
