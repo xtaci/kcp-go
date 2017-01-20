@@ -24,6 +24,8 @@ func init() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
+	go server()
+	<-time.After(1 * time.Second)
 }
 
 func DialTest() (*UDPSession, error) {
@@ -83,10 +85,6 @@ func server() {
 		s.(*UDPSession).SetKeepAlive(1)
 		go handleClient(s.(*UDPSession))
 	}
-}
-
-func init() {
-	go server()
 }
 
 func handleClient(conn *UDPSession) {

@@ -353,7 +353,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 			kcp.rx_srtt = 1
 		}
 	}
-	rto = kcp.rx_srtt + _imax_(1, 4*kcp.rx_rttval)
+	rto = kcp.rx_srtt + _imax_(kcp.interval, 4*kcp.rx_rttval)
 	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
 }
 
@@ -715,8 +715,6 @@ func (kcp *KCP) flush() {
 		resent = 0xffffffff
 	}
 
-	rtomin := (kcp.rx_rto >> 3)
-
 	// flush data segments
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	for k := range kcp.snd_buf {
@@ -727,7 +725,7 @@ func (kcp *KCP) flush() {
 			needsend = true
 			segment.xmit++
 			segment.rto = kcp.rx_rto
-			segment.resendts = current + segment.rto + rtomin
+			segment.resendts = current + segment.rto
 		} else if _itimediff(current, segment.resendts) >= 0 {
 			needsend = true
 			segment.xmit++
