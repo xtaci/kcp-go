@@ -63,13 +63,13 @@ type (
 		die               chan struct{}
 		chReadEvent       chan struct{}
 		chWriteEvent      chan struct{}
-		chTicker          chan time.Time
 		chUDPOutput       chan []byte
 		headerSize        int
 		ackNoDelay        bool
 		isClosed          bool
 		keepAliveInterval int32
 		mu                sync.Mutex
+		updateInterval    int32
 	}
 
 	setReadBuffer interface {
@@ -84,7 +84,6 @@ type (
 // newUDPSession create a new udp session for client or server
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
-	sess.chTicker = make(chan time.Time, 1)
 	sess.chUDPOutput = make(chan []byte)
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
@@ -333,6 +332,7 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
+	atomic.StoreInt32(&s.updateInterval, int32(interval))
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header, no effect if it's accepted from Listener
@@ -496,14 +496,7 @@ func (s *UDPSession) outputTask() {
 
 // kcp update, input loop
 func (s *UDPSession) updateTask() {
-	var tc <-chan time.Time
-	if s.l == nil { // client
-		ticker := time.NewTicker(10 * time.Millisecond)
-		tc = ticker.C
-		defer ticker.Stop()
-	} else {
-		tc = s.chTicker
-	}
+	tc := time.After(time.Duration(atomic.LoadInt32(&s.updateInterval)) * time.Millisecond)
 
 	for {
 		select {
@@ -514,6 +507,7 @@ func (s *UDPSession) updateTask() {
 				s.notifyWriteEvent()
 			}
 			s.mu.Unlock()
+			tc = time.After(time.Duration(atomic.LoadInt32(&s.updateInterval)) * time.Millisecond)
 		case <-s.die:
 			if s.l != nil { // has listener
 				select {
@@ -698,8 +692,6 @@ type (
 func (l *Listener) monitor() {
 	chPacket := make(chan packet, rxQueueLimit)
 	go l.receiver(chPacket)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
 	for {
 		select {
 		case p := <-chPacket:
@@ -754,14 +746,6 @@ func (l *Listener) monitor() {
 			delete(l.sessions, deadlink.String())
 		case <-l.die:
 			return
-		case <-ticker.C:
-			now := time.Now()
-			for _, s := range l.sessions {
-				select {
-				case s.chTicker <- now:
-				default:
-				}
-			}
 		}
 	}
 }
