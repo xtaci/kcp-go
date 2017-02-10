@@ -76,6 +76,12 @@ PASS
 ok  	github.com/xtaci/kcp-go	0.600s
 ```
 
+## Tuning
+
+Q: I'm running > 3000 connections on my server. the CPU utilization is high.
+
+A: A standalone `agent` or `gate` server for kcp-go is suggested, not only for CPU utilization, but also important to the **precision** of RTT measurements which indirectly affects retransmission. By increasing update `interval` with `SetNoDelay` like `conn.SetNoDelay(1, 40, 1, 1)` will dramatically reduce system load.
+
 ## Who is using this?
 
 1. https://github.com/xtaci/kcptun
