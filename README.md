@@ -94,8 +94,14 @@ A: A standalone `agent` or `gate` server for kcp-go is suggested, not only for C
 2. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
 3. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
 
-## Donation
+### Support
 
-![donate](donate.png)
+You can support this project by the following methods:
 
-Help kcp-go to become great!
+1. Vultr promotion code:     
+http://www.vultr.com/?ref=6897065
+
+2. Paypal    
+https://www.paypal.me/xtaci
+
+Your name or github name will be listed on this page by default.
