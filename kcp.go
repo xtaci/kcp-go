@@ -127,7 +127,7 @@ type KCP struct {
 	conv, mtu, mss, state                  uint32
 	snd_una, snd_nxt, rcv_nxt              uint32
 	ssthresh                               uint32
-	rx_rttval, rx_srtt, rx_rto, rx_minrto  uint32
+	rx_rttvar, rx_srtt, rx_rto, rx_minrto  uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
 	interval, ts_flush, xmit               uint32
 	nodelay, updated                       uint32
@@ -341,20 +341,20 @@ func (kcp *KCP) update_ack(rtt int32) {
 	var rto uint32
 	if kcp.rx_srtt == 0 {
 		kcp.rx_srtt = uint32(rtt)
-		kcp.rx_rttval = uint32(rtt) / 2
+		kcp.rx_rttvar = uint32(rtt) / 2
 	} else {
 		delta := rtt - int32(kcp.rx_srtt)
 		if delta < 0 {
 			delta = -delta
 		}
 
-		if rtt < int32(kcp.rx_srtt-kcp.rx_rttval) {
+		if rtt < int32(kcp.rx_srtt-kcp.rx_rttvar) {
 			// if the new RTT sample is below the bottom of the range of
 			// what an RTT measurement is expected to be.
 			// give an 8x reduced weight versus its normal weighting
-			kcp.rx_rttval = (31*kcp.rx_rttval + uint32(delta)) / 32
+			kcp.rx_rttvar = (31*kcp.rx_rttvar + uint32(delta)) / 32
 		} else {
-			kcp.rx_rttval = (3*kcp.rx_rttval + uint32(delta)) / 4
+			kcp.rx_rttvar = (3*kcp.rx_rttvar + uint32(delta)) / 4
 		}
 
 		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
@@ -362,7 +362,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 			kcp.rx_srtt = 1
 		}
 	}
-	rto = kcp.rx_srtt + _imax_(kcp.interval, 4*kcp.rx_rttval)
+	rto = kcp.rx_srtt + _imax_(kcp.interval, 4*kcp.rx_rttvar)
 	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
 }
 
