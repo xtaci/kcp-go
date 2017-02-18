@@ -341,25 +341,25 @@ func (kcp *KCP) update_ack(rtt int32) {
 	var rto uint32
 	if kcp.rx_srtt == 0 {
 		kcp.rx_srtt = uint32(rtt)
-		kcp.rx_rttvar = uint32(rtt) / 2
+		kcp.rx_rttvar = uint32(rtt) >> 1
 	} else {
 		delta := rtt - int32(kcp.rx_srtt)
 		if delta < 0 {
 			delta = -delta
 		}
 
+		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) >> 3
+		if kcp.rx_srtt < 1 {
+			kcp.rx_srtt = 1
+		}
+
 		if rtt < int32(kcp.rx_srtt-kcp.rx_rttvar) {
 			// if the new RTT sample is below the bottom of the range of
 			// what an RTT measurement is expected to be.
 			// give an 8x reduced weight versus its normal weighting
-			kcp.rx_rttvar = (31*kcp.rx_rttvar + uint32(delta)) / 32
+			kcp.rx_rttvar = (31*kcp.rx_rttvar + uint32(delta)) >> 5
 		} else {
-			kcp.rx_rttvar = (3*kcp.rx_rttvar + uint32(delta)) / 4
-		}
-
-		kcp.rx_srtt = (7*kcp.rx_srtt + uint32(rtt)) / 8
-		if kcp.rx_srtt < 1 {
-			kcp.rx_srtt = 1
+			kcp.rx_rttvar = (3*kcp.rx_rttvar + uint32(delta)) >> 2
 		}
 	}
 	rto = kcp.rx_srtt + _imax_(kcp.interval, 4*kcp.rx_rttvar)
