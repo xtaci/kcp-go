@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"sync/atomic"
 
-	"github.com/xtaci/reedsolomon"
+	"github.com/klauspost/reedsolomon"
 )
 
 const (
@@ -54,7 +54,7 @@ func newFEC(rxlimit, dataShards, parityShards int) *FEC {
 	fec.parityShards = parityShards
 	fec.shardSize = dataShards + parityShards
 	fec.paws = (0xffffffff/uint32(fec.shardSize) - 1) * uint32(fec.shardSize)
-	enc, err := reedsolomon.New(dataShards, parityShards)
+	enc, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithMaxGoroutines(1))
 	if err != nil {
 		return nil
 	}
