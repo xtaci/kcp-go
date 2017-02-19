@@ -344,12 +344,12 @@ func (kcp *KCP) update_ack(rtt int32) {
 		kcp.rx_srtt = rtt
 		kcp.rx_rttvar = rtt >> 1
 	} else {
-		delta := rtt - int32(kcp.rx_srtt)
+		delta := rtt - kcp.rx_srtt
 		kcp.rx_srtt += delta >> 3
 		if delta < 0 {
 			delta = -delta
 		}
-		if rtt < int32(kcp.rx_srtt-kcp.rx_rttvar) {
+		if rtt < kcp.rx_srtt-kcp.rx_rttvar {
 			// if the new RTT sample is below the bottom of the range of
 			// what an RTT measurement is expected to be.
 			// give an 8x reduced weight versus its normal weighting
@@ -745,7 +745,7 @@ func (kcp *KCP) flush() {
 			lostSegs++
 		} else if segment.fastack >= resent { // fast retransmit
 			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= int32(kcp.rx_srtt/4) {
+			if _itimediff(current, lastsend) >= kcp.rx_srtt/4 {
 				needsend = true
 				segment.xmit++
 				segment.fastack = 0
@@ -755,7 +755,7 @@ func (kcp *KCP) flush() {
 			}
 		} else if segment.fastack > 0 && !hasPending { // early retransmit
 			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= int32(kcp.rx_srtt/4) {
+			if _itimediff(current, lastsend) >= kcp.rx_srtt/4 {
 				needsend = true
 				segment.xmit++
 				segment.fastack = 0
