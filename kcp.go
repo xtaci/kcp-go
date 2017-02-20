@@ -714,7 +714,6 @@ func (kcp *KCP) flush() {
 
 	// send new segments
 	for k := len(kcp.snd_buf) - newSegsCount; k < len(kcp.snd_buf); k++ {
-		current := currentMs()
 		segment := &kcp.snd_buf[k]
 		segment.xmit++
 		segment.rto = kcp.rx_rto
@@ -729,6 +728,7 @@ func (kcp *KCP) flush() {
 		if size+need > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
+			current = currentMs()
 		}
 
 		ptr = segment.encode(ptr)
@@ -738,7 +738,6 @@ func (kcp *KCP) flush() {
 
 	// check for retransmissions
 	for k := 0; k < len(kcp.snd_buf)-newSegsCount; k++ {
-		current := currentMs()
 		segment := &kcp.snd_buf[k]
 		needsend := false
 		if _itimediff(current, segment.resendts) >= 0 { // RTO
@@ -786,6 +785,7 @@ func (kcp *KCP) flush() {
 			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
 				ptr = buffer
+				current = currentMs()
 			}
 
 			ptr = segment.encode(ptr)
