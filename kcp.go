@@ -805,10 +805,21 @@ func (kcp *KCP) flush() {
 	}
 
 	// counter updates
-	atomic.AddUint64(&DefaultSnmp.RetransSegs, lostSegs+fastRetransSegs+earlyRetransSegs)
-	atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
-	atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
-	atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
+	sum := lostSegs
+	if lostSegs > 0 {
+		atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
+	}
+	if earlyRetransSegs > 0 {
+		atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
+		sum += earlyRetransSegs
+	}
+	if fastRetransSegs > 0 {
+		atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
+		sum += fastRetransSegs
+	}
+	if sum > 0 {
+		atomic.AddUint64(&DefaultSnmp.RetransSegs, sum)
+	}
 
 	// update ssthresh
 	// rate halving, https://tools.ietf.org/html/rfc6937
