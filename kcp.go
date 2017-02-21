@@ -477,7 +477,8 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 }
 
 // Input when you received a low level packet (eg. UDP packet), call it
-func (kcp *KCP) Input(data []byte, update_ack bool) int {
+// regular indicates a regular packet has received(not from FEC)
+func (kcp *KCP) Input(data []byte, regular bool) int {
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
 		return -1
@@ -517,7 +518,10 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 			return -3
 		}
 
-		kcp.rmt_wnd = uint32(wnd)
+		// only trust window updates from regular packets. i.e: latest update
+		if regular {
+			kcp.rmt_wnd = uint32(wnd)
+		}
 		kcp.parse_una(una)
 		kcp.shrink_buf()
 
@@ -565,7 +569,7 @@ func (kcp *KCP) Input(data []byte, update_ack bool) int {
 	}
 
 	current := currentMs()
-	if flag != 0 && update_ack {
+	if flag != 0 && regular {
 		kcp.parse_fastack(maxack)
 		if _itimediff(current, recentack) >= 0 {
 			kcp.update_ack(_itimediff(current, recentack))
