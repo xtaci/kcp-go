@@ -84,16 +84,16 @@ A: A standalone `agent` or `gate` server for kcp-go is suggested, not only for C
 
 ## Who is using this?
 
-1. https://github.com/xtaci/kcptun
-2. https://github.com/getlantern/lantern
-3. https://github.com/smallnest/rpcx
+1. https://github.com/xtaci/kcptun -- A Secure Tunnel Based On KCP over UDP.
+2. https://github.com/getlantern/lantern -- Lantern delivers fast access to the open Internet. 
+3. https://github.com/smallnest/rpcx -- A RPC service framework based on net/rpc like alibaba Dubbo and weibo Motan.
+4. https://github.com/gonet2/agent -- A gateway for games with stream multiplexing.
 
 ## Links
 
 1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
 2. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
 3. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
-4. https://github.com/gonet2/agent -- A gateway for games with stream multiplexing
 
 ### Support
 
