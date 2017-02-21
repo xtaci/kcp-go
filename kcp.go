@@ -102,11 +102,11 @@ type Segment struct {
 	ts       uint32
 	sn       uint32
 	una      uint32
+	data     []byte
 	resendts uint32
 	rto      uint32
 	fastack  uint32
 	xmit     uint32
-	data     []byte
 }
 
 // encode a segment into buffer
