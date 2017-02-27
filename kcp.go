@@ -420,11 +420,7 @@ func (kcp *KCP) parse_una(una uint32) bool {
 		}
 	}
 	kcp.snd_buf = kcp.snd_buf[count:]
-	if count > 0 {
-		return true
-	} else {
-		return false
-	}
+	return count > 0
 }
 
 // ack append
