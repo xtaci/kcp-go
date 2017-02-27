@@ -88,9 +88,7 @@ func (fec *FEC) markFEC(data []byte) {
 	binary.LittleEndian.PutUint32(data, fec.next)
 	binary.LittleEndian.PutUint16(data[4:], typeFEC)
 	fec.next++
-	if fec.next >= fec.paws { // paws would only occurs in markFEC
-		fec.next = 0
-	}
+	fec.next %= fec.paws
 }
 
 // input a fec packet

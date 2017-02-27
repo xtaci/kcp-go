@@ -4,7 +4,12 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
+	"time"
 )
+
+func init() {
+	rand.Seed(time.Now().UnixNano())
+}
 
 func TestFECOther(t *testing.T) {
 	if newFEC(128, 0, 1) != nil {
