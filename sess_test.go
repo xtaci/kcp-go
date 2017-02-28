@@ -86,7 +86,7 @@ func handleClient(conn *UDPSession) {
 	conn.SetACKNoDelay(false)
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
-	fmt.Println("new client", conn.RemoteAddr())
+	log.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 65536)
 	for {
 		n, err := conn.Read(buf)
@@ -142,10 +142,10 @@ func sendrecvclient(wg *sync.WaitGroup) {
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
-		fmt.Println("sent:", msg)
+		log.Println("sent:", msg)
 		cli.Write([]byte(msg))
 		if n, err := cli.Read(buf); err == nil {
-			fmt.Println("recv:", string(buf[:n]))
+			log.Println("recv:", string(buf[:n]))
 		} else {
 			panic(err)
 		}
@@ -221,7 +221,7 @@ func speedclient(wg *sync.WaitGroup) {
 		for {
 			n, err := cli.Read(buf)
 			if err != nil {
-				fmt.Println(err)
+				log.Println(err)
 				break
 			} else {
 				nrecv += n
@@ -231,12 +231,12 @@ func speedclient(wg *sync.WaitGroup) {
 			}
 		}
 		println("total recv:", nrecv)
-		fmt.Println("time for 16MB rtt with encryption", time.Now().Sub(start))
-		fmt.Printf("%+v\n", DefaultSnmp.Copy())
-		fmt.Println(DefaultSnmp.Header())
-		fmt.Println(DefaultSnmp.ToSlice())
+		log.Println("time for 16MB rtt with encryption", time.Now().Sub(start))
+		log.Printf("%+v\n", DefaultSnmp.Copy())
+		log.Println(DefaultSnmp.Header())
+		log.Println(DefaultSnmp.ToSlice())
 		DefaultSnmp.Reset()
-		fmt.Println(DefaultSnmp.ToSlice())
+		log.Println(DefaultSnmp.ToSlice())
 		wg.Done()
 	}()
 	msg := make([]byte, 4096)
@@ -250,7 +250,7 @@ func TestParallel(t *testing.T) {
 	par := 1000
 	var wg sync.WaitGroup
 	wg.Add(par)
-	fmt.Println("testing parallel", par, "connections")
+	log.Println("testing parallel", par, "connections")
 	for i := 0; i < par; i++ {
 		go parallelclient(&wg)
 	}
@@ -274,7 +274,6 @@ func parallelclient(wg *sync.WaitGroup) {
 		<-time.After(10 * time.Millisecond)
 	}
 	wg.Done()
-	wg.Wait()
 }
 
 func TestClose(t *testing.T) {
