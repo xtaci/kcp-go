@@ -26,8 +26,6 @@ func init() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 
-	go server()
-	<-time.After(time.Second)
 }
 
 func DialTest() (*UDPSession, error) {
@@ -52,29 +50,37 @@ func ListenTest() (net.Listener, error) {
 	return ListenWithOptions(port, block, 10, 3)
 }
 
-func server() {
+func server() net.Listener {
 	l, err := ListenTest()
-	if err != nil {
-		panic(err)
-	}
-
-	kcplistener := l.(*Listener)
-	kcplistener.SetReadBuffer(4 * 1024 * 1024)
-	kcplistener.SetWriteBuffer(4 * 1024 * 1024)
-	kcplistener.SetDSCP(46)
-	log.Println("listening on:", kcplistener.conn.LocalAddr())
 	for {
-		s, err := l.Accept()
 		if err != nil {
-			panic(err)
+			<-time.After(time.Second)
+			l, err = ListenTest()
+		} else {
+			break
 		}
-
-		// coverage test
-		s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
-		s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
-		s.(*UDPSession).SetKeepAlive(1)
-		go handleClient(s.(*UDPSession))
 	}
+
+	go func() {
+		kcplistener := l.(*Listener)
+		kcplistener.SetReadBuffer(4 * 1024 * 1024)
+		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
+		kcplistener.SetDSCP(46)
+		log.Println("listening on:", kcplistener.conn.LocalAddr())
+		for {
+			s, err := l.Accept()
+			if err != nil {
+				return
+			}
+
+			// coverage test
+			s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
+			s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
+			s.(*UDPSession).SetKeepAlive(1)
+			go handleClient(s.(*UDPSession))
+		}
+	}()
+	return l
 }
 
 func handleClient(conn *UDPSession) {
@@ -98,6 +104,9 @@ func handleClient(conn *UDPSession) {
 }
 
 func TestTimeout(t *testing.T) {
+	l := server()
+	defer l.Close()
+
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -115,9 +124,12 @@ func TestTimeout(t *testing.T) {
 	if n != 0 || err == nil {
 		t.Fail()
 	}
+	cli.Close()
 }
 
 func TestSendRecv(t *testing.T) {
+	l := server()
+	defer l.Close()
 	var wg sync.WaitGroup
 	const par = 1
 	wg.Add(par)
@@ -151,9 +163,13 @@ func sendrecvclient(wg *sync.WaitGroup) {
 		}
 	}
 	wg.Done()
+	wg.Wait() // make sure ports not reused
+	cli.Close()
 }
 
 func TestBigPacket(t *testing.T) {
+	l := server()
+	defer l.Close()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go bigclient(&wg)
@@ -196,9 +212,12 @@ func bigclient(wg *sync.WaitGroup) {
 	}
 	receiverWaiter.Wait()
 	wg.Done()
+	cli.Close()
 }
 
 func TestSpeed(t *testing.T) {
+	l := server()
+	defer l.Close()
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go speedclient(&wg)
@@ -244,9 +263,37 @@ func speedclient(wg *sync.WaitGroup) {
 	for i := 0; i < 4096; i++ {
 		cli.Write(msg)
 	}
+	cli.Close()
+}
+
+func TestClose(t *testing.T) {
+	l := server()
+	defer l.Close()
+
+	cli, err := DialTest()
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, 10)
+
+	cli.Close()
+	if cli.Close() == nil {
+		t.Fail()
+	}
+	n, err := cli.Write(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	n, err = cli.Read(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	cli.Close()
 }
 
 func TestParallel(t *testing.T) {
+	l := server()
+	defer l.Close()
 	par := 1000
 	var wg sync.WaitGroup
 	wg.Add(par)
@@ -274,4 +321,6 @@ func parallelclient(wg *sync.WaitGroup) {
 		<-time.After(10 * time.Millisecond)
 	}
 	wg.Done()
+	wg.Wait() // make sure ports not reused
+	cli.Close()
 }
