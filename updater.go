@@ -53,7 +53,7 @@ func (h *updateHeap) init() {
 	h.chWakeUp = make(chan struct{}, 1)
 }
 
-func (h *updateHeap) newSession(s *UDPSession) {
+func (h *updateHeap) addSession(s *UDPSession) {
 	h.mu.Lock()
 	heap.Push(h, entry{s.sid, time.Now(), s})
 	h.mu.Unlock()

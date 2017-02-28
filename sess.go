@@ -118,7 +118,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.kcp.WndSize(defaultWndSize, defaultWndSize)
 	sess.kcp.SetMtu(IKCP_MTU_DEF - sess.headerSize)
 
-	updater.newSession(sess)
+	updater.addSession(sess)
 	go sess.outputTask()
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
