@@ -252,6 +252,8 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
+	updater.removeSession(s)
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.isClosed {
@@ -259,7 +261,6 @@ func (s *UDPSession) Close() error {
 	}
 	close(s.die)
 	s.isClosed = true
-	updater.removeSession(s)
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	if s.l == nil { // client socket close
 		return s.conn.Close()

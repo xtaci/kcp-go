@@ -128,7 +128,7 @@ func BenchmarkTEA(b *testing.B) {
 	b.SetBytes(int64(len(enc) * 2))
 }
 
-func TestSimpleXOR(t *testing.T) {
+func TestXOR(t *testing.T) {
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	bc, err := NewSimpleXORBlockCrypt(pass)
 	if err != nil {
@@ -145,7 +145,7 @@ func TestSimpleXOR(t *testing.T) {
 	}
 }
 
-func BenchmarkSimpleXOR(b *testing.B) {
+func BenchmarkXOR(b *testing.B) {
 	pass := make([]byte, 32)
 	io.ReadFull(rand.Reader, pass)
 	bc, err := NewSimpleXORBlockCrypt(pass)
