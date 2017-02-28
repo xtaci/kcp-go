@@ -47,6 +47,7 @@ func BenchmarkAES128(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func BenchmarkAES192(b *testing.B) {
@@ -66,6 +67,7 @@ func BenchmarkAES192(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func BenchmarkAES256(b *testing.B) {
@@ -85,6 +87,7 @@ func BenchmarkAES256(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestTEA(t *testing.T) {
@@ -122,6 +125,7 @@ func BenchmarkTEA(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestSimpleXOR(t *testing.T) {
@@ -158,6 +162,7 @@ func BenchmarkSimpleXOR(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestBlowfish(t *testing.T) {
@@ -194,6 +199,7 @@ func BenchmarkBlowfish(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestNone(t *testing.T) {
@@ -230,6 +236,7 @@ func BenchmarkNone(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestCast5(t *testing.T) {
@@ -266,6 +273,7 @@ func BenchmarkCast5(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestTripleDES(t *testing.T) {
@@ -302,6 +310,7 @@ func BenchmarkTripleDES(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestTwofish(t *testing.T) {
@@ -338,6 +347,7 @@ func BenchmarkTwofish(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestXTEA(t *testing.T) {
@@ -375,6 +385,7 @@ func BenchmarkXTEA(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }
 
 func TestSalsa20(t *testing.T) {
@@ -411,4 +422,5 @@ func BenchmarkSalsa20(b *testing.B) {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
+	b.SetBytes(int64(len(enc) * 2))
 }

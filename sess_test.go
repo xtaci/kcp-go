@@ -39,6 +39,13 @@ func DialTest() (*UDPSession, error) {
 	}
 
 	sess.SetStreamMode(true)
+	sess.SetWindowSize(1024, 1024)
+	sess.SetReadBuffer(4 * 1024 * 1024)
+	sess.SetWriteBuffer(4 * 1024 * 1024)
+	sess.SetStreamMode(true)
+	sess.SetNoDelay(1, 20, 2, 1)
+	sess.SetACKNoDelay(true)
+	sess.SetDeadline(time.Now().Add(time.Minute))
 	return sess, err
 }
 
@@ -66,7 +73,6 @@ func server() net.Listener {
 		kcplistener.SetReadBuffer(4 * 1024 * 1024)
 		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
 		kcplistener.SetDSCP(46)
-		log.Println("listening on:", kcplistener.conn.LocalAddr())
 		for {
 			s, err := l.Accept()
 			if err != nil {
@@ -92,7 +98,6 @@ func handleClient(conn *UDPSession) {
 	conn.SetACKNoDelay(false)
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
-	log.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 65536)
 	for {
 		n, err := conn.Read(buf)
@@ -130,53 +135,30 @@ func TestTimeout(t *testing.T) {
 func TestSendRecv(t *testing.T) {
 	l := server()
 	defer l.Close()
-	var wg sync.WaitGroup
-	const par = 1
-	wg.Add(par)
-	for i := 0; i < par; i++ {
-		go sendrecvclient(&wg)
-	}
-	wg.Wait()
-}
-
-func sendrecvclient(wg *sync.WaitGroup) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
 	}
-	cli.SetReadBuffer(4 * 1024 * 1024)
-	cli.SetWriteBuffer(4 * 1024 * 1024)
-	cli.SetStreamMode(true)
-	cli.SetNoDelay(1, 20, 2, 1)
-	cli.SetACKNoDelay(true)
-	cli.SetDeadline(time.Now().Add(time.Minute))
 	const N = 100
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
-		log.Println("sent:", msg)
 		cli.Write([]byte(msg))
 		if n, err := cli.Read(buf); err == nil {
-			log.Println("recv:", string(buf[:n]))
+			if string(buf[:n]) != msg {
+				t.Fail()
+			}
 		} else {
 			panic(err)
 		}
 	}
-	wg.Done()
-	wg.Wait() // make sure ports not reused
 	cli.Close()
 }
 
 func TestBigPacket(t *testing.T) {
 	l := server()
 	defer l.Close()
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go bigclient(&wg)
-	wg.Wait()
-}
 
-func bigclient(wg *sync.WaitGroup) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -187,7 +169,6 @@ func bigclient(wg *sync.WaitGroup) {
 	msg := make([]byte, 1024*512)
 
 	total := len(msg) * N
-	println("total to send:", total)
 	var receiverWaiter sync.WaitGroup
 	receiverWaiter.Add(1)
 
@@ -211,58 +192,6 @@ func bigclient(wg *sync.WaitGroup) {
 		cli.Write(msg)
 	}
 	receiverWaiter.Wait()
-	wg.Done()
-	cli.Close()
-}
-
-func TestSpeed(t *testing.T) {
-	l := server()
-	defer l.Close()
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go speedclient(&wg)
-	wg.Wait()
-}
-
-func speedclient(wg *sync.WaitGroup) {
-	cli, err := DialTest()
-	if err != nil {
-		panic(err)
-	}
-	log.Println("remote:", cli.RemoteAddr(), "local:", cli.LocalAddr())
-	log.Println("conv:", cli.GetConv())
-	cli.SetNoDelay(1, 20, 2, 1)
-	start := time.Now()
-
-	go func() {
-		buf := make([]byte, 1024*1024)
-		nrecv := 0
-		for {
-			n, err := cli.Read(buf)
-			if err != nil {
-				log.Println(err)
-				break
-			} else {
-				nrecv += n
-				if nrecv == 4096*4096 {
-					break
-				}
-			}
-		}
-		println("total recv:", nrecv)
-		log.Println("time for 16MB rtt with encryption", time.Now().Sub(start))
-		log.Printf("%+v\n", DefaultSnmp.Copy())
-		log.Println(DefaultSnmp.Header())
-		log.Println(DefaultSnmp.ToSlice())
-		DefaultSnmp.Reset()
-		log.Println(DefaultSnmp.ToSlice())
-		wg.Done()
-	}()
-	msg := make([]byte, 4096)
-	cli.SetWindowSize(1024, 1024)
-	for i := 0; i < 4096; i++ {
-		cli.Write(msg)
-	}
 	cli.Close()
 }
 
@@ -291,36 +220,106 @@ func TestClose(t *testing.T) {
 	cli.Close()
 }
 
-func TestParallel(t *testing.T) {
+func BenchmarkParallel100x10(b *testing.B) {
 	l := server()
 	defer l.Close()
-	par := 1000
 	var wg sync.WaitGroup
-	wg.Add(par)
-	log.Println("testing parallel", par, "connections")
-	for i := 0; i < par; i++ {
-		go parallelclient(&wg)
+	wg.Add(b.N)
+	for i := 0; i < b.N; i++ {
+		go parallelclient(&wg, b, 100, 10)
 	}
 	wg.Wait()
 }
 
-func parallelclient(wg *sync.WaitGroup) {
+func BenchmarkParallel100x100(b *testing.B) {
+	l := server()
+	defer l.Close()
+	var wg sync.WaitGroup
+	wg.Add(b.N)
+	for i := 0; i < b.N; i++ {
+		go parallelclient(&wg, b, 100, 100)
+	}
+	wg.Wait()
+}
+
+func BenchmarkParallel100x1000(b *testing.B) {
+	l := server()
+	defer l.Close()
+	var wg sync.WaitGroup
+	wg.Add(b.N)
+	for i := 0; i < b.N; i++ {
+		go parallelclient(&wg, b, 100, 1000)
+	}
+	wg.Wait()
+}
+
+func parallelclient(wg *sync.WaitGroup, b *testing.B, count, nbytes int) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
 	}
-	const N = 100
 	cli.SetNoDelay(1, 20, 2, 1)
-	buf := make([]byte, 10)
-	for i := 0; i < N; i++ {
+	buf := make([]byte, nbytes)
+	for i := 0; i < count; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		cli.Write([]byte(msg))
 		if _, err := cli.Read(buf); err != nil {
 			break
 		}
-		<-time.After(10 * time.Millisecond)
 	}
+	b.SetBytes(int64(count * nbytes))
 	wg.Done()
 	wg.Wait() // make sure ports not reused
+}
+
+func BenchmarkSpeed(b *testing.B) {
+	l := server()
+	defer l.Close()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go speedclient(&wg, b)
+	wg.Wait()
+}
+
+func speedclient(wg *sync.WaitGroup, b *testing.B) {
+	cli, err := DialTest()
+	if err != nil {
+		panic(err)
+	}
+	cli.SetNoDelay(1, 20, 2, 1)
+
+	// pong
+	go func() {
+		buf := make([]byte, 1024*1024)
+		nrecv := 0
+		for {
+			n, err := cli.Read(buf)
+			if err != nil {
+				break
+			} else {
+				nrecv += n
+				if nrecv == 4096*4096 {
+					break
+				}
+			}
+		}
+		wg.Done()
+	}()
+
+	//ping
+	msg := make([]byte, 4096)
+	for i := 0; i < 4096; i++ {
+		cli.Write(msg)
+	}
 	cli.Close()
+	wg.Wait()
+	b.SetBytes(4096 * 4096)
+}
+
+func TestSNMP(t *testing.T) {
+	t.Log(DefaultSnmp.Copy())
+	t.Log(DefaultSnmp.Header())
+	t.Log(DefaultSnmp.ToSlice())
+	DefaultSnmp.Reset()
+	t.Log(DefaultSnmp.ToSlice())
 }
