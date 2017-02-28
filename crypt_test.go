@@ -276,7 +276,7 @@ func BenchmarkCast5(b *testing.B) {
 	b.SetBytes(int64(len(enc) * 2))
 }
 
-func TestTripleDES(t *testing.T) {
+func Test3DES(t *testing.T) {
 	pass := pbkdf2.Key(key, []byte(salt), 4096, 24, sha1.New)
 	bc, err := NewTripleDESBlockCrypt(pass)
 	if err != nil {
@@ -293,7 +293,7 @@ func TestTripleDES(t *testing.T) {
 	}
 }
 
-func BenchmarkTripleDES(b *testing.B) {
+func Benchmark3DES(b *testing.B) {
 	pass := make([]byte, 24)
 	io.ReadFull(rand.Reader, pass)
 	bc, err := NewTripleDESBlockCrypt(pass)

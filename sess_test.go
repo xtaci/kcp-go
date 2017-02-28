@@ -167,6 +167,25 @@ func TestClose(t *testing.T) {
 	cli.Close()
 }
 
+func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
+	var wg sync.WaitGroup
+	wg.Add(1024)
+	for i := 0; i < 1024; i++ {
+		go parallel_client(&wg)
+	}
+	wg.Wait()
+}
+
+func parallel_client(wg *sync.WaitGroup) {
+	cli, err := DialTest()
+	if err != nil {
+		panic(err)
+	}
+
+	echo_tester(cli, 64, 64)
+	wg.Done()
+}
+
 func BenchmarkSpeed4K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		speedclient(b, 4096)
