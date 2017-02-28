@@ -26,6 +26,7 @@ func init() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 
+	go server()
 }
 
 func DialTest() (*UDPSession, error) {
@@ -57,15 +58,10 @@ func ListenTest() (net.Listener, error) {
 	return ListenWithOptions(port, block, 10, 3)
 }
 
-func server() net.Listener {
+func server() {
 	l, err := ListenTest()
-	for {
-		if err != nil {
-			<-time.After(time.Second)
-			l, err = ListenTest()
-		} else {
-			break
-		}
+	if err != nil {
+		panic(err)
 	}
 
 	go func() {
@@ -86,7 +82,6 @@ func server() net.Listener {
 			go handleClient(s.(*UDPSession))
 		}
 	}()
-	return l
 }
 
 func handleClient(conn *UDPSession) {
@@ -109,9 +104,6 @@ func handleClient(conn *UDPSession) {
 }
 
 func TestTimeout(t *testing.T) {
-	l := server()
-	defer l.Close()
-
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -133,8 +125,6 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestSendRecv(t *testing.T) {
-	l := server()
-	defer l.Close()
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -155,50 +145,7 @@ func TestSendRecv(t *testing.T) {
 	cli.Close()
 }
 
-func TestBigPacket(t *testing.T) {
-	l := server()
-	defer l.Close()
-
-	cli, err := DialTest()
-	if err != nil {
-		panic(err)
-	}
-	cli.SetNoDelay(1, 20, 2, 1)
-	const N = 10
-	buf := make([]byte, 1024*512)
-	msg := make([]byte, 1024*512)
-
-	total := len(msg) * N
-	var receiverWaiter sync.WaitGroup
-	receiverWaiter.Add(1)
-
-	go func() {
-		nrecv := 0
-		for {
-			n, err := cli.Read(buf)
-			if err != nil {
-				break
-			} else {
-				nrecv += n
-				if nrecv == total {
-					receiverWaiter.Done()
-					return
-				}
-			}
-		}
-	}()
-
-	for i := 0; i < N; i++ {
-		cli.Write(msg)
-	}
-	receiverWaiter.Wait()
-	cli.Close()
-}
-
 func TestClose(t *testing.T) {
-	l := server()
-	defer l.Close()
-
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -220,100 +167,38 @@ func TestClose(t *testing.T) {
 	cli.Close()
 }
 
-func BenchmarkParallel100x10(b *testing.B) {
-	l := server()
-	defer l.Close()
-	var wg sync.WaitGroup
-	wg.Add(b.N)
+func BenchmarkSpeed4K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		go parallelclient(&wg, b, 100, 10)
+		speedclient(b, 4096)
 	}
-	wg.Wait()
 }
 
-func BenchmarkParallel100x100(b *testing.B) {
-	l := server()
-	defer l.Close()
-	var wg sync.WaitGroup
-	wg.Add(b.N)
+func BenchmarkSpeed64K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		go parallelclient(&wg, b, 100, 100)
+		speedclient(b, 65536)
 	}
-	wg.Wait()
 }
 
-func BenchmarkParallel100x1000(b *testing.B) {
-	l := server()
-	defer l.Close()
-	var wg sync.WaitGroup
-	wg.Add(b.N)
+func BenchmarkSpeed512K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		go parallelclient(&wg, b, 100, 1000)
+		speedclient(b, 524288)
 	}
-	wg.Wait()
 }
 
-func parallelclient(wg *sync.WaitGroup, b *testing.B, count, nbytes int) {
+func BenchmarkSpeed1M(b *testing.B) {
+	for i := 0; i < b.N; i++ {
+		speedclient(b, 1048576)
+	}
+}
+
+func speedclient(b *testing.B, nbytes int) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
 	}
-	cli.SetNoDelay(1, 20, 2, 1)
-	buf := make([]byte, nbytes)
-	for i := 0; i < count; i++ {
-		msg := fmt.Sprintf("hello%v", i)
-		cli.Write([]byte(msg))
-		if _, err := cli.Read(buf); err != nil {
-			break
-		}
-	}
-	b.SetBytes(int64(count * nbytes))
-	wg.Done()
-	wg.Wait() // make sure ports not reused
-}
 
-func BenchmarkSpeed(b *testing.B) {
-	l := server()
-	defer l.Close()
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go speedclient(&wg, b)
-	wg.Wait()
-}
-
-func speedclient(wg *sync.WaitGroup, b *testing.B) {
-	cli, err := DialTest()
-	if err != nil {
-		panic(err)
-	}
-	cli.SetNoDelay(1, 20, 2, 1)
-
-	// pong
-	go func() {
-		buf := make([]byte, 1024*1024)
-		nrecv := 0
-		for {
-			n, err := cli.Read(buf)
-			if err != nil {
-				break
-			} else {
-				nrecv += n
-				if nrecv == 4096*4096 {
-					break
-				}
-			}
-		}
-		wg.Done()
-	}()
-
-	//ping
-	msg := make([]byte, 4096)
-	for i := 0; i < 4096; i++ {
-		cli.Write(msg)
-	}
-	cli.Close()
-	wg.Wait()
-	b.SetBytes(4096 * 4096)
+	echo_tester(cli, nbytes, 1)
+	b.SetBytes(int64(nbytes) * 4)
 }
 
 func TestSNMP(t *testing.T) {
@@ -322,4 +207,40 @@ func TestSNMP(t *testing.T) {
 	t.Log(DefaultSnmp.ToSlice())
 	DefaultSnmp.Reset()
 	t.Log(DefaultSnmp.ToSlice())
+}
+
+func echo_tester(cli net.Conn, msglen, msgcount int) {
+	total := msglen * msgcount
+
+	var wg sync.WaitGroup
+
+	// sender
+	wg.Add(2)
+	go func() {
+		buf := make([]byte, msglen)
+		for i := 0; i < msgcount; i++ {
+			cli.Write(buf)
+		}
+		wg.Done()
+	}()
+
+	// receiver
+	go func() {
+		buf := make([]byte, msglen)
+		nrecv := 0
+		for {
+			n, err := cli.Read(buf)
+			if err != nil {
+				log.Println(err)
+				break
+			} else {
+				nrecv += n
+				if nrecv == total {
+					break
+				}
+			}
+		}
+		wg.Done()
+	}()
+	wg.Wait()
 }

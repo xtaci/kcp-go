@@ -54,18 +54,22 @@ func (h *updateHeap) init() {
 }
 
 func (h *updateHeap) addSession(s *UDPSession) {
-	h.mu.Lock()
-	heap.Push(h, entry{s.sid, time.Now(), s})
-	h.mu.Unlock()
-	h.wakeup()
+	go func() {
+		h.mu.Lock()
+		heap.Push(h, entry{s.sid, time.Now(), s})
+		h.mu.Unlock()
+		h.wakeup()
+	}()
 }
 
 func (h *updateHeap) removeSession(s *UDPSession) {
-	h.mu.Lock()
-	if idx, ok := h.indices[s.sid]; ok {
-		heap.Remove(h, idx)
-	}
-	h.mu.Unlock()
+	go func() {
+		h.mu.Lock()
+		if idx, ok := h.indices[s.sid]; ok {
+			heap.Remove(h, idx)
+		}
+		h.mu.Unlock()
+	}()
 }
 
 func (h *updateHeap) wakeup() {
