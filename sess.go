@@ -40,6 +40,7 @@ const (
 
 var (
 	xmitBuf sync.Pool
+	sid     uint32
 )
 
 func init() {
@@ -51,6 +52,7 @@ func init() {
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
+		sid               uint32
 		kcp               *KCP           // the core ARQ
 		l                 *Listener      // point to server listener if it's a server socket
 		fec               *FEC           // forward error correction
@@ -84,6 +86,7 @@ type (
 // newUDPSession create a new udp session for client or server
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
+	sess.sid = atomic.AddUint32(&sid, 1)
 	sess.chUDPOutput = make(chan []byte)
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
@@ -115,7 +118,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.kcp.WndSize(defaultWndSize, defaultWndSize)
 	sess.kcp.SetMtu(IKCP_MTU_DEF - sess.headerSize)
 
-	go sess.updateTask()
+	updater.newSession(sess)
 	go sess.outputTask()
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
@@ -209,16 +212,16 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 
 		if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
 			n = len(b)
-			max := s.kcp.mss << 8
 			for {
-				if len(b) <= int(max) { // in most cases
+				if len(b) <= int(s.kcp.mss) {
 					s.kcp.Send(b)
 					break
 				} else {
-					s.kcp.Send(b[:max])
-					b = b[max:]
+					s.kcp.Send(b[:s.kcp.mss])
+					b = b[s.kcp.mss:]
 				}
 			}
+
 			s.kcp.flush()
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
@@ -256,6 +259,7 @@ func (s *UDPSession) Close() error {
 	}
 	close(s.die)
 	s.isClosed = true
+	updater.removeSession(s)
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	if s.l == nil { // client socket close
 		return s.conn.Close()
@@ -494,30 +498,15 @@ func (s *UDPSession) outputTask() {
 	}
 }
 
-// kcp update, input loop
-func (s *UDPSession) updateTask() {
-	tc := time.After(time.Duration(atomic.LoadInt32(&s.updateInterval)) * time.Millisecond)
-
-	for {
-		select {
-		case <-tc:
-			s.mu.Lock()
-			s.kcp.flush()
-			if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
-				s.notifyWriteEvent()
-			}
-			s.mu.Unlock()
-			tc = time.After(time.Duration(atomic.LoadInt32(&s.updateInterval)) * time.Millisecond)
-		case <-s.die:
-			if s.l != nil { // has listener
-				select {
-				case s.l.chDeadlinks <- s.remote:
-				case <-s.l.die:
-				}
-			}
-			return
-		}
+// kcp update, returns interval for next calling
+func (s *UDPSession) update() time.Duration {
+	s.mu.Lock()
+	s.kcp.flush()
+	if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
+		s.notifyWriteEvent()
 	}
+	s.mu.Unlock()
+	return time.Duration(atomic.LoadInt32(&s.updateInterval)) * time.Millisecond
 }
 
 // GetConv gets conversation id of a session
@@ -580,6 +569,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
 		}
+
 		if s.ackNoDelay {
 			s.kcp.flush()
 		}

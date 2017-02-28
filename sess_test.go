@@ -19,42 +19,32 @@ const salt = "kcptest"
 
 var key = []byte("testkey")
 var fec = 4
+var pass = pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 
 func init() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
+
 	go server()
-	<-time.After(1 * time.Second)
+	<-time.After(time.Second)
 }
 
 func DialTest() (*UDPSession, error) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	return DialWithOptions(port, block, 10, 3)
-}
+	sess, err := DialWithOptions(port, block, 10, 3)
+	if err != nil {
+		panic(err)
+	}
 
-func DialTest2() (*UDPSession, error) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
-	block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
-	return DialWithOptions(port, block, 10, 3)
-}
-
-// all uncovered codes
-func TestCoverage(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
-	block, _ := NewAESBlockCrypt(pass)
-	DialWithOptions("127.0.0.1:100000", block, 0, 0)
+	sess.SetStreamMode(true)
+	return sess, err
 }
 
 func ListenTest() (net.Listener, error) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
 	block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
@@ -69,8 +59,8 @@ func server() {
 	}
 
 	kcplistener := l.(*Listener)
-	kcplistener.SetReadBuffer(16 * 1024 * 1024)
-	kcplistener.SetWriteBuffer(16 * 1024 * 1024)
+	kcplistener.SetReadBuffer(4 * 1024 * 1024)
+	kcplistener.SetWriteBuffer(4 * 1024 * 1024)
 	kcplistener.SetDSCP(46)
 	log.Println("listening on:", kcplistener.conn.LocalAddr())
 	for {
@@ -80,8 +70,8 @@ func server() {
 		}
 
 		// coverage test
-		s.(*UDPSession).SetReadBuffer(16 * 1024 * 1024)
-		s.(*UDPSession).SetWriteBuffer(16 * 1024 * 1024)
+		s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
+		s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
 		s.(*UDPSession).SetKeepAlive(1)
 		go handleClient(s.(*UDPSession))
 	}
@@ -98,13 +88,11 @@ func handleClient(conn *UDPSession) {
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
 	fmt.Println("new client", conn.RemoteAddr())
 	buf := make([]byte, 65536)
-	count := 0
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
 			panic(err)
 		}
-		count++
 		conn.Write(buf[:n])
 	}
 }
@@ -129,44 +117,23 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
-func TestClose(t *testing.T) {
-	cli, err := DialTest()
-	if err != nil {
-		panic(err)
-	}
-	buf := make([]byte, 10)
-
-	cli.Close()
-	if cli.Close() == nil {
-		t.Fail()
-	}
-	n, err := cli.Write(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-	n, err = cli.Read(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-}
-
 func TestSendRecv(t *testing.T) {
 	var wg sync.WaitGroup
 	const par = 1
 	wg.Add(par)
 	for i := 0; i < par; i++ {
-		go client(&wg)
+		go sendrecvclient(&wg)
 	}
 	wg.Wait()
 }
 
-func client(wg *sync.WaitGroup) {
+func sendrecvclient(wg *sync.WaitGroup) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
 	}
-	cli.SetReadBuffer(16 * 1024 * 1024)
-	cli.SetWriteBuffer(16 * 1024 * 1024)
+	cli.SetReadBuffer(4 * 1024 * 1024)
+	cli.SetWriteBuffer(4 * 1024 * 1024)
 	cli.SetStreamMode(true)
 	cli.SetNoDelay(1, 20, 2, 1)
 	cli.SetACKNoDelay(true)
@@ -183,18 +150,17 @@ func client(wg *sync.WaitGroup) {
 			panic(err)
 		}
 	}
-	cli.Close()
 	wg.Done()
 }
 
 func TestBigPacket(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go client2(&wg)
+	go bigclient(&wg)
 	wg.Wait()
 }
 
-func client2(wg *sync.WaitGroup) {
+func bigclient(wg *sync.WaitGroup) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -203,39 +169,44 @@ func client2(wg *sync.WaitGroup) {
 	const N = 10
 	buf := make([]byte, 1024*512)
 	msg := make([]byte, 1024*512)
+
+	total := len(msg) * N
+	println("total to send:", total)
+	var receiverWaiter sync.WaitGroup
+	receiverWaiter.Add(1)
+
+	go func() {
+		nrecv := 0
+		for {
+			n, err := cli.Read(buf)
+			if err != nil {
+				break
+			} else {
+				nrecv += n
+				if nrecv == total {
+					receiverWaiter.Done()
+					return
+				}
+			}
+		}
+	}()
+
 	for i := 0; i < N; i++ {
 		cli.Write(msg)
 	}
-	println("total written:", len(msg)*N)
-
-	nrecv := 0
-	cli.SetReadDeadline(time.Now().Add(3 * time.Second))
-	for {
-		n, err := cli.Read(buf)
-		if err != nil {
-			break
-		} else {
-			nrecv += n
-			if nrecv == len(msg)*N {
-				break
-			}
-		}
-	}
-
-	println("total recv:", nrecv)
-	cli.Close()
+	receiverWaiter.Wait()
 	wg.Done()
 }
 
 func TestSpeed(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go client3(&wg)
+	go speedclient(&wg)
 	wg.Wait()
 }
 
-func client3(wg *sync.WaitGroup) {
-	cli, err := DialTest2()
+func speedclient(wg *sync.WaitGroup) {
+	cli, err := DialTest()
 	if err != nil {
 		panic(err)
 	}
@@ -260,7 +231,6 @@ func client3(wg *sync.WaitGroup) {
 			}
 		}
 		println("total recv:", nrecv)
-		cli.Close()
 		fmt.Println("time for 16MB rtt with encryption", time.Now().Sub(start))
 		fmt.Printf("%+v\n", DefaultSnmp.Copy())
 		fmt.Println(DefaultSnmp.Header())
@@ -277,17 +247,17 @@ func client3(wg *sync.WaitGroup) {
 }
 
 func TestParallel(t *testing.T) {
-	par := 200
+	par := 1000
 	var wg sync.WaitGroup
 	wg.Add(par)
 	fmt.Println("testing parallel", par, "connections")
 	for i := 0; i < par; i++ {
-		go client4(&wg)
+		go parallelclient(&wg)
 	}
 	wg.Wait()
 }
 
-func client4(wg *sync.WaitGroup) {
+func parallelclient(wg *sync.WaitGroup) {
 	cli, err := DialTest()
 	if err != nil {
 		panic(err)
@@ -303,6 +273,27 @@ func client4(wg *sync.WaitGroup) {
 		}
 		<-time.After(10 * time.Millisecond)
 	}
-	cli.Close()
 	wg.Done()
+	wg.Wait()
+}
+
+func TestClose(t *testing.T) {
+	cli, err := DialTest()
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, 10)
+
+	cli.Close()
+	if cli.Close() == nil {
+		t.Fail()
+	}
+	n, err := cli.Write(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	n, err = cli.Read(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
 }
