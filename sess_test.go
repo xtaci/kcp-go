@@ -275,24 +275,3 @@ func parallelclient(wg *sync.WaitGroup) {
 	}
 	wg.Done()
 }
-
-func TestClose(t *testing.T) {
-	cli, err := DialTest()
-	if err != nil {
-		panic(err)
-	}
-	buf := make([]byte, 10)
-
-	cli.Close()
-	if cli.Close() == nil {
-		t.Fail()
-	}
-	n, err := cli.Write(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-	n, err = cli.Read(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-}
