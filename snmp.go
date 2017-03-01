@@ -7,28 +7,27 @@ import (
 
 // Snmp defines network statistics indicator
 type Snmp struct {
-	BytesSent        uint64 // raw bytes sent
-	BytesReceived    uint64
-	MaxConn          uint64
-	ActiveOpens      uint64
-	PassiveOpens     uint64
-	CurrEstab        uint64 // count of connections for now
-	InErrs           uint64 // udp read errors
-	InCsumErrors     uint64 // checksum errors from CRC32
-	KCPInErrors      uint64 // packet iput errors from kcp
-	InSegs           uint64
-	OutSegs          uint64
-	InBytes          uint64 // udp bytes received
-	OutBytes         uint64 // udp bytes sent
-	RetransSegs      uint64
-	FastRetransSegs  uint64
-	EarlyRetransSegs uint64
-	LostSegs         uint64 // number of segs infered as lost
-	RepeatSegs       uint64 // number of segs duplicated
-	FECRecovered     uint64 // correct packets recovered from FEC
-	FECErrs          uint64 // incorrect packets recovered from FEC
-	FECSegs          uint64 // FEC segments received
-	FECShortShards   uint64 // number of data shards that's not enough for recovery
+	BytesSent       uint64 // raw bytes sent
+	BytesReceived   uint64
+	MaxConn         uint64
+	ActiveOpens     uint64
+	PassiveOpens    uint64
+	CurrEstab       uint64 // count of connections for now
+	InErrs          uint64 // udp read errors
+	InCsumErrors    uint64 // checksum errors from CRC32
+	KCPInErrors     uint64 // packet iput errors from kcp
+	InSegs          uint64
+	OutSegs         uint64
+	InBytes         uint64 // udp bytes received
+	OutBytes        uint64 // udp bytes sent
+	RetransSegs     uint64
+	FastRetransSegs uint64
+	LostSegs        uint64 // number of segs infered as lost
+	RepeatSegs      uint64 // number of segs duplicated
+	FECRecovered    uint64 // correct packets recovered from FEC
+	FECErrs         uint64 // incorrect packets recovered from FEC
+	FECSegs         uint64 // FEC segments received
+	FECShortShards  uint64 // number of data shards that's not enough for recovery
 }
 
 func newSnmp() *Snmp {
@@ -80,7 +79,6 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.OutBytes),
 		fmt.Sprint(snmp.RetransSegs),
 		fmt.Sprint(snmp.FastRetransSegs),
-		fmt.Sprint(snmp.EarlyRetransSegs),
 		fmt.Sprint(snmp.LostSegs),
 		fmt.Sprint(snmp.RepeatSegs),
 		fmt.Sprint(snmp.FECSegs),
@@ -108,7 +106,6 @@ func (s *Snmp) Copy() *Snmp {
 	d.OutBytes = atomic.LoadUint64(&s.OutBytes)
 	d.RetransSegs = atomic.LoadUint64(&s.RetransSegs)
 	d.FastRetransSegs = atomic.LoadUint64(&s.FastRetransSegs)
-	d.EarlyRetransSegs = atomic.LoadUint64(&s.EarlyRetransSegs)
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
 	d.FECSegs = atomic.LoadUint64(&s.FECSegs)
@@ -135,7 +132,6 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.OutBytes, 0)
 	atomic.StoreUint64(&s.RetransSegs, 0)
 	atomic.StoreUint64(&s.FastRetransSegs, 0)
-	atomic.StoreUint64(&s.EarlyRetransSegs, 0)
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
 	atomic.StoreUint64(&s.FECSegs, 0)

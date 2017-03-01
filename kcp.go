@@ -95,18 +95,19 @@ func _itimediff(later, earlier uint32) int32 {
 
 // Segment defines a KCP segment
 type Segment struct {
-	conv     uint32
-	cmd      uint32
-	frg      uint32
-	wnd      uint32
-	ts       uint32
-	sn       uint32
-	una      uint32
-	data     []byte
-	resendts uint32
-	rto      uint32
-	fastack  uint32
-	xmit     uint32
+	conv       uint32
+	cmd        uint32
+	frg        uint32
+	wnd        uint32
+	ts         uint32
+	sn         uint32
+	una        uint32
+	data       []byte
+	resendts   uint32
+	rto        uint32
+	fastack    uint32
+	fastack_ts uint32
+	xmit       uint32
 }
 
 // encode a segment into buffer
@@ -394,7 +395,7 @@ func (kcp *KCP) parse_ack(sn uint32) (success bool) {
 	return
 }
 
-func (kcp *KCP) parse_fastack(sn uint32) {
+func (kcp *KCP) parse_fastack(sn uint32, current uint32) {
 	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
 		return
 	}
@@ -403,8 +404,11 @@ func (kcp *KCP) parse_fastack(sn uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(sn, seg.sn) < 0 {
 			break
-		} else if sn != seg.sn { //  && kcp.current >= seg.ts+kcp.rx_srtt {
-			seg.fastack++
+		} else if sn != seg.sn {
+			if seg.fastack == 0 || _itimediff(current, seg.fastack_ts) >= int32(kcp.interval) {
+				seg.fastack++
+				seg.fastack_ts = current
+			}
 		}
 	}
 }
@@ -576,7 +580,7 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 
 	current := currentMs()
 	if flag != 0 && regular {
-		kcp.parse_fastack(maxack)
+		kcp.parse_fastack(maxack, current)
 		if _itimediff(current, recentack) >= 0 && (ack_done || una_done) {
 			kcp.update_ack(_itimediff(current, recentack))
 		}
@@ -737,7 +741,7 @@ func (kcp *KCP) flush() {
 	}
 
 	// counters
-	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
+	var lostSegs, fastRetransSegs uint64
 
 	// send new segments
 	for k := len(kcp.snd_buf) - newSegsCount; k < len(kcp.snd_buf); k++ {
@@ -825,10 +829,6 @@ func (kcp *KCP) flush() {
 	sum := lostSegs
 	if lostSegs > 0 {
 		atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
-	}
-	if earlyRetransSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
-		sum += earlyRetransSegs
 	}
 	if fastRetransSegs > 0 {
 		atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
