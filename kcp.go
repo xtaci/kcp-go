@@ -145,8 +145,9 @@ type KCP struct {
 
 	acklist []ackItem
 
-	buffer []byte
-	output Output
+	buffer    []byte
+	output    Output
+	datashard int
 }
 
 type ackItem struct {
@@ -626,20 +627,34 @@ func (kcp *KCP) flush() {
 	seg.una = kcp.rcv_nxt
 
 	// flush acknowledges
-	ptr := buffer
+	var required []ackItem
 	for i, ack := range kcp.acklist {
-		size := len(buffer) - len(ptr)
-		if size+IKCP_OVERHEAD > int(kcp.mtu) {
-			kcp.output(buffer, size)
-			ptr = buffer
-		}
-		// filter jitters caused by bufferbloat
+		// filter necessary acks only
 		if ack.sn >= kcp.rcv_nxt || len(kcp.acklist)-1 == i {
-			seg.sn, seg.ts = ack.sn, ack.ts
-			ptr = seg.encode(ptr)
+			required = append(required, kcp.acklist[i])
 		}
 	}
 	kcp.acklist = nil
+
+	batch := kcp.mtu / IKCP_OVERHEAD
+	if kcp.datashard > 0 { // try triggering FEC
+		batch = _imin_(batch, uint32(len(required)/kcp.datashard))
+	}
+
+	ptr := buffer
+	var segCount uint32
+	for _, ack := range required {
+		seg.sn, seg.ts = ack.sn, ack.ts
+		ptr = seg.encode(ptr)
+
+		segCount++
+		size := len(buffer) - len(ptr)
+		if segCount > batch {
+			kcp.output(buffer, size)
+			ptr = buffer
+			segCount = 0
+		}
+	}
 
 	current := currentMs()
 	// probe window size (if remote window size equals zero)
@@ -934,6 +949,11 @@ func (kcp *KCP) Check() uint32 {
 	}
 
 	return current + minimal
+}
+
+// set datashard for some calculation
+func (kcp *KCP) setDataShard(datashard int) {
+	kcp.datashard = datashard
 }
 
 // SetMtu changes MTU size, default is 1400
