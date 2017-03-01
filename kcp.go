@@ -648,8 +648,8 @@ func (kcp *KCP) flush() {
 		ptr = seg.encode(ptr)
 
 		segCount++
-		size := len(buffer) - len(ptr)
 		if segCount >= batch {
+			size := len(buffer) - len(ptr)
 			kcp.output(buffer, size)
 			ptr = buffer
 			segCount = 0
