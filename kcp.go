@@ -649,7 +649,7 @@ func (kcp *KCP) flush() {
 
 		segCount++
 		size := len(buffer) - len(ptr)
-		if segCount > batch {
+		if segCount >= batch {
 			kcp.output(buffer, size)
 			ptr = buffer
 			segCount = 0
