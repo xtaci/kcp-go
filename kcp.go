@@ -737,7 +737,7 @@ func (kcp *KCP) flush() {
 	}
 
 	// counters
-	var lostSegs, fastRetransSegs uint64
+	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
 
 	// send new segments
 	for k := len(kcp.snd_buf) - newSegsCount; k < len(kcp.snd_buf); k++ {
@@ -787,6 +787,14 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			change++
 			fastRetransSegs++
+		} else if segment.fastack > 0 && newSegsCount == 0 &&
+			_itimediff(current, segment.ts) >= kcp.rx_srtt { // early retransmit
+			needsend = true
+			segment.xmit++
+			segment.fastack = 0
+			segment.resendts = current + segment.rto
+			change++
+			earlyRetransSegs++
 		}
 
 		if needsend {
@@ -827,6 +835,10 @@ func (kcp *KCP) flush() {
 	if fastRetransSegs > 0 {
 		atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
 		sum += fastRetransSegs
+	}
+	if earlyRetransSegs > 0 {
+		atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
+		sum += earlyRetransSegs
 	}
 	if sum > 0 {
 		atomic.AddUint64(&DefaultSnmp.RetransSegs, sum)
