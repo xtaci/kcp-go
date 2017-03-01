@@ -789,16 +789,6 @@ func (kcp *KCP) flush() {
 				change++
 				fastRetransSegs++
 			}
-		} else if segment.fastack > 0 && newSegsCount == 0 { // early retransmit
-			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= kcp.rx_srtt>>2 {
-				needsend = true
-				segment.xmit++
-				segment.fastack = 0
-				segment.resendts = current + segment.rto
-				change++
-				earlyRetransSegs++
-			}
 		}
 
 		if needsend {
