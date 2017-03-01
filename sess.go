@@ -117,7 +117,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	})
 	sess.kcp.WndSize(defaultWndSize, defaultWndSize)
 	sess.kcp.SetMtu(IKCP_MTU_DEF - sess.headerSize)
-	sess.kcp.setDataShard(dataShards)
+	sess.kcp.setFEC(dataShards, parityShards)
 
 	updater.addSession(sess)
 	go sess.outputTask()

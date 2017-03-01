@@ -145,9 +145,9 @@ type KCP struct {
 
 	acklist []ackItem
 
-	buffer    []byte
-	output    Output
-	datashard int
+	buffer                 []byte
+	output                 Output
+	datashard, parityshard int
 }
 
 type ackItem struct {
@@ -636,23 +636,26 @@ func (kcp *KCP) flush() {
 	}
 	kcp.acklist = nil
 
-	batch := kcp.mtu / IKCP_OVERHEAD
-	if kcp.datashard > 0 { // try triggering FEC
-		batch = _imin_(batch, uint32(len(required)/kcp.datashard))
-	}
-
 	ptr := buffer
-	var segCount uint32
-	for _, ack := range required {
-		seg.sn, seg.ts = ack.sn, ack.ts
-		ptr = seg.encode(ptr)
+	maxBatchSize := kcp.mtu / IKCP_OVERHEAD
+	for len(required) > 0 {
+		var batchSize int
+		if kcp.datashard > 0 && kcp.parityshard > 0 { // try triggering FEC
+			batchSize = int(_ibound_(1, uint32(len(required)/kcp.datashard), maxBatchSize))
+		} else {
+			batchSize = int(_ibound_(1, uint32(len(required)), maxBatchSize))
+		}
 
-		segCount++
-		if segCount >= batch {
+		for len(required) >= batchSize {
+			for i := 0; i < batchSize; i++ {
+				ack := required[i]
+				seg.sn, seg.ts = ack.sn, ack.ts
+				ptr = seg.encode(ptr)
+			}
 			size := len(buffer) - len(ptr)
 			kcp.output(buffer, size)
 			ptr = buffer
-			segCount = 0
+			required = required[batchSize:]
 		}
 	}
 
@@ -951,9 +954,10 @@ func (kcp *KCP) Check() uint32 {
 	return current + minimal
 }
 
-// set datashard for some calculation
-func (kcp *KCP) setDataShard(datashard int) {
+// set datashard,parityshard info for some optimizations
+func (kcp *KCP) setFEC(datashard, parityshard int) {
 	kcp.datashard = datashard
+	kcp.parityshard = parityshard
 }
 
 // SetMtu changes MTU size, default is 1400
