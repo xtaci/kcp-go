@@ -95,19 +95,18 @@ func _itimediff(later, earlier uint32) int32 {
 
 // Segment defines a KCP segment
 type Segment struct {
-	conv           uint32
-	cmd            uint32
-	frg            uint32
-	wnd            uint32
-	ts             uint32
-	sn             uint32
-	una            uint32
-	data           []byte
-	resendts       uint32
-	rto            uint32
-	fastack        uint32
-	fastack_lastsn uint32
-	xmit           uint32
+	conv     uint32
+	cmd      uint32
+	frg      uint32
+	wnd      uint32
+	ts       uint32
+	sn       uint32
+	una      uint32
+	data     []byte
+	resendts uint32
+	rto      uint32
+	fastack  uint32
+	xmit     uint32
 }
 
 // encode a segment into buffer
@@ -405,13 +404,7 @@ func (kcp *KCP) parse_fastack(sn uint32) {
 		if _itimediff(sn, seg.sn) < 0 {
 			break
 		} else if sn != seg.sn {
-			if seg.fastack == 0 {
-				seg.fastack++
-				seg.fastack_lastsn = sn
-			} else if sn > seg.fastack_lastsn {
-				seg.fastack++
-				seg.fastack_lastsn = sn
-			}
+			seg.fastack++
 		}
 	}
 }
@@ -786,7 +779,8 @@ func (kcp *KCP) flush() {
 			segment.resendts = current + segment.rto
 			lost = true
 			lostSegs++
-		} else if segment.fastack >= resent { // fast retransmit
+		} else if segment.fastack >= resent &&
+			_itimediff(current, segment.ts) >= kcp.rx_srtt { // fast retransmit
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
