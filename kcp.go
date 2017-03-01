@@ -95,19 +95,19 @@ func _itimediff(later, earlier uint32) int32 {
 
 // Segment defines a KCP segment
 type Segment struct {
-	conv       uint32
-	cmd        uint32
-	frg        uint32
-	wnd        uint32
-	ts         uint32
-	sn         uint32
-	una        uint32
-	data       []byte
-	resendts   uint32
-	rto        uint32
-	fastack    uint32
-	fastack_ts uint32
-	xmit       uint32
+	conv           uint32
+	cmd            uint32
+	frg            uint32
+	wnd            uint32
+	ts             uint32
+	sn             uint32
+	una            uint32
+	data           []byte
+	resendts       uint32
+	rto            uint32
+	fastack        uint32
+	fastack_lastsn uint32
+	xmit           uint32
 }
 
 // encode a segment into buffer
@@ -395,7 +395,7 @@ func (kcp *KCP) parse_ack(sn uint32) (success bool) {
 	return
 }
 
-func (kcp *KCP) parse_fastack(sn uint32, current uint32) {
+func (kcp *KCP) parse_fastack(sn uint32) {
 	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
 		return
 	}
@@ -405,9 +405,12 @@ func (kcp *KCP) parse_fastack(sn uint32, current uint32) {
 		if _itimediff(sn, seg.sn) < 0 {
 			break
 		} else if sn != seg.sn {
-			if seg.fastack == 0 || _itimediff(current, seg.fastack_ts) >= int32(kcp.interval) {
+			if seg.fastack == 0 {
 				seg.fastack++
-				seg.fastack_ts = current
+				seg.fastack_lastsn = sn
+			} else if sn > seg.fastack_lastsn {
+				seg.fastack++
+				seg.fastack_lastsn = sn
 			}
 		}
 	}
@@ -580,7 +583,7 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 
 	current := currentMs()
 	if flag != 0 && regular {
-		kcp.parse_fastack(maxack, current)
+		kcp.parse_fastack(maxack)
 		if _itimediff(current, recentack) >= 0 && (ack_done || una_done) {
 			kcp.update_ack(_itimediff(current, recentack))
 		}
@@ -784,15 +787,12 @@ func (kcp *KCP) flush() {
 			lost = true
 			lostSegs++
 		} else if segment.fastack >= resent { // fast retransmit
-			lastsend := segment.resendts - segment.rto
-			if _itimediff(current, lastsend) >= kcp.rx_srtt>>2 {
-				needsend = true
-				segment.xmit++
-				segment.fastack = 0
-				segment.resendts = current + segment.rto
-				change++
-				fastRetransSegs++
-			}
+			needsend = true
+			segment.xmit++
+			segment.fastack = 0
+			segment.resendts = current + segment.rto
+			change++
+			fastRetransSegs++
 		}
 
 		if needsend {
