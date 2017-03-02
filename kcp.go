@@ -489,11 +489,9 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 	}
 
 	var maxack uint32
-	var recentack uint32
 	var flag int
-	var ack_done bool
-	var una_done bool
 
+	current := currentMs()
 	for {
 		var ts, sn, length, una, conv uint32
 		var wnd uint16
@@ -528,11 +526,14 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 		if regular {
 			kcp.rmt_wnd = uint32(wnd)
 		}
-		una_done = una_done || kcp.parse_una(una)
+		kcp.parse_una(una)
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			ack_done = ack_done || kcp.parse_ack(sn)
+			if kcp.parse_ack(sn) {
+				kcp.update_ack(_itimediff(current, ts))
+			}
+
 			kcp.shrink_buf()
 			if flag == 0 {
 				flag = 1
@@ -540,7 +541,6 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 			} else if _itimediff(sn, maxack) > 0 {
 				maxack = sn
 			}
-			recentack = ts
 		} else if cmd == IKCP_CMD_PUSH {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
@@ -574,12 +574,8 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 		data = data[length:]
 	}
 
-	current := currentMs()
 	if flag != 0 && regular {
 		kcp.parse_fastack(maxack)
-		if _itimediff(current, recentack) >= 0 && (ack_done || una_done) {
-			kcp.update_ack(_itimediff(current, recentack))
-		}
 	}
 
 	if _itimediff(kcp.snd_una, una) > 0 {

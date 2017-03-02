@@ -87,7 +87,7 @@ type (
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.sid = atomic.AddUint32(&sid, 1)
-	sess.chUDPOutput = make(chan []byte)
+	sess.chUDPOutput = make(chan []byte, rxQueueLimit)
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
