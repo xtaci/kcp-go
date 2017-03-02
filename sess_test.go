@@ -40,11 +40,12 @@ func DialTest() (*UDPSession, error) {
 	}
 
 	sess.SetStreamMode(true)
-	sess.SetWindowSize(1024, 1024)
+	sess.SetWindowSize(4096, 4096)
 	sess.SetReadBuffer(4 * 1024 * 1024)
 	sess.SetWriteBuffer(4 * 1024 * 1024)
 	sess.SetStreamMode(true)
-	sess.SetNoDelay(1, 20, 2, 1)
+	sess.SetNoDelay(1, 10, 2, 1)
+	sess.SetMtu(1400)
 	sess.SetACKNoDelay(true)
 	sess.SetDeadline(time.Now().Add(time.Minute))
 	return sess, err
@@ -86,10 +87,10 @@ func server() {
 
 func handleClient(conn *UDPSession) {
 	conn.SetStreamMode(true)
-	conn.SetWindowSize(1024, 1024)
-	conn.SetNoDelay(1, 20, 2, 1)
+	conn.SetWindowSize(4096, 4096)
+	conn.SetNoDelay(1, 10, 2, 1)
 	conn.SetDSCP(46)
-	conn.SetMtu(1450)
+	conn.SetMtu(1400)
 	conn.SetACKNoDelay(false)
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
@@ -186,25 +187,25 @@ func parallel_client(wg *sync.WaitGroup) {
 	wg.Done()
 }
 
-func BenchmarkSpeed4K(b *testing.B) {
+func BenchmarkEchoSpeed4K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		speedclient(b, 4096)
 	}
 }
 
-func BenchmarkSpeed64K(b *testing.B) {
+func BenchmarkEchoSpeed64K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		speedclient(b, 65536)
 	}
 }
 
-func BenchmarkSpeed512K(b *testing.B) {
+func BenchmarkEchoSpeed512K(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		speedclient(b, 524288)
 	}
 }
 
-func BenchmarkSpeed1M(b *testing.B) {
+func BenchmarkEchoSpeed1M(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		speedclient(b, 1048576)
 	}
@@ -217,7 +218,7 @@ func speedclient(b *testing.B, nbytes int) {
 	}
 
 	echo_tester(cli, nbytes, 1)
-	b.SetBytes(int64(nbytes) * 4)
+	b.SetBytes(int64(nbytes))
 }
 
 func TestSNMP(t *testing.T) {
