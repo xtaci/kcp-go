@@ -412,8 +412,6 @@ func (s *UDPSession) outputTask() {
 
 	for {
 		select {
-		// receive from a synchronous channel
-		// buffered channel must be avoided, because of "bufferbloat"
 		case ext := <-s.chUDPOutput:
 			var ecc [][]byte
 			if s.fec != nil {
