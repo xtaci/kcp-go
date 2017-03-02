@@ -72,17 +72,15 @@ func ikcp_decode32u(p []byte, l *uint32) []byte {
 func _imin_(a, b uint32) uint32 {
 	if a <= b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func _imax_(a, b uint32) uint32 {
 	if a >= b {
 		return a
-	} else {
-		return b
 	}
+	return b
 }
 
 func _ibound_(lower, middle, upper uint32) uint32 {

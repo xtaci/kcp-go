@@ -35,6 +35,7 @@ func newSnmp() *Snmp {
 	return new(Snmp)
 }
 
+// Header returns all field names
 func (s *Snmp) Header() []string {
 	return []string{
 		"BytesSent",
@@ -62,6 +63,7 @@ func (s *Snmp) Header() []string {
 	}
 }
 
+// ToSlice returns current snmp info as slice
 func (s *Snmp) ToSlice() []string {
 	snmp := s.Copy()
 	return []string{
