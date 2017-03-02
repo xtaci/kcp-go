@@ -598,7 +598,7 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 		}
 	}
 
-	if len(kcp.acklist) > 0 && uint32(kcp.WaitSnd()) >= kcp.Cwnd()>>1 {
+	if len(kcp.acklist) > 0 && kcp.Cwnd() == 0 {
 		kcp.flush()
 	}
 
