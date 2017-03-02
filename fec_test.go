@@ -29,21 +29,17 @@ func TestFECNoLost(t *testing.T) {
 		data := makefecgroup(i, 13)
 		for k := range data[fec.dataShards] {
 			fec.markData(data[k])
-			t.Log("input:", data[k])
 		}
 
 		ecc := fec.calcECC(data, fecHeaderSize, fecHeaderSize+4)
 		for k := range ecc {
 			fec.markFEC(ecc[k])
 		}
-		t.Log("  ecc:", ecc)
 		data = append(data, ecc...)
 		for k := range data {
 			f := fec.decode(data[k])
 			if recovered := fec.input(f); recovered != nil {
-				for k := range recovered {
-					t.Log("recovered:", binary.LittleEndian.Uint32(recovered[k]))
-				}
+				t.Fail()
 			}
 		}
 	}
@@ -51,27 +47,23 @@ func TestFECNoLost(t *testing.T) {
 
 func TestFECLost1(t *testing.T) {
 	fec := newFEC(128, 10, 3)
-	println(fec.paws, fec.paws%13)
 	fec.next = fec.paws - 13
 	for i := 0; i < 100; i += 10 {
 		data := makefecgroup(i, 13)
 		for k := range data[fec.dataShards] {
 			fec.markData(data[k])
-			t.Log("input:", data[k])
 		}
 		ecc := fec.calcECC(data, fecHeaderSize, fecHeaderSize+4)
 		for k := range ecc {
 			fec.markFEC(ecc[k])
 		}
-		t.Log("ecc:", ecc)
 		lost := rand.Intn(13)
-		t.Log("lost:", data[lost])
 		for k := range data {
 			if k != lost {
 				f := fec.decode(data[k])
 				if recovered := fec.input(f); recovered != nil {
-					for i := range recovered {
-						t.Log("recovered:", binary.LittleEndian.Uint32(recovered[i]))
+					if lost > 10 {
+						t.Fail()
 					}
 				}
 			}
@@ -85,26 +77,29 @@ func TestFECLost2(t *testing.T) {
 		data := makefecgroup(i, 13)
 		for k := range data[fec.dataShards] {
 			fec.markData(data[k])
-			t.Log("input:", data[k])
 		}
 		ecc := fec.calcECC(data, fecHeaderSize, fecHeaderSize+4)
 		for k := range ecc {
 			fec.markFEC(ecc[k])
 		}
-		t.Log("ecc:", ecc)
 		lost1 := rand.Intn(13)
 		lost2 := rand.Intn(13)
 		for lost2 == lost1 {
 			lost2 = rand.Intn(13)
 		}
-		t.Log(" lost1:", data[lost1])
-		t.Log(" lost2:", data[lost2])
+		expect := 0
+		if lost1 < 10 {
+			expect++
+		}
+		if lost2 < 10 {
+			expect++
+		}
 		for k := range data {
 			if k != lost1 && k != lost2 {
 				f := fec.decode(data[k])
 				if recovered := fec.input(f); recovered != nil {
-					for i := range recovered {
-						t.Log("recovered:", binary.LittleEndian.Uint32(recovered[i]))
+					if len(recovered) != expect {
+						t.Fail()
 					}
 				}
 			}

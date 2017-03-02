@@ -263,7 +263,7 @@ func test(mode int) {
 				maxrtt = int(rtt)
 			}
 
-			println("[RECV] mode=", mode, " sn=", sn, " rtt=", rtt)
+			//println("[RECV] mode=", mode, " sn=", sn, " rtt=", rtt)
 		}
 
 		if next > 100 {

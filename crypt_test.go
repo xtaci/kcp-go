@@ -14,7 +14,7 @@ const cryptKey = "testkey"
 const cryptSalt = "kcptest"
 
 func TestAES(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 	bc, err := NewAESBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +91,7 @@ func BenchmarkAES256(b *testing.B) {
 }
 
 func TestTEA(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 16, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 16, sha1.New)
 	bc, err := NewTEABlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -129,7 +129,7 @@ func BenchmarkTEA(b *testing.B) {
 }
 
 func TestXOR(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 	bc, err := NewSimpleXORBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -166,7 +166,7 @@ func BenchmarkXOR(b *testing.B) {
 }
 
 func TestBlowfish(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 	bc, err := NewBlowfishBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -203,7 +203,7 @@ func BenchmarkBlowfish(b *testing.B) {
 }
 
 func TestNone(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 	bc, err := NewNoneBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -240,7 +240,7 @@ func BenchmarkNone(b *testing.B) {
 }
 
 func TestCast5(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 16, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 16, sha1.New)
 	bc, err := NewCast5BlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -277,7 +277,7 @@ func BenchmarkCast5(b *testing.B) {
 }
 
 func Test3DES(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 24, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 24, sha1.New)
 	bc, err := NewTripleDESBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +314,7 @@ func Benchmark3DES(b *testing.B) {
 }
 
 func TestTwofish(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 	bc, err := NewTwofishBlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -351,7 +351,7 @@ func BenchmarkTwofish(b *testing.B) {
 }
 
 func TestXTEA(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 16, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 16, sha1.New)
 	bc, err := NewXTEABlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)
@@ -389,7 +389,7 @@ func BenchmarkXTEA(b *testing.B) {
 }
 
 func TestSalsa20(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 	bc, err := NewSalsa20BlockCrypt(pass)
 	if err != nil {
 		t.Fatal(err)

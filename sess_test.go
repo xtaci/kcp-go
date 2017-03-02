@@ -14,27 +14,31 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-const port = "127.0.0.1:9999"
+const portEcho = "127.0.0.1:9999"
+const portSink = "127.0.0.1:19999"
 const salt = "kcptest"
 
 var key = []byte("testkey")
 var fec = 4
-var pass = pbkdf2.Key(key, []byte(salt), 4096, 32, sha1.New)
+var pass = pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 
 func init() {
 	go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
 	}()
 
-	go server()
+	go echoServer()
+	go sinkServer()
+	println("beginning tests, encryption:salsa20, fec:10/3")
 }
 
-func DialTest() (*UDPSession, error) {
-	block, _ := NewNoneBlockCrypt(pass)
+func dialEcho() (*UDPSession, error) {
+	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	sess, err := DialWithOptions(port, block, 10, 3)
+	block, _ := NewSalsa20BlockCrypt(pass)
+	sess, err := DialWithOptions(portEcho, block, 10, 3)
 	if err != nil {
 		panic(err)
 	}
@@ -51,16 +55,51 @@ func DialTest() (*UDPSession, error) {
 	return sess, err
 }
 
-func ListenTest() (net.Listener, error) {
-	block, _ := NewNoneBlockCrypt(pass)
+func dialSink() (*UDPSession, error) {
+	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	return ListenWithOptions(port, block, 10, 3)
+	block, _ := NewSalsa20BlockCrypt(pass)
+	sess, err := DialWithOptions(portSink, block, 10, 3)
+	if err != nil {
+		panic(err)
+	}
+
+	sess.SetStreamMode(true)
+	sess.SetWindowSize(1024, 1024)
+	sess.SetReadBuffer(4 * 1024 * 1024)
+	sess.SetWriteBuffer(4 * 1024 * 1024)
+	sess.SetStreamMode(true)
+	sess.SetNoDelay(1, 10, 2, 1)
+	sess.SetMtu(1400)
+	sess.SetACKNoDelay(true)
+	sess.SetDeadline(time.Now().Add(time.Minute))
+	return sess, err
 }
 
-func server() {
-	l, err := ListenTest()
+//////////////////////////
+
+func listenEcho() (net.Listener, error) {
+	//block, _ := NewNoneBlockCrypt(pass)
+	//block, _ := NewSimpleXORBlockCrypt(pass)
+	//block, _ := NewTEABlockCrypt(pass[:16])
+	//block, _ := NewAESBlockCrypt(pass)
+	block, _ := NewSalsa20BlockCrypt(pass)
+	return ListenWithOptions(portEcho, block, 10, 3)
+}
+
+func listenSink() (net.Listener, error) {
+	//block, _ := NewNoneBlockCrypt(pass)
+	//block, _ := NewSimpleXORBlockCrypt(pass)
+	//block, _ := NewTEABlockCrypt(pass[:16])
+	//block, _ := NewAESBlockCrypt(pass)
+	block, _ := NewSalsa20BlockCrypt(pass)
+	return ListenWithOptions(portSink, block, 10, 3)
+}
+
+func echoServer() {
+	l, err := listenEcho()
 	if err != nil {
 		panic(err)
 	}
@@ -80,12 +119,31 @@ func server() {
 			s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
 			s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
 			s.(*UDPSession).SetKeepAlive(1)
-			go handleClient(s.(*UDPSession))
+			go handleEcho(s.(*UDPSession))
 		}
 	}()
 }
 
-func handleClient(conn *UDPSession) {
+func sinkServer() {
+	l, err := listenSink()
+	if err != nil {
+		panic(err)
+	}
+
+	go func() {
+		for {
+			s, err := l.Accept()
+			if err != nil {
+				return
+			}
+			go handleSink(s.(*UDPSession))
+		}
+	}()
+}
+
+///////////////////////////
+
+func handleEcho(conn *UDPSession) {
 	conn.SetStreamMode(true)
 	conn.SetWindowSize(4096, 4096)
 	conn.SetNoDelay(1, 10, 2, 1)
@@ -104,8 +162,28 @@ func handleClient(conn *UDPSession) {
 	}
 }
 
+func handleSink(conn *UDPSession) {
+	conn.SetStreamMode(true)
+	conn.SetWindowSize(4096, 4096)
+	conn.SetNoDelay(1, 10, 2, 1)
+	conn.SetDSCP(46)
+	conn.SetMtu(1400)
+	conn.SetACKNoDelay(false)
+	conn.SetReadDeadline(time.Now().Add(time.Hour))
+	conn.SetWriteDeadline(time.Now().Add(time.Hour))
+	buf := make([]byte, 65536)
+	for {
+		_, err := conn.Read(buf)
+		if err != nil {
+			panic(err)
+		}
+	}
+}
+
+///////////////////////////
+
 func TestTimeout(t *testing.T) {
-	cli, err := DialTest()
+	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
 	}
@@ -126,7 +204,7 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestSendRecv(t *testing.T) {
-	cli, err := DialTest()
+	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
 	}
@@ -147,7 +225,7 @@ func TestSendRecv(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	cli, err := DialTest()
+	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
 	}
@@ -177,48 +255,117 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	wg.Wait()
 }
 
-func parallel_client(wg *sync.WaitGroup) {
-	cli, err := DialTest()
+func parallel_client(wg *sync.WaitGroup) (err error) {
+	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
 	}
 
-	echo_tester(cli, 64, 64)
+	err = echo_tester(cli, 64, 64)
 	wg.Done()
+	return
 }
 
 func BenchmarkEchoSpeed4K(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		speedclient(b, 4096)
-	}
+	speedclient(b, 4096)
 }
 
 func BenchmarkEchoSpeed64K(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		speedclient(b, 65536)
-	}
+	speedclient(b, 65536)
 }
 
 func BenchmarkEchoSpeed512K(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		speedclient(b, 524288)
-	}
+	speedclient(b, 524288)
 }
 
 func BenchmarkEchoSpeed1M(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		speedclient(b, 1048576)
-	}
+	speedclient(b, 1048576)
 }
 
 func speedclient(b *testing.B, nbytes int) {
-	cli, err := DialTest()
+	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
 	}
 
-	echo_tester(cli, nbytes, 1)
+	if err := echo_tester(cli, nbytes, b.N); err != nil {
+		b.Fail()
+	}
 	b.SetBytes(int64(nbytes))
+}
+
+func BenchmarkSinkSpeed4K(b *testing.B) {
+	sinkclient(b, 4096)
+}
+
+func BenchmarkSinkSpeed64K(b *testing.B) {
+	sinkclient(b, 65536)
+}
+
+func BenchmarkSinkSpeed256K(b *testing.B) {
+	sinkclient(b, 524288)
+}
+
+func BenchmarkSinkSpeed1M(b *testing.B) {
+	sinkclient(b, 1048576)
+}
+
+func sinkclient(b *testing.B, nbytes int) {
+	cli, err := dialSink()
+	if err != nil {
+		panic(err)
+	}
+
+	sink_tester(cli, nbytes, b.N)
+	b.SetBytes(int64(nbytes))
+}
+
+func echo_tester(cli net.Conn, msglen, msgcount int) error {
+	for i := 0; i < msgcount; i++ {
+		// send packet
+		buf := make([]byte, msglen)
+		if _, err := cli.Write(buf); err != nil {
+			return err
+		}
+
+		// receive packet
+		nrecv := 0
+		for {
+			n, err := cli.Read(buf)
+			if err != nil {
+				return err
+			} else {
+				nrecv += n
+				if nrecv == msglen {
+					break
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func sink_tester(cli *UDPSession, msglen, msgcount int) error {
+	// sender
+	buf := make([]byte, msglen)
+	for i := 0; i < msgcount; i++ {
+		if _, err := cli.Write(buf); err != nil {
+			return err
+		}
+	}
+
+	// window checker
+	for {
+		cli.mu.Lock()
+		waitsnd := cli.kcp.WaitSnd()
+		cli.mu.Unlock()
+		if waitsnd != 0 {
+			<-time.After(100 * time.Millisecond)
+		} else {
+			return nil
+		}
+	}
+	return nil
 }
 
 func TestSNMP(t *testing.T) {
@@ -227,40 +374,4 @@ func TestSNMP(t *testing.T) {
 	t.Log(DefaultSnmp.ToSlice())
 	DefaultSnmp.Reset()
 	t.Log(DefaultSnmp.ToSlice())
-}
-
-func echo_tester(cli net.Conn, msglen, msgcount int) {
-	total := msglen * msgcount
-
-	var wg sync.WaitGroup
-
-	// sender
-	wg.Add(2)
-	go func() {
-		buf := make([]byte, msglen)
-		for i := 0; i < msgcount; i++ {
-			cli.Write(buf)
-		}
-		wg.Done()
-	}()
-
-	// receiver
-	go func() {
-		buf := make([]byte, msglen)
-		nrecv := 0
-		for {
-			n, err := cli.Read(buf)
-			if err != nil {
-				log.Println(err)
-				break
-			} else {
-				nrecv += n
-				if nrecv == total {
-					break
-				}
-			}
-		}
-		wg.Done()
-	}()
-	wg.Wait()
 }
