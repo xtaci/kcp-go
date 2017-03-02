@@ -598,8 +598,7 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 		}
 	}
 
-	// flush acklist immediately when remote window is 0
-	// calculate window size
+	// flush acklist immediately when no more data can be sent
 	if len(kcp.acklist) > 0 && _itimediff(kcp.snd_nxt, kcp.snd_una+kcp.Cwnd()) >= 0 {
 		kcp.flush()
 	}
