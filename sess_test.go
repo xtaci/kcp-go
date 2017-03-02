@@ -56,18 +56,18 @@ func dialEcho() (*UDPSession, error) {
 }
 
 func dialSink() (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
+	block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
+	//block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(portSink, block, 10, 3)
 	if err != nil {
 		panic(err)
 	}
 
 	sess.SetStreamMode(true)
-	sess.SetWindowSize(1024, 1024)
+	sess.SetWindowSize(4096, 4096)
 	sess.SetReadBuffer(4 * 1024 * 1024)
 	sess.SetWriteBuffer(4 * 1024 * 1024)
 	sess.SetStreamMode(true)
@@ -90,11 +90,11 @@ func listenEcho() (net.Listener, error) {
 }
 
 func listenSink() (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
+	block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
+	//block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(portSink, block, 10, 3)
 }
 
