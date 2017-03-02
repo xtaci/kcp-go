@@ -131,11 +131,16 @@ func sinkServer() {
 	}
 
 	go func() {
+		kcplistener := l.(*Listener)
+		kcplistener.SetReadBuffer(4 * 1024 * 1024)
+		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
+		kcplistener.SetDSCP(46)
 		for {
 			s, err := l.Accept()
 			if err != nil {
 				return
 			}
+
 			go handleSink(s.(*UDPSession))
 		}
 	}()
