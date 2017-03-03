@@ -223,7 +223,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 				}
 			}
 
-			s.kcp.flush()
+			s.kcp.flush(false)
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 			return n, nil
@@ -501,7 +501,7 @@ func (s *UDPSession) outputTask() {
 // kcp update, returns interval for next calling
 func (s *UDPSession) update() time.Duration {
 	s.mu.Lock()
-	s.kcp.flush()
+	s.kcp.flush(false)
 	if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
 		s.notifyWriteEvent()
 	}
@@ -535,7 +535,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		f := s.fec.decode(data)
 		s.mu.Lock()
 		if f.flag == typeData {
-			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true); ret != 0 {
+			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
 				kcpInErrors++
 			}
 		}
@@ -550,7 +550,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 					if len(r) >= 2 { // must be larger than 2bytes
 						sz := binary.LittleEndian.Uint16(r)
 						if int(sz) <= len(r) && sz >= 2 {
-							if ret := s.kcp.Input(r[2:sz], false); ret == 0 {
+							if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
 								fecRecovered++
 							} else {
 								kcpInErrors++
@@ -569,22 +569,15 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
 		}
-
-		if s.ackNoDelay {
-			s.kcp.flush()
-		}
 		s.mu.Unlock()
 	} else {
 		s.mu.Lock()
-		if ret := s.kcp.Input(data, true); ret != 0 {
+		if ret := s.kcp.Input(data, true, s.ackNoDelay); ret != 0 {
 			kcpInErrors++
 		}
 		// notify reader
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
-		}
-		if s.ackNoDelay {
-			s.kcp.flush()
 		}
 		s.mu.Unlock()
 	}

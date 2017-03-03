@@ -205,7 +205,7 @@ func test(mode int) {
 				break
 			}
 			// 如果 p2收到udp，则作为下层协议输入到kcp2
-			kcp2.Input(buffer[:hr], true)
+			kcp2.Input(buffer[:hr], true, false)
 		}
 
 		// 处理虚拟网络：检测是否有udp包从p2->p1
@@ -215,7 +215,7 @@ func test(mode int) {
 				break
 			}
 			// 如果 p1收到udp，则作为下层协议输入到kcp1
-			kcp1.Input(buffer[:hr], true)
+			kcp1.Input(buffer[:hr], true, false)
 			//println("@@@@", hr, r)
 		}
 

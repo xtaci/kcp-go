@@ -477,7 +477,7 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 
 // Input when you received a low level packet (eg. UDP packet), call it
 // regular indicates a regular packet has received(not from FEC)
-func (kcp *KCP) Input(data []byte, regular bool) int {
+func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
 		return -1
@@ -596,6 +596,11 @@ func (kcp *KCP) Input(data []byte, regular bool) int {
 		}
 	}
 
+	// ack immediately
+	if ackNoDelay && len(kcp.acklist) > 0 {
+		kcp.flush(true)
+	}
+
 	return 0
 }
 
@@ -607,7 +612,7 @@ func (kcp *KCP) wnd_unused() int32 {
 }
 
 // flush pending data
-func (kcp *KCP) flush() {
+func (kcp *KCP) flush(ackOnly bool) {
 	buffer := kcp.buffer
 	change := 0
 	lost := false
@@ -649,6 +654,10 @@ func (kcp *KCP) flush() {
 			ptr = buffer
 			required = required[batchSize:]
 		}
+	}
+
+	if ackOnly { // flush acks only
+		return
 	}
 
 	current := currentMs()
@@ -888,7 +897,7 @@ func (kcp *KCP) Update() {
 		if _itimediff(current, kcp.ts_flush) >= 0 {
 			kcp.ts_flush = current + kcp.interval
 		}
-		kcp.flush()
+		kcp.flush(false)
 	}
 }
 
