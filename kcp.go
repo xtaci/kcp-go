@@ -781,7 +781,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 			lost = true
 			lostSegs++
 		} else if segment.fastack >= resent &&
-			_itimediff(current, segment.ts) >= int32(kcp.rx_rto) { // fast retransmit
+			_itimediff(current, segment.ts) >= kcp.rx_srtt { // fast retransmit
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
@@ -789,7 +789,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 			change++
 			fastRetransSegs++
 		} else if segment.fastack > 0 && newSegsCount == 0 &&
-			_itimediff(current, segment.ts) >= int32(kcp.rx_rto) { // early retransmit
+			_itimediff(current, segment.ts) >= kcp.rx_srtt { // early retransmit
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
