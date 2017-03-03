@@ -785,7 +785,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
-			segment.resendts = current + segment.rto
+			segment.resendts = current + kcp.rx_rto
 			change++
 			fastRetransSegs++
 		} else if segment.fastack > 0 && newSegsCount == 0 &&
@@ -793,7 +793,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 			needsend = true
 			segment.xmit++
 			segment.fastack = 0
-			segment.resendts = current + segment.rto
+			segment.resendts = current + kcp.rx_rto
 			change++
 			earlyRetransSegs++
 		}
