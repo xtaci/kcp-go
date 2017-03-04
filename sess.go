@@ -52,10 +52,19 @@ func init() {
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
-		sid               uint32
-		kcp               *KCP           // the core ARQ
-		l                 *Listener      // point to server listener if it's a server socket
-		fec               *FEC           // forward error correction
+		sid uint32
+		kcp *KCP      // the core ARQ
+		l   *Listener // point to server listener if it's a server socket
+
+		// forward error correction
+		fec              *FEC
+		fecGroup         [][]byte
+		fecHeaderOffset  int
+		fecPayloadOffset int
+
+		fecCnt     int // count datashard
+		fecMaxSize int // record maximum data length in datashard
+
 		conn              net.PacketConn // the underlying packet socket
 		block             BlockCrypt
 		remote            net.Addr
@@ -65,7 +74,6 @@ type (
 		die               chan struct{}
 		chReadEvent       chan struct{}
 		chWriteEvent      chan struct{}
-		chUDPOutput       chan []byte
 		headerSize        int
 		ackNoDelay        bool
 		isClosed          bool
@@ -94,7 +102,6 @@ type (
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.sid = atomic.AddUint32(&sid, 1)
-	sess.chUDPOutput = make(chan []byte, rxQueueLimit)
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
@@ -103,7 +110,22 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.keepAliveInterval = defaultKeepAliveInterval
 	sess.l = l
 	sess.block = block
+
+	// FEC initialization
 	sess.fec = newFEC(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
+	if sess.fec != nil {
+		if sess.block != nil {
+			sess.fecHeaderOffset = cryptHeaderSize
+		}
+		sess.fecPayloadOffset = sess.fecHeaderOffset + fecHeaderSize
+
+		// fec data group
+		sess.fecGroup = make([][]byte, sess.fec.shardSize)
+		for k := range sess.fecGroup {
+			sess.fecGroup[k] = make([]byte, mtuLimit)
+		}
+	}
+
 	// calculate header size
 	if sess.block != nil {
 		sess.headerSize += cryptHeaderSize
@@ -116,10 +138,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		if size >= IKCP_OVERHEAD {
 			ext := xmitBuf.Get().([]byte)[:sess.headerSize+size]
 			copy(ext[sess.headerSize:], buf)
-			select {
-			case sess.chUDPOutput <- ext:
-			case <-sess.die:
-			}
+			sess.output(ext)
 		}
 	})
 	sess.kcp.WndSize(defaultWndSize, defaultWndSize)
@@ -127,7 +146,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.kcp.setFEC(dataShards, parityShards)
 
 	updater.addSession(sess)
-	go sess.outputTask()
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
@@ -396,103 +414,60 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 // 1. FEC
 // 2. CRC32
 // 3. Encryption
-// 4. writeTo kernel
-func (s *UDPSession) outputTask() {
-	// offset pre-compute
-	fecOffset := 0
-	if s.block != nil {
-		fecOffset = cryptHeaderSize
-	}
-	szOffset := fecOffset + fecHeaderSize
-
-	// fec data group
-	var cacheLine []byte
-	var fecGroup [][]byte
-	var fecCnt int
-	var fecMaxSize int
+// 4. emit to emitTask
+// 5. emitTask WriteTo kernel
+func (s *UDPSession) output(ext []byte) {
+	var ecc [][]byte
 	if s.fec != nil {
-		cacheLine = make([]byte, s.fec.shardSize*mtuLimit)
-		fecGroup = make([][]byte, s.fec.shardSize)
-		for k := range fecGroup {
-			fecGroup[k] = cacheLine[k*mtuLimit : (k+1)*mtuLimit]
+		s.fec.markData(ext[s.fecHeaderOffset:])
+		binary.LittleEndian.PutUint16(ext[s.fecPayloadOffset:], uint16(len(ext[s.fecPayloadOffset:])))
+
+		// copy data to fec group
+		sz := len(ext)
+		s.fecGroup[s.fecCnt] = s.fecGroup[s.fecCnt][:sz]
+		copy(s.fecGroup[s.fecCnt], ext)
+		s.fecCnt++
+		if sz > s.fecMaxSize {
+			s.fecMaxSize = sz
+		}
+
+		//  calculate Reed-Solomon Erasure Code
+		if s.fecCnt == s.fec.dataShards {
+			for i := 0; i < s.fec.dataShards; i++ {
+				shard := s.fecGroup[i]
+				slen := len(shard)
+				xorBytes(shard[slen:s.fecMaxSize], shard[slen:s.fecMaxSize], shard[slen:s.fecMaxSize])
+			}
+			ecc = s.fec.calcECC(s.fecGroup, s.fecPayloadOffset, s.fecMaxSize)
+			for k := range ecc {
+				s.fec.markFEC(ecc[k][s.fecHeaderOffset:])
+				ecc[k] = ecc[k][:s.fecMaxSize]
+			}
+			s.fecCnt = 0
+			s.fecMaxSize = 0
 		}
 	}
 
-	// keepalive
-	var lastPing time.Time
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
+	if s.block != nil {
+		io.ReadFull(rand.Reader, ext[:nonceSize])
+		checksum := crc32.ChecksumIEEE(ext[cryptHeaderSize:])
+		binary.LittleEndian.PutUint32(ext[nonceSize:], checksum)
+		s.block.Encrypt(ext, ext)
 
-	for {
-		select {
-		case ext := <-s.chUDPOutput:
-			var ecc [][]byte
-			if s.fec != nil {
-				s.fec.markData(ext[fecOffset:])
-				// explicit size, including 2bytes size itself.
-				binary.LittleEndian.PutUint16(ext[szOffset:], uint16(len(ext[szOffset:])))
-
-				// copy data to fec group
-				sz := len(ext)
-				fecGroup[fecCnt] = fecGroup[fecCnt][:sz]
-				copy(fecGroup[fecCnt], ext)
-				fecCnt++
-				if sz > fecMaxSize {
-					fecMaxSize = sz
-				}
-
-				//  calculate Reed-Solomon Erasure Code
-				if fecCnt == s.fec.dataShards {
-					for i := 0; i < s.fec.dataShards; i++ {
-						shard := fecGroup[i]
-						slen := len(shard)
-						xorBytes(shard[slen:fecMaxSize], shard[slen:fecMaxSize], shard[slen:fecMaxSize])
-					}
-					ecc = s.fec.calcECC(fecGroup, szOffset, fecMaxSize)
-					for k := range ecc {
-						s.fec.markFEC(ecc[k][fecOffset:])
-						ecc[k] = ecc[k][:fecMaxSize]
-					}
-					fecCnt = 0
-					fecMaxSize = 0
-				}
+		if ecc != nil {
+			for k := range ecc {
+				io.ReadFull(rand.Reader, ecc[k][:nonceSize])
+				checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
+				binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
+				s.block.Encrypt(ecc[k], ecc[k])
 			}
+		}
+	}
 
-			if s.block != nil {
-				io.ReadFull(rand.Reader, ext[:nonceSize])
-				checksum := crc32.ChecksumIEEE(ext[cryptHeaderSize:])
-				binary.LittleEndian.PutUint32(ext[nonceSize:], checksum)
-				s.block.Encrypt(ext, ext)
-
-				if ecc != nil {
-					for k := range ecc {
-						io.ReadFull(rand.Reader, ecc[k][:nonceSize])
-						checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
-						binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
-						s.block.Encrypt(ecc[k], ecc[k])
-					}
-				}
-			}
-
-			defaultEmitter.emit(emitPacket{s.conn, s.remote, ext, true})
-			if ecc != nil {
-				for k := range ecc {
-					defaultEmitter.emit(emitPacket{s.conn, s.remote, ecc[k], false})
-				}
-			}
-		case <-ticker.C: // NAT keep-alive
-			interval := time.Duration(atomic.LoadInt32(&s.keepAliveInterval)) * time.Second
-			if interval > 0 && time.Now().After(lastPing.Add(interval)) {
-				var rnd uint16
-				binary.Read(rand.Reader, binary.LittleEndian, &rnd)
-				sz := int(rnd)%(IKCP_MTU_DEF-s.headerSize-IKCP_OVERHEAD) + s.headerSize + IKCP_OVERHEAD
-				ping := make([]byte, sz) // randomized ping packet
-				io.ReadFull(rand.Reader, ping)
-				s.conn.WriteTo(ping, s.remote)
-				lastPing = time.Now()
-			}
-		case <-s.die:
-			return
+	defaultEmitter.emit(emitPacket{s.conn, s.remote, ext, true})
+	if ecc != nil {
+		for k := range ecc {
+			defaultEmitter.emit(emitPacket{s.conn, s.remote, ecc[k], false})
 		}
 	}
 }
