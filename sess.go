@@ -81,6 +81,12 @@ type (
 	setWriteBuffer interface {
 		SetWriteBuffer(bytes int) error
 	}
+
+	emitPacket struct {
+		to      net.Addr
+		data    []byte
+		recycle bool
+	}
 )
 
 // newUDPSession create a new udp session for client or server
@@ -384,7 +390,29 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 	atomic.StoreInt32(&s.keepAliveInterval, int32(interval))
 }
 
+// keepon writing packets to kernel
+func (s *UDPSession) emitterTask(ch chan emitPacket) {
+	for {
+		select {
+		case p := <-ch:
+			if n, err := s.conn.WriteTo(p.data, p.to); err == nil {
+				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
+			}
+			if p.recycle {
+				xmitBuf.Put(p.data)
+			}
+		case <-s.die:
+			return
+		}
+	}
+}
+
 func (s *UDPSession) outputTask() {
+	// start a standalone emitter
+	emit := make(chan emitPacket, rxQueueLimit)
+	go s.emitterTask(emit)
+
 	// offset pre-compute
 	fecOffset := 0
 	if s.block != nil {
@@ -461,26 +489,12 @@ func (s *UDPSession) outputTask() {
 				}
 			}
 
-			nbytes := 0
-			nsegs := 0
-			// if mrand.Intn(100) < 50 {
-			if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
-				nbytes += n
-				nsegs++
-			}
-			// }
-
+			emit <- emitPacket{s.remote, ext, true}
 			if ecc != nil {
 				for k := range ecc {
-					if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
-						nbytes += n
-						nsegs++
-					}
+					emit <- emitPacket{s.remote, ecc[k], false}
 				}
 			}
-			atomic.AddUint64(&DefaultSnmp.OutSegs, uint64(nsegs))
-			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
-			xmitBuf.Put(ext)
 		case <-ticker.C: // NAT keep-alive
 			interval := time.Duration(atomic.LoadInt32(&s.keepAliveInterval)) * time.Second
 			if interval > 0 && time.Now().After(lastPing.Add(interval)) {
