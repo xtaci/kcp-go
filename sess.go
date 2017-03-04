@@ -58,7 +58,7 @@ type (
 
 		// forward error correction
 		fec              *FEC
-		fecGroup         [][]byte
+		fecDataShards    [][]byte
 		fecHeaderOffset  int
 		fecPayloadOffset int
 
@@ -119,10 +119,10 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		}
 		sess.fecPayloadOffset = sess.fecHeaderOffset + fecHeaderSize
 
-		// fec data group
-		sess.fecGroup = make([][]byte, sess.fec.shardSize)
-		for k := range sess.fecGroup {
-			sess.fecGroup[k] = make([]byte, mtuLimit)
+		// fec data shards
+		sess.fecDataShards = make([][]byte, sess.fec.shardSize)
+		for k := range sess.fecDataShards {
+			sess.fecDataShards[k] = make([]byte, mtuLimit)
 		}
 	}
 
@@ -136,9 +136,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
 		if size >= IKCP_OVERHEAD {
-			ext := xmitBuf.Get().([]byte)[:sess.headerSize+size]
-			copy(ext[sess.headerSize:], buf)
-			sess.output(ext)
+			sess.output(buf[:size])
 		}
 	})
 	sess.kcp.WndSize(defaultWndSize, defaultWndSize)
@@ -416,38 +414,52 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 // 3. Encryption
 // 4. emit to emitTask
 // 5. emitTask WriteTo kernel
-func (s *UDPSession) output(ext []byte) {
+func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
+
+	// extend buf's header space
+	ext := xmitBuf.Get().([]byte)[:s.headerSize+len(buf)]
+	copy(ext[s.headerSize:], buf)
+
+	// FEC stage
 	if s.fec != nil {
 		s.fec.markData(ext[s.fecHeaderOffset:])
 		binary.LittleEndian.PutUint16(ext[s.fecPayloadOffset:], uint16(len(ext[s.fecPayloadOffset:])))
 
-		// copy data to fec group
+		// copy data to fec datashards
 		sz := len(ext)
-		s.fecGroup[s.fecCnt] = s.fecGroup[s.fecCnt][:sz]
-		copy(s.fecGroup[s.fecCnt], ext)
+		s.fecDataShards[s.fecCnt] = s.fecDataShards[s.fecCnt][:sz]
+		copy(s.fecDataShards[s.fecCnt], ext)
 		s.fecCnt++
+
+		// record max datashard length
 		if sz > s.fecMaxSize {
 			s.fecMaxSize = sz
 		}
 
 		//  calculate Reed-Solomon Erasure Code
 		if s.fecCnt == s.fec.dataShards {
+			// bzero each datashard's tail
 			for i := 0; i < s.fec.dataShards; i++ {
-				shard := s.fecGroup[i]
+				shard := s.fecDataShards[i]
 				slen := len(shard)
 				xorBytes(shard[slen:s.fecMaxSize], shard[slen:s.fecMaxSize], shard[slen:s.fecMaxSize])
 			}
-			ecc = s.fec.calcECC(s.fecGroup, s.fecPayloadOffset, s.fecMaxSize)
+
+			// calculation of RS
+			ecc = s.fec.calcECC(s.fecDataShards, s.fecPayloadOffset, s.fecMaxSize)
 			for k := range ecc {
 				s.fec.markFEC(ecc[k][s.fecHeaderOffset:])
 				ecc[k] = ecc[k][:s.fecMaxSize]
 			}
+
+			// reset counters to zero
 			s.fecCnt = 0
 			s.fecMaxSize = 0
 		}
 	}
 
+	// encryption stage
 	if s.block != nil {
 		io.ReadFull(rand.Reader, ext[:nonceSize])
 		checksum := crc32.ChecksumIEEE(ext[cryptHeaderSize:])
@@ -464,6 +476,7 @@ func (s *UDPSession) output(ext []byte) {
 		}
 	}
 
+	// emit stage
 	defaultEmitter.emit(emitPacket{s.conn, s.remote, ext, true})
 	if ecc != nil {
 		for k := range ecc {
