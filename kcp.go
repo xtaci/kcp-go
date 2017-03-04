@@ -599,7 +599,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	if ackNoDelay && len(kcp.acklist) > 0 { // ack immediately
 		kcp.flush(true)
 	} else if kcp.rmt_wnd == 0 && len(kcp.acklist) > 0 { // window zero
-		kcp.flush(false)
+		kcp.flush(true)
 	}
 	return 0
 }
