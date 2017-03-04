@@ -408,6 +408,12 @@ func (s *UDPSession) emitterTask(ch chan emitPacket) {
 	}
 }
 
+// output pipeline entry
+// steps for output data processing:
+// 1. FEC
+// 2. CRC32
+// 3. Encryption
+// 4. writeTo kernel
 func (s *UDPSession) outputTask() {
 	// start a standalone emitter
 	emit := make(chan emitPacket, rxQueueLimit)
