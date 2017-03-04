@@ -67,13 +67,30 @@ lis, err := kcp.ListenWithOptions(":10000", nil, 10, 3)
   内存：	8 GB
 ```
 ```
-$ go test -run Speed
-new client 127.0.0.1:61165
-total recv: 16777216
-time for 16MB rtt with encryption 570.41176ms
-&{BytesSent:33554432 BytesReceived:33554432 MaxConn:2 ActiveOpens:1 PassiveOpens:1 CurrEstab:1 InErrs:0 InCsumErrors:0 InSegs:42577 OutSegs:42641 OutBytes:48111336 RetransSegs:92 FastRetransSegs:92 LostSegs:0 RepeatSegs:0 FECRecovered:1 FECErrs:0 FECSegs:8514}
+$ go test -run=^$ -v -bench .
+beginning tests, encryption:salsa20, fec:10/3
+BenchmarkAES128-4          	  200000	     11286 ns/op	 362.90 MB/s
+BenchmarkAES192-4          	  100000	     12332 ns/op	 332.14 MB/s
+BenchmarkAES256-4          	  100000	     13490 ns/op	 303.62 MB/s
+BenchmarkTEA-4             	   50000	     24191 ns/op	 169.31 MB/s
+BenchmarkXOR-4             	 5000000	       389 ns/op	10516.55 MB/s
+BenchmarkBlowfish-4        	   30000	     46750 ns/op	  87.61 MB/s
+BenchmarkNone-4            	20000000	        66.2 ns/op	61870.86 MB/s
+BenchmarkCast5-4           	   30000	     60050 ns/op	  68.21 MB/s
+Benchmark3DES-4            	    2000	    857810 ns/op	   4.77 MB/s
+BenchmarkTwofish-4         	   30000	     56199 ns/op	  72.88 MB/s
+BenchmarkXTEA-4            	   20000	     77454 ns/op	  52.88 MB/s
+BenchmarkSalsa20-4         	  300000	      4896 ns/op	 836.51 MB/s
+BenchmarkEchoSpeed4K-4     	    5000	    266582 ns/op	  15.36 MB/s
+BenchmarkEchoSpeed64K-4    	    1000	   1800013 ns/op	  36.41 MB/s
+BenchmarkEchoSpeed512K-4   	     100	  13474889 ns/op	  38.91 MB/s
+BenchmarkEchoSpeed1M-4     	      50	  26673491 ns/op	  39.31 MB/s
+BenchmarkSinkSpeed4K-4     	   20000	     68814 ns/op	  59.52 MB/s
+BenchmarkSinkSpeed64K-4    	    2000	    896972 ns/op	  73.06 MB/s
+BenchmarkSinkSpeed256K-4   	     200	   7370915 ns/op	  71.13 MB/s
+BenchmarkSinkSpeed1M-4     	     100	  13908481 ns/op	  75.39 MB/s
 PASS
-ok  	github.com/xtaci/kcp-go	0.600s
+ok  	github.com/xtaci/kcp-go	37.789s
 ```
 
 ## Tuning
