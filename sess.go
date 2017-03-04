@@ -83,6 +83,7 @@ type (
 	}
 
 	emitPacket struct {
+		conn    net.PacketConn
 		to      net.Addr
 		data    []byte
 		recycle bool
@@ -390,24 +391,6 @@ func (s *UDPSession) SetKeepAlive(interval int) {
 	atomic.StoreInt32(&s.keepAliveInterval, int32(interval))
 }
 
-// keepon writing packets to kernel
-func (s *UDPSession) emitterTask(ch chan emitPacket) {
-	for {
-		select {
-		case p := <-ch:
-			if n, err := s.conn.WriteTo(p.data, p.to); err == nil {
-				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
-			}
-			if p.recycle {
-				xmitBuf.Put(p.data)
-			}
-		case <-s.die:
-			return
-		}
-	}
-}
-
 // output pipeline entry
 // steps for output data processing:
 // 1. FEC
@@ -415,10 +398,6 @@ func (s *UDPSession) emitterTask(ch chan emitPacket) {
 // 3. Encryption
 // 4. writeTo kernel
 func (s *UDPSession) outputTask() {
-	// start a standalone emitter
-	emit := make(chan emitPacket, rxQueueLimit)
-	go s.emitterTask(emit)
-
 	// offset pre-compute
 	fecOffset := 0
 	if s.block != nil {
@@ -495,10 +474,10 @@ func (s *UDPSession) outputTask() {
 				}
 			}
 
-			emit <- emitPacket{s.remote, ext, true}
+			defaultEmitter.emit(emitPacket{s.conn, s.remote, ext, true})
 			if ecc != nil {
 				for k := range ecc {
-					emit <- emitPacket{s.remote, ecc[k], false}
+					defaultEmitter.emit(emitPacket{s.conn, s.remote, ecc[k], false})
 				}
 			}
 		case <-ticker.C: // NAT keep-alive
