@@ -37,7 +37,7 @@ func TestFECNoLost(t *testing.T) {
 		}
 		data = append(data, ecc...)
 		for k := range data {
-			f := fec.decodePacket(data[k])
+			f := fec.decodeBytes(data[k])
 			if recovered := fec.Decode(f); recovered != nil {
 				t.Fail()
 			}
@@ -60,7 +60,7 @@ func TestFECLost1(t *testing.T) {
 		lost := rand.Intn(13)
 		for k := range data {
 			if k != lost {
-				f := fec.decodePacket(data[k])
+				f := fec.decodeBytes(data[k])
 				if recovered := fec.Decode(f); recovered != nil {
 					if lost > 10 {
 						t.Fail()
@@ -96,7 +96,7 @@ func TestFECLost2(t *testing.T) {
 		}
 		for k := range data {
 			if k != lost1 && k != lost2 {
-				f := fec.decodePacket(data[k])
+				f := fec.decodeBytes(data[k])
 				if recovered := fec.Decode(f); recovered != nil {
 					if len(recovered) != expect {
 						t.Fail()

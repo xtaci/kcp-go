@@ -67,8 +67,8 @@ func newFEC(rxlimit, dataShards, parityShards int) *FEC {
 	return fec
 }
 
-// decodePacket a fec packet
-func (fec *FEC) decodePacket(data []byte) fecPacket {
+// decodeBytes a fec packet
+func (fec *FEC) decodeBytes(data []byte) fecPacket {
 	var pkt fecPacket
 	pkt.seqid = binary.LittleEndian.Uint32(data)
 	pkt.flag = binary.LittleEndian.Uint16(data[4:])

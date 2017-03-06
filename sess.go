@@ -519,7 +519,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	var kcpInErrors, fecErrs, fecRecovered, fecSegs uint64
 
 	if s.fec != nil {
-		f := s.fec.decodePacket(data)
+		f := s.fec.decodeBytes(data)
 		s.mu.Lock()
 		if f.flag == typeData {
 			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
