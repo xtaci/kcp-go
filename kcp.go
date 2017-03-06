@@ -756,7 +756,6 @@ func (kcp *KCP) flush(ackOnly bool) {
 		if size+need > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer
-			current = currentMs()
 		}
 
 		ptr = segment.encode(ptr)
@@ -809,7 +808,6 @@ func (kcp *KCP) flush(ackOnly bool) {
 			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
 				ptr = buffer
-				current = currentMs()
 			}
 
 			ptr = segment.encode(ptr)
