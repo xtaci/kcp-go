@@ -365,12 +365,11 @@ func sink_tester(cli *UDPSession, msglen, msgcount int) error {
 		waitsnd := cli.kcp.WaitSnd()
 		cli.mu.Unlock()
 		if waitsnd != 0 {
-			<-time.After(100 * time.Millisecond)
+			<-time.After(10 * time.Millisecond)
 		} else {
 			return nil
 		}
 	}
-	return nil
 }
 
 func TestSNMP(t *testing.T) {

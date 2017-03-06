@@ -25,11 +25,13 @@ type (
 		shardSize    int
 		next         uint32 // next seqid
 		enc          reedsolomon.Encoder
-		shards       [][]byte
-		shards2      [][]byte // for calcECC
-		shardsflag   []bool
-		paws         uint32 // Protect Against Wrapped Sequence numbers
-		lastCheck    uint32
+
+		decodeCache [][]byte
+		encodeCache [][]byte
+		shardsflag  []bool
+
+		paws      uint32 // Protect Against Wrapped Sequence numbers
+		lastCheck uint32
 	}
 
 	fecPacket struct {
@@ -59,14 +61,14 @@ func newFEC(rxlimit, dataShards, parityShards int) *FEC {
 		return nil
 	}
 	fec.enc = enc
-	fec.shards = make([][]byte, fec.shardSize)
-	fec.shards2 = make([][]byte, fec.shardSize)
+	fec.decodeCache = make([][]byte, fec.shardSize)
+	fec.encodeCache = make([][]byte, fec.shardSize)
 	fec.shardsflag = make([]bool, fec.shardSize)
 	return fec
 }
 
-// decode a fec packet
-func (fec *FEC) decode(data []byte) fecPacket {
+// decodePacket a fec packet
+func (fec *FEC) decodePacket(data []byte) fecPacket {
 	var pkt fecPacket
 	pkt.seqid = binary.LittleEndian.Uint32(data)
 	pkt.flag = binary.LittleEndian.Uint16(data[4:])
@@ -91,8 +93,8 @@ func (fec *FEC) markFEC(data []byte) {
 	fec.next %= fec.paws
 }
 
-// input a fec packet
-func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
+// Decode a fec packet
+func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
 	// expiration
 	now := currentMs()
 	if now-fec.lastCheck >= fecExpire {
@@ -149,9 +151,9 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 		numDataShard := 0
 		first := -1
 		maxlen := 0
-		shards := fec.shards
+		shards := fec.decodeCache
 		shardsflag := fec.shardsflag
-		for k := range fec.shards {
+		for k := range fec.decodeCache {
 			shards[k] = nil
 			shardsflag[k] = false
 		}
@@ -224,11 +226,12 @@ func (fec *FEC) input(pkt fecPacket) (recovered [][]byte) {
 	return
 }
 
-func (fec *FEC) calcECC(data [][]byte, offset, maxlen int) (ecc [][]byte) {
+// Encode a group of datashards
+func (fec *FEC) Encode(data [][]byte, offset, maxlen int) (ecc [][]byte) {
 	if len(data) != fec.shardSize {
 		return nil
 	}
-	shards := fec.shards2
+	shards := fec.encodeCache
 	for k := range shards {
 		shards[k] = data[k][offset:maxlen]
 	}

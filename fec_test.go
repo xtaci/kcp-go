@@ -31,14 +31,14 @@ func TestFECNoLost(t *testing.T) {
 			fec.markData(data[k])
 		}
 
-		ecc := fec.calcECC(data, fecHeaderSize, fecHeaderSize+4)
+		ecc := fec.Encode(data, fecHeaderSize, fecHeaderSize+4)
 		for k := range ecc {
 			fec.markFEC(ecc[k])
 		}
 		data = append(data, ecc...)
 		for k := range data {
-			f := fec.decode(data[k])
-			if recovered := fec.input(f); recovered != nil {
+			f := fec.decodePacket(data[k])
+			if recovered := fec.Decode(f); recovered != nil {
 				t.Fail()
 			}
 		}
@@ -53,15 +53,15 @@ func TestFECLost1(t *testing.T) {
 		for k := range data[fec.dataShards] {
 			fec.markData(data[k])
 		}
-		ecc := fec.calcECC(data, fecHeaderSize, fecHeaderSize+4)
+		ecc := fec.Encode(data, fecHeaderSize, fecHeaderSize+4)
 		for k := range ecc {
 			fec.markFEC(ecc[k])
 		}
 		lost := rand.Intn(13)
 		for k := range data {
 			if k != lost {
-				f := fec.decode(data[k])
-				if recovered := fec.input(f); recovered != nil {
+				f := fec.decodePacket(data[k])
+				if recovered := fec.Decode(f); recovered != nil {
 					if lost > 10 {
 						t.Fail()
 					}
@@ -78,7 +78,7 @@ func TestFECLost2(t *testing.T) {
 		for k := range data[fec.dataShards] {
 			fec.markData(data[k])
 		}
-		ecc := fec.calcECC(data, fecHeaderSize, fecHeaderSize+4)
+		ecc := fec.Encode(data, fecHeaderSize, fecHeaderSize+4)
 		for k := range ecc {
 			fec.markFEC(ecc[k])
 		}
@@ -96,8 +96,8 @@ func TestFECLost2(t *testing.T) {
 		}
 		for k := range data {
 			if k != lost1 && k != lost2 {
-				f := fec.decode(data[k])
-				if recovered := fec.input(f); recovered != nil {
+				f := fec.decodePacket(data[k])
+				if recovered := fec.Decode(f); recovered != nil {
 					if len(recovered) != expect {
 						t.Fail()
 					}

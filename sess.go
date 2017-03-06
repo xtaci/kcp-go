@@ -447,7 +447,7 @@ func (s *UDPSession) output(buf []byte) {
 			}
 
 			// calculation of RS
-			ecc = s.fec.calcECC(s.fecDataShards, s.fecPayloadOffset, s.fecMaxSize)
+			ecc = s.fec.Encode(s.fecDataShards, s.fecPayloadOffset, s.fecMaxSize)
 			for k := range ecc {
 				s.fec.markFEC(ecc[k][s.fecHeaderOffset:])
 				ecc[k] = ecc[k][:s.fecMaxSize]
@@ -519,7 +519,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	var kcpInErrors, fecErrs, fecRecovered, fecSegs uint64
 
 	if s.fec != nil {
-		f := s.fec.decode(data)
+		f := s.fec.decodePacket(data)
 		s.mu.Lock()
 		if f.flag == typeData {
 			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
@@ -532,7 +532,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 				fecSegs++
 			}
 
-			if recovers := s.fec.input(f); recovers != nil {
+			if recovers := s.fec.Decode(f); recovers != nil {
 				for _, r := range recovers {
 					if len(r) >= 2 { // must be larger than 2bytes
 						sz := binary.LittleEndian.Uint16(r)
