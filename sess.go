@@ -51,33 +51,36 @@ func init() {
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
-		sid uint32
-		kcp *KCP      // the core ARQ
-		l   *Listener // point to server listener if it's a server socket
+		// core
+		sid      uint32
+		conn     net.PacketConn // the underlying packet socket
+		kcp      *KCP           // the core ARQ
+		l        *Listener      // point to server listener if it's a server socket
+		block    BlockCrypt     // encryption
+		sockbuff []byte         // kcp receiving is based on packet, I turn it into stream
 
 		// forward error correction
 		fec              *FEC
 		fecDataShards    [][]byte
 		fecHeaderOffset  int
 		fecPayloadOffset int
+		fecCnt           int // count datashard
+		fecMaxSize       int // record maximum data length in datashard
 
-		fecCnt     int // count datashard
-		fecMaxSize int // record maximum data length in datashard
-
-		conn           net.PacketConn // the underlying packet socket
-		block          BlockCrypt
+		// settings
 		remote         net.Addr
 		rd             time.Time // read deadline
 		wd             time.Time // write deadline
-		sockbuff       []byte    // kcp receiving is based on packet, I turn it into stream
-		die            chan struct{}
-		chReadEvent    chan struct{}
-		chWriteEvent   chan struct{}
 		headerSize     int
-		ackNoDelay     bool
-		isClosed       bool
-		mu             sync.Mutex
 		updateInterval int32
+		ackNoDelay     bool
+
+		// notifications
+		die          chan struct{}
+		chReadEvent  chan struct{}
+		chWriteEvent chan struct{}
+		isClosed     bool
+		mu           sync.Mutex
 	}
 
 	setReadBuffer interface {
