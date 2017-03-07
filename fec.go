@@ -147,9 +147,9 @@ func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
 
 		for i := searchBegin; i <= searchEnd; i++ {
 			seqid := fec.rx[i].seqid
-			if seqid > shardEnd {
+			if _itimediff(seqid, shardEnd) > 0 {
 				break
-			} else if seqid >= shardBegin {
+			} else if _itimediff(seqid, shardBegin) >= 0 {
 				shards[seqid%uint32(fec.shardSize)] = fec.rx[i].data
 				shardsflag[seqid%uint32(fec.shardSize)] = true
 				numshard++
