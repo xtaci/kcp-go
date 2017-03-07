@@ -12,26 +12,23 @@ const (
 	fecHeaderSizePlus2 = fecHeaderSize + 2 // plus 2B data size
 	typeData           = 0xf1
 	typeFEC            = 0xf2
-	fecExpire          = 30000 // 30s
 )
 
 type (
 	// FEC defines forward error correction for packets
 	FEC struct {
-		rx           []fecPacket // ordered receive queue
-		rxlimit      int         // queue size limit
+		rxlimit      int // queue size limit
 		dataShards   int
 		parityShards int
 		shardSize    int
 		next         uint32 // next seqid
+		paws         uint32 // Protect Against Wrapped Sequence numbers
 		enc          reedsolomon.Encoder
 
+		rx          []fecPacket // ordered receive queue
 		decodeCache [][]byte
 		encodeCache [][]byte
 		shardsflag  []bool
-
-		paws      uint32 // Protect Against Wrapped Sequence numbers
-		lastCheck uint32
 	}
 
 	fecPacket struct {
@@ -95,21 +92,6 @@ func (fec *FEC) markFEC(data []byte) {
 
 // Decode a fec packet
 func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
-	// expiration
-	now := currentMs()
-	if now-fec.lastCheck >= fecExpire {
-		var rx []fecPacket
-		for k := range fec.rx {
-			if now-fec.rx[k].ts < fecExpire {
-				rx = append(rx, fec.rx[k])
-			} else {
-				xmitBuf.Put(fec.rx[k].data)
-			}
-		}
-		fec.rx = rx
-		fec.lastCheck = now
-	}
-
 	// insertion
 	n := len(fec.rx) - 1
 	insertIdx := 0

@@ -118,7 +118,6 @@ func echoServer() {
 			// coverage test
 			s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
 			s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
-			s.(*UDPSession).SetKeepAlive(1)
 			go handleEcho(s.(*UDPSession))
 		}
 	}()

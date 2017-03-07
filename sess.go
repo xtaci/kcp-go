@@ -23,14 +23,13 @@ func (errTimeout) Temporary() bool { return true }
 func (errTimeout) Error() string   { return "i/o timeout" }
 
 const (
-	defaultWndSize           = 128 // default window size, in packet
-	nonceSize                = 16  // magic number
-	crcSize                  = 4   // 4bytes packet checksum
-	cryptHeaderSize          = nonceSize + crcSize
-	mtuLimit                 = 2048
-	rxQueueLimit             = 8192
-	rxFECMulti               = 3 // FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
-	defaultKeepAliveInterval = 10
+	defaultWndSize  = 128 // default window size, in packet
+	nonceSize       = 16  // magic number
+	crcSize         = 4   // 4bytes packet checksum
+	cryptHeaderSize = nonceSize + crcSize
+	mtuLimit        = 2048
+	rxQueueLimit    = 8192
+	rxFECMulti      = 3 // FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
 )
 
 const (
@@ -65,21 +64,20 @@ type (
 		fecCnt     int // count datashard
 		fecMaxSize int // record maximum data length in datashard
 
-		conn              net.PacketConn // the underlying packet socket
-		block             BlockCrypt
-		remote            net.Addr
-		rd                time.Time // read deadline
-		wd                time.Time // write deadline
-		sockbuff          []byte    // kcp receiving is based on packet, I turn it into stream
-		die               chan struct{}
-		chReadEvent       chan struct{}
-		chWriteEvent      chan struct{}
-		headerSize        int
-		ackNoDelay        bool
-		isClosed          bool
-		keepAliveInterval int32
-		mu                sync.Mutex
-		updateInterval    int32
+		conn           net.PacketConn // the underlying packet socket
+		block          BlockCrypt
+		remote         net.Addr
+		rd             time.Time // read deadline
+		wd             time.Time // write deadline
+		sockbuff       []byte    // kcp receiving is based on packet, I turn it into stream
+		die            chan struct{}
+		chReadEvent    chan struct{}
+		chWriteEvent   chan struct{}
+		headerSize     int
+		ackNoDelay     bool
+		isClosed       bool
+		mu             sync.Mutex
+		updateInterval int32
 	}
 
 	setReadBuffer interface {
@@ -107,7 +105,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.remote = remote
 	sess.conn = conn
-	sess.keepAliveInterval = defaultKeepAliveInterval
 	sess.l = l
 	sess.block = block
 
@@ -400,11 +397,6 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 		}
 	}
 	return errors.New(errInvalidOperation)
-}
-
-// SetKeepAlive changes per-connection NAT keepalive interval; 0 to disable, default to 10s
-func (s *UDPSession) SetKeepAlive(interval int) {
-	atomic.StoreInt32(&s.keepAliveInterval, int32(interval))
 }
 
 // output pipeline entry
