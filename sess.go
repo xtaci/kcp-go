@@ -504,7 +504,7 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) kcpInput(data []byte) {
-	var kcpInErrors, fecErrs, fecRecovered, fecSegs uint64
+	var kcpInErrors, fecErrs, fecRecovered, fecParityShards uint64
 
 	if s.fec != nil {
 		f := s.fec.decodeBytes(data)
@@ -517,7 +517,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 		if f.flag == typeData || f.flag == typeFEC {
 			if f.flag == typeFEC {
-				fecSegs++
+				fecParityShards++
 			}
 
 			if recovers := s.fec.Decode(f); recovers != nil {
@@ -559,8 +559,8 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
-	if fecSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.FECSegs, fecSegs)
+	if fecParityShards > 0 {
+		atomic.AddUint64(&DefaultSnmp.FECParityShards, fecParityShards)
 	}
 	if kcpInErrors > 0 {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
