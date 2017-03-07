@@ -1,7 +1,7 @@
 package kcp
 
 import (
-	"runtime"
+	"net"
 	"sync/atomic"
 )
 
@@ -13,9 +13,19 @@ func init() {
 	defaultEmitter.init()
 }
 
-type Emitter struct {
-	ch chan emitPacket
-}
+type (
+	emitPacket struct {
+		conn    net.PacketConn
+		to      net.Addr
+		data    []byte
+		recycle bool
+	}
+
+	// Emitter is the global packet sender
+	Emitter struct {
+		ch chan emitPacket
+	}
+)
 
 func (e *Emitter) init() {
 	e.ch = make(chan emitPacket, emitQueue)
@@ -24,17 +34,13 @@ func (e *Emitter) init() {
 
 // keepon writing packets to kernel
 func (e *Emitter) emitTask() {
-	runtime.LockOSThread()
-	for {
-		select {
-		case p := <-e.ch:
-			if n, err := p.conn.WriteTo(p.data, p.to); err == nil {
-				atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
-			}
-			if p.recycle {
-				xmitBuf.Put(p.data)
-			}
+	for p := range e.ch {
+		if n, err := p.conn.WriteTo(p.data, p.to); err == nil {
+			atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
+		}
+		if p.recycle {
+			xmitBuf.Put(p.data)
 		}
 	}
 }

@@ -90,13 +90,6 @@ type (
 	setWriteBuffer interface {
 		SetWriteBuffer(bytes int) error
 	}
-
-	emitPacket struct {
-		conn    net.PacketConn
-		to      net.Addr
-		data    []byte
-		recycle bool
-	}
 )
 
 // newUDPSession create a new udp session for client or server
