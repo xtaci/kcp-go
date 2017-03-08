@@ -665,9 +665,9 @@ func (kcp *KCP) flush(ackOnly bool) {
 		return
 	}
 
-	current := currentMs()
 	// probe window size (if remote window size equals zero)
 	if kcp.rmt_wnd == 0 {
+		current := currentMs()
 		if kcp.probe_wait == 0 {
 			kcp.probe_wait = IKCP_PROBE_INIT
 			kcp.ts_probe = current + kcp.probe_wait
@@ -747,6 +747,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 
 	// send new segments
 	for k := len(kcp.snd_buf) - newSegsCount; k < len(kcp.snd_buf); k++ {
+		current := currentMs()
 		segment := &kcp.snd_buf[k]
 		segment.xmit++
 		segment.rto = kcp.rx_rto
@@ -770,6 +771,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 
 	// check for retransmissions
 	for k := 0; k < len(kcp.snd_buf)-newSegsCount; k++ {
+		current := currentMs()
 		segment := &kcp.snd_buf[k]
 		needsend := false
 		if _itimediff(current, segment.resendts) >= 0 { // RTO

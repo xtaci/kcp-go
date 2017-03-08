@@ -7,8 +7,6 @@ import (
 
 var defaultEmitter Emitter
 
-const emitQueue = 2048
-
 func init() {
 	defaultEmitter.init()
 }
@@ -30,7 +28,7 @@ type (
 )
 
 func (e *Emitter) init() {
-	e.ch = make(chan emitPacket, emitQueue)
+	e.ch = make(chan emitPacket)
 	go e.emitTask()
 }
 
