@@ -14,10 +14,12 @@ func init() {
 }
 
 type (
+	// packet emit request
 	emitPacket struct {
-		conn    net.PacketConn
-		to      net.Addr
-		data    []byte
+		conn net.PacketConn
+		to   net.Addr
+		data []byte
+		// mark this packet should recycle to global xmitBuf
 		recycle bool
 	}
 
