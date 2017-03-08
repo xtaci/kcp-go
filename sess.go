@@ -36,7 +36,7 @@ const (
 	mtuLimit = 2048
 
 	// packet receiving channel limit
-	rxQueueLimit = 8192
+	rxQueueLimit = 2048
 
 	// FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
 	rxFECMulti = 3

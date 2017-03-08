@@ -7,7 +7,7 @@ import (
 
 var defaultEmitter Emitter
 
-const emitQueue = 8192
+const emitQueue = 2048
 
 func init() {
 	defaultEmitter.init()
