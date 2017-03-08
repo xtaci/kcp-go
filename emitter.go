@@ -38,7 +38,7 @@ func (e *Emitter) init() {
 func (e *Emitter) emitTask() {
 	for p := range e.ch {
 		if n, err := p.conn.WriteTo(p.data, p.to); err == nil {
-			atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+			atomic.AddUint64(&DefaultSnmp.OutPkts, 1)
 			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(n))
 		}
 		if p.recycle {

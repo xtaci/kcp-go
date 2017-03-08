@@ -578,7 +578,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		s.mu.Unlock()
 	}
 
-	atomic.AddUint64(&DefaultSnmp.InSegs, 1)
+	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
 	if fecParityShards > 0 {
 		atomic.AddUint64(&DefaultSnmp.FECParityShards, fecParityShards)

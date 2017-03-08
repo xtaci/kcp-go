@@ -117,6 +117,7 @@ func (seg *Segment) encode(ptr []byte) []byte {
 	ptr = ikcp_encode32u(ptr, seg.sn)
 	ptr = ikcp_encode32u(ptr, seg.una)
 	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
+	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 	return ptr
 }
 
@@ -485,8 +486,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 
 	var maxack uint32
 	var flag int
-
+	var inSegs uint64
 	current := currentMs()
+
 	for {
 		var ts, sn, length, una, conv uint32
 		var wnd uint16
@@ -567,8 +569,10 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 			return -3
 		}
 
+		inSegs++
 		data = data[length:]
 	}
+	atomic.AddUint64(&DefaultSnmp.InSegs, inSegs)
 
 	if flag != 0 && regular {
 		kcp.parse_fastack(maxack)
