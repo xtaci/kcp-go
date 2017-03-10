@@ -122,6 +122,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.conn = conn
 	sess.l = l
 	sess.block = block
+	sess.recvbuf = make([]byte, mtuLimit)
 
 	// FEC initialization
 	sess.fec = newFEC(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
@@ -175,9 +176,9 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
 		s.mu.Lock()
 		if s.buffer.Len() > 0 { // copy from buffer
-			n, err = s.buffer.Read(b)
+			n, _ = s.buffer.Read(b)
 			s.mu.Unlock()
-			return n, err
+			return n, nil
 		}
 
 		if s.isClosed {
@@ -207,7 +208,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			n = copy(b, s.recvbuf[:size])     // direct copy
 			s.buffer.Write(s.recvbuf[n:size]) // save rests to bytes.Buffer
 			s.mu.Unlock()
-			return size, nil
+			return n, nil
 		}
 
 		var timeout *time.Timer
