@@ -83,12 +83,12 @@ type (
 		fecPayloadOffset int // FEC payload offset in packet
 
 		// settings
-		remote         net.Addr  // remote peer address
-		rd             time.Time // read deadline
-		wd             time.Time // write deadline
-		headerSize     int       // the overall header size added before KCP frame
-		updateInterval int32     // interval in seconds to call kcp.flush()
-		ackNoDelay     bool      // send ack immediately for each incoming packet
+		remote         net.Addr      // remote peer address
+		rd             time.Time     // read deadline
+		wd             time.Time     // write deadline
+		headerSize     int           // the overall header size added before KCP frame
+		updateInterval time.Duration // interval in seconds to call kcp.flush()
+		ackNoDelay     bool          // send ack immediately for each incoming packet
 
 		// notifications
 		die          chan struct{} // notify session has Closed
@@ -378,7 +378,7 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
-	atomic.StoreInt32(&s.updateInterval, int32(interval))
+	s.updateInterval = time.Duration(interval) * time.Millisecond
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header, no effect if it's accepted from Listener
@@ -498,14 +498,15 @@ func (s *UDPSession) output(buf []byte) {
 }
 
 // kcp update, returns interval for next calling
-func (s *UDPSession) update() time.Duration {
+func (s *UDPSession) update() (interval time.Duration) {
 	s.mu.Lock()
 	s.kcp.flush(false)
 	if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
 		s.notifyWriteEvent()
 	}
+	interval = s.updateInterval
 	s.mu.Unlock()
-	return time.Duration(atomic.LoadInt32(&s.updateInterval)) * time.Millisecond
+	return
 }
 
 // GetConv gets conversation id of a session
