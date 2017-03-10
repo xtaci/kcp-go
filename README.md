@@ -62,15 +62,15 @@ lis, err := kcp.ListenWithOptions(":10000", nil, 10, 3)
 
 ## Performance
 ```
-  型号名称：	MacBook Pro
-  型号标识符：	MacBookPro12,1
-  处理器名称：	Intel Core i5
-  处理器速度：	2.7 GHz
-  处理器数目：	1
-  核总数：	2
-  L2 缓存（每个核）：	256 KB
-  L3 缓存：	3 MB
-  内存：	8 GB
+  Model Name:	MacBook Pro
+  Model Identifier:	MacBookPro12,1
+  Processor Name:	Intel Core i5
+  Processor Speed:	2.7 GHz
+  Number of Processors:	1
+  Total Number of Cores:	2
+  L2 Cache (per Core):	256 KB
+  L3 Cache:	3 MB
+  Memory:	8 GB
 ```
 ```
 $ go test -run=^$ -v -bench .
