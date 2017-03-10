@@ -1,6 +1,7 @@
 package kcp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
@@ -72,8 +73,9 @@ type (
 		block BlockCrypt     // block encryption
 
 		// kcp receiving is based on packets
-		// sockbuff turns packets into stream
-		sockbuff []byte
+		// recvbuf turns packets into stream
+		recvbuf []byte
+		buffer  bytes.Buffer
 
 		fec           *FEC     // forward error correction
 		fecDataShards [][]byte // data shards cache
@@ -172,11 +174,10 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
 		s.mu.Lock()
-		if len(s.sockbuff) > 0 { // copy from buffer
-			n = copy(b, s.sockbuff)
-			s.sockbuff = s.sockbuff[n:]
+		if s.buffer.Len() > 0 { // copy from buffer
+			n, err = s.buffer.Read(b)
 			s.mu.Unlock()
-			return n, nil
+			return n, err
 		}
 
 		if s.isClosed {
@@ -191,18 +192,22 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			}
 		}
 
-		if n := s.kcp.PeekSize(); n > 0 { // data arrived
-			if len(b) >= n {
+		if size := s.kcp.PeekSize(); size > 0 { // data arrived
+			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
+			if len(b) >= size { // direct write
 				s.kcp.Recv(b)
-			} else {
-				buf := make([]byte, n)
-				s.kcp.Recv(buf)
-				n = copy(b, buf)
-				s.sockbuff = buf[n:] // store remaining bytes into sockbuff for next read
+				s.mu.Unlock()
+				return size, nil
 			}
+
+			if len(s.recvbuf) < size { // resize buf
+				s.recvbuf = make([]byte, size)
+			}
+			s.kcp.Recv(s.recvbuf)
+			n = copy(b, s.recvbuf[:size])     // direct copy
+			s.buffer.Write(s.recvbuf[n:size]) // save rests to bytes.Buffer
 			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
-			return n, nil
+			return size, nil
 		}
 
 		var timeout *time.Timer
