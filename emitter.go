@@ -28,7 +28,7 @@ type (
 )
 
 func (e *Emitter) init() {
-	e.ch = make(chan emitPacket)
+	e.ch = make(chan emitPacket, 1)
 	go e.emitTask()
 }
 

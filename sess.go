@@ -36,9 +36,6 @@ const (
 	// maximum packet size
 	mtuLimit = 1500
 
-	// packet receiving channel limit
-	rxQueueLimit = 2048
-
 	// FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
 	rxFECMulti = 3
 )
@@ -618,7 +615,7 @@ func (s *UDPSession) receiver(ch chan []byte) {
 
 // read loop for client session
 func (s *UDPSession) readLoop() {
-	chPacket := make(chan []byte, rxQueueLimit)
+	chPacket := make(chan []byte, 1)
 	go s.receiver(chPacket)
 
 	for {
@@ -677,7 +674,7 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	chPacket := make(chan inPacket, rxQueueLimit)
+	chPacket := make(chan inPacket, 1)
 	go l.receiver(chPacket)
 	for {
 		select {
@@ -741,7 +738,10 @@ func (l *Listener) receiver(ch chan inPacket) {
 	for {
 		data := xmitBuf.Get().([]byte)[:mtuLimit]
 		if n, from, err := l.conn.ReadFrom(data); err == nil && n >= l.headerSize+IKCP_OVERHEAD {
-			ch <- inPacket{from, data[:n]}
+			select {
+			case ch <- inPacket{from, data[:n]}:
+			case <-l.die:
+			}
 		} else if err != nil {
 			return
 		} else {
