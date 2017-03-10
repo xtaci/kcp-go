@@ -109,6 +109,7 @@ A: A standalone `agent` or `gate` server for kcp-go is suggested, not only for C
 2. https://github.com/getlantern/lantern -- Lantern delivers fast access to the open Internet. 
 3. https://github.com/smallnest/rpcx -- A RPC service framework based on net/rpc like alibaba Dubbo and weibo Motan.
 4. https://github.com/gonet2/agent -- A gateway for games with stream multiplexing.
+5. https://github.com/syncthing/syncthing -- Open Source Continuous File Synchronization.
 
 ## Links
 
