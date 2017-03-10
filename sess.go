@@ -34,7 +34,7 @@ const (
 	cryptHeaderSize = nonceSize + crcSize
 
 	// maximum packet size
-	mtuLimit = 2048
+	mtuLimit = 1500
 
 	// packet receiving channel limit
 	rxQueueLimit = 2048
