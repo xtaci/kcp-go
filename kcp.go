@@ -642,7 +642,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 			ptr = seg.encode(ptr)
 		}
 	}
-	kcp.acklist = nil
+	kcp.acklist = kcp.acklist[0:0]
 
 	if ackOnly { // flash remain ack segments
 		size := len(buffer) - len(ptr)
