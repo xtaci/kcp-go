@@ -39,7 +39,6 @@ type (
 		seqid uint32
 		flag  uint16
 		data  []byte
-		ts    uint32
 	}
 )
 
@@ -73,7 +72,6 @@ func (fec *FEC) decodeBytes(data []byte) fecPacket {
 	var pkt fecPacket
 	pkt.seqid = binary.LittleEndian.Uint32(data)
 	pkt.flag = binary.LittleEndian.Uint16(data[4:])
-	pkt.ts = currentMs()
 	// allocate memory & copy
 	buf := xmitBuf.Get().([]byte)[:len(data)-6]
 	copy(buf, data[6:])
