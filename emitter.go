@@ -45,6 +45,5 @@ func (e *Emitter) emitTask() {
 	}
 }
 
-func (e *Emitter) emit(p emitPacket) {
-	e.ch <- p
-}
+// emit a packet
+func (e *Emitter) emit(p emitPacket) { e.ch <- p }
