@@ -144,9 +144,8 @@ type KCP struct {
 
 	acklist []ackItem
 
-	buffer                 []byte
-	output                 Output
-	datashard, parityshard int
+	buffer []byte
+	output Output
 }
 
 type ackItem struct {
@@ -941,12 +940,6 @@ func (kcp *KCP) Check() uint32 {
 	}
 
 	return current + minimal
-}
-
-// set datashard,parityshard info for some optimizations
-func (kcp *KCP) setFEC(datashard, parityshard int) {
-	kcp.datashard = datashard
-	kcp.parityshard = parityshard
 }
 
 // SetMtu changes MTU size, default is 1400
