@@ -205,8 +205,9 @@ func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
 		xmitBuf.Put(fec.rx[0].data) // free
-		fec.rx[0].data = nil
-		fec.rx = fec.rx[1:]
+		copy(fec.rx, fec.rx[1:])    // shift left
+		fec.rx[len(fec.rx)-1] = fecPacket{}
+		fec.rx = fec.rx[:len(fec.rx)-1]
 	}
 	return
 }
