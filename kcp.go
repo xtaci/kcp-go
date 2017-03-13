@@ -244,7 +244,9 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	kcp.rcv_queue = kcp.rcv_queue[count:]
+	if count > 0 {
+		kcp.rcv_queue = kcp.remove_front(kcp.rcv_queue, count)
+	}
 
 	// move available data from rcv_buf -> rcv_queue
 	count = 0
@@ -257,8 +259,11 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 			break
 		}
 	}
-	kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
-	kcp.rcv_buf = kcp.rcv_buf[count:]
+
+	if count > 0 {
+		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
+		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
+	}
 
 	// fast recover
 	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) && fast_recover {
@@ -416,7 +421,9 @@ func (kcp *KCP) parse_una(una uint32) {
 			break
 		}
 	}
-	kcp.snd_buf = kcp.snd_buf[count:]
+	if count > 0 {
+		kcp.snd_buf = kcp.remove_front(kcp.snd_buf, count)
+	}
 }
 
 // ack append
@@ -471,8 +478,10 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 			break
 		}
 	}
-	kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
-	kcp.rcv_buf = kcp.rcv_buf[count:]
+	if count > 0 {
+		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
+		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
+	}
 }
 
 // Input when you received a low level packet (eg. UDP packet), call it
@@ -720,7 +729,9 @@ func (kcp *KCP) flush(ackOnly bool) {
 		newSegsCount++
 		kcp.snd_queue[k].data = nil
 	}
-	kcp.snd_queue = kcp.snd_queue[newSegsCount:]
+	if newSegsCount > 0 {
+		kcp.snd_queue = kcp.remove_front(kcp.snd_queue, newSegsCount)
+	}
 
 	// calculate resent
 	resent := uint32(kcp.fastresend)
@@ -1012,4 +1023,9 @@ func (kcp *KCP) Cwnd() uint32 {
 		cwnd = _imin_(kcp.cwnd, cwnd)
 	}
 	return cwnd
+}
+
+// remove front n elements from queue
+func (kcp *KCP) remove_front(q []Segment, n int) []Segment {
+	return q[:copy(q, q[n:])]
 }
