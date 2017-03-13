@@ -423,8 +423,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 // 1. FEC
 // 2. CRC32
 // 3. Encryption
-// 4. emit to emitTask
-// 5. emitTask WriteTo kernel
+// 4. WriteTo kernel
 func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
@@ -487,13 +486,27 @@ func (s *UDPSession) output(buf []byte) {
 		}
 	}
 
-	// emit stage
-	defaultEmitter.emit(emitPacket{s.conn, s.remote, ext, true})
+	// WriteTo kernel
+	nbytes := 0
+	npkts := 0
+	// if mrand.Intn(100) < 50 {
+	if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
+		nbytes += n
+		npkts++
+	}
+	// }
+
 	if ecc != nil {
 		for k := range ecc {
-			defaultEmitter.emit(emitPacket{s.conn, s.remote, ecc[k], false})
+			if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
+				nbytes += n
+				npkts++
+			}
 		}
 	}
+	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
+	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
+	xmitBuf.Put(ext)
 }
 
 // kcp update, returns interval for next calling
