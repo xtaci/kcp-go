@@ -291,7 +291,9 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 // Close closes the connection.
 func (s *UDPSession) Close() error {
 	updater.removeSession(s)
-	s.l.closeSession(s.remote)
+	if s.l != nil { // notify listener
+		s.l.closeSession(s.remote)
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
