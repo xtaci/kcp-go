@@ -291,6 +291,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 // Close closes the connection.
 func (s *UDPSession) Close() error {
 	updater.removeSession(s)
+	s.l.closeSession(s.remote)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -303,7 +304,6 @@ func (s *UDPSession) Close() error {
 	if s.l == nil { // client socket close
 		return s.conn.Close()
 	}
-
 	return nil
 }
 
@@ -834,6 +834,14 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 func (l *Listener) Close() error {
 	close(l.die)
 	return l.conn.Close()
+}
+
+// closeSession notify the listener that a session has closed
+func (l *Listener) closeSession(remote net.Addr) {
+	select {
+	case l.chDeadlinks <- remote:
+	case <-l.die:
+	}
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
