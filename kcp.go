@@ -1027,5 +1027,9 @@ func (kcp *KCP) Cwnd() uint32 {
 
 // remove front n elements from queue
 func (kcp *KCP) remove_front(q []Segment, n int) []Segment {
-	return q[:copy(q, q[n:])]
+	newn := copy(q, q[n:])
+	for i := newn; i < len(q); i++ {
+		q[i] = Segment{} // manual set nil for GC
+	}
+	return q[:newn]
 }
