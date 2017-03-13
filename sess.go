@@ -73,6 +73,8 @@ type (
 		// recvbuf turns packets into stream
 		recvbuf []byte
 		buffer  bytes.Buffer
+		// extended output buffer(with header)
+		ext []byte
 
 		fec           *FEC     // forward error correction
 		fecDataShards [][]byte // data shards cache
@@ -120,6 +122,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.l = l
 	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
+	sess.ext = make([]byte, mtuLimit)
 
 	// FEC initialization
 	sess.fec = newFEC(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
@@ -428,7 +431,7 @@ func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
 	// extend buf's header space
-	ext := xmitBuf.Get().([]byte)[:s.headerSize+len(buf)]
+	ext := s.ext[:s.headerSize+len(buf)]
 	copy(ext[s.headerSize:], buf)
 
 	// FEC stage
@@ -506,7 +509,6 @@ func (s *UDPSession) output(buf []byte) {
 	}
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
-	xmitBuf.Put(ext)
 }
 
 // kcp update, returns interval for next calling
