@@ -125,6 +125,7 @@ You can support this project by the following methods:
 http://www.vultr.com/?ref=6897065
 
 2. Paypal    
-https://www.paypal.me/xtaci
+https://www.paypal.me/xtaci/5
 
-Your name or github name will be listed on this page by default.
+3. 支付宝
+hanbmei@163.com（接受付费咨询）
