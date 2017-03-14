@@ -385,6 +385,7 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 }
 
 func speedclient(b *testing.B, nbytes int) {
+	b.ReportAllocs()
 	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
@@ -413,6 +414,7 @@ func BenchmarkSinkSpeed1M(b *testing.B) {
 }
 
 func sinkclient(b *testing.B, nbytes int) {
+	b.ReportAllocs()
 	cli, err := dialSink()
 	if err != nil {
 		panic(err)

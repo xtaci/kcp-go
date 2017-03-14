@@ -175,14 +175,13 @@ func NewKCP(conv uint32, output Output) *KCP {
 }
 
 // newSegment creates a KCP segment
-func (kcp *KCP) newSegment(size int) *Segment {
-	seg := new(Segment)
+func (kcp *KCP) newSegment(size int) (seg Segment) {
 	seg.data = xmitBuf.Get().([]byte)[:size]
-	return seg
+	return
 }
 
 // delSegment recycles a KCP segment
-func (kcp *KCP) delSegment(seg *Segment) {
+func (kcp *KCP) delSegment(seg Segment) {
 	xmitBuf.Put(seg.data)
 }
 
@@ -239,7 +238,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
 		count++
-		kcp.delSegment(seg)
+		kcp.delSegment(*seg)
 		if seg.frg == 0 {
 			break
 		}
@@ -297,8 +296,8 @@ func (kcp *KCP) Send(buffer []byte) int {
 				copy(seg.data, old.data)
 				copy(seg.data[len(old.data):], buffer)
 				buffer = buffer[extend:]
-				kcp.delSegment(old)
-				kcp.snd_queue[n-1] = *seg
+				kcp.delSegment(*old)
+				kcp.snd_queue[n-1] = seg
 			}
 		}
 
@@ -335,7 +334,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		} else { // stream mode
 			seg.frg = 0
 		}
-		kcp.snd_queue = append(kcp.snd_queue, *seg)
+		kcp.snd_queue = append(kcp.snd_queue, seg)
 		buffer = buffer[size:]
 	}
 	return 0
@@ -383,7 +382,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if sn == seg.sn {
-			kcp.delSegment(seg)
+			kcp.delSegment(*seg)
 			copy(kcp.snd_buf[k:], kcp.snd_buf[k+1:])
 			kcp.snd_buf[len(kcp.snd_buf)-1] = Segment{}
 			kcp.snd_buf = kcp.snd_buf[:len(kcp.snd_buf)-1]
@@ -415,7 +414,7 @@ func (kcp *KCP) parse_una(una uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
-			kcp.delSegment(seg)
+			kcp.delSegment(*seg)
 			count++
 		} else {
 			break
@@ -431,7 +430,7 @@ func (kcp *KCP) ack_push(sn, ts uint32) {
 	kcp.acklist = append(kcp.acklist, ackItem{sn, ts})
 }
 
-func (kcp *KCP) parse_data(newseg *Segment) {
+func (kcp *KCP) parse_data(newseg Segment) {
 	sn := newseg.sn
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
@@ -457,11 +456,11 @@ func (kcp *KCP) parse_data(newseg *Segment) {
 
 	if !repeat {
 		if insert_idx == n+1 {
-			kcp.rcv_buf = append(kcp.rcv_buf, *newseg)
+			kcp.rcv_buf = append(kcp.rcv_buf, newseg)
 		} else {
 			kcp.rcv_buf = append(kcp.rcv_buf, Segment{})
 			copy(kcp.rcv_buf[insert_idx+1:], kcp.rcv_buf[insert_idx:])
-			kcp.rcv_buf[insert_idx] = *newseg
+			kcp.rcv_buf[insert_idx] = newseg
 		}
 	} else {
 		kcp.delSegment(newseg)
