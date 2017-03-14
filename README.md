@@ -24,7 +24,7 @@
 
 **kcp-go** is a ***Production-Grade Reliable-UDP*** library for golang. 
 
-It provides ***fast, ordered, error-checked*** delivery of streams over **UDP**, and has been well tested and it's running on millions of devices(from low-end MIPS routers to high-end servers).
+It provides ***fast, ordered and error-checked*** delivery of streams over **UDP** packets, has been well tested with opensource project [kcptun](https://github.com/xtaci/kcptun). Millions of devices(from low-end MIPS routers to high-end servers) are running with **kcp-go** at present, including applications like **online games, live broadcasting, file synchronization and network acceleration**.
 
 [Lastest Release](https://github.com/xtaci/kcp-go/releases)
 
