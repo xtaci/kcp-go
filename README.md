@@ -128,4 +128,4 @@ http://www.vultr.com/?ref=6897065
 https://www.paypal.me/xtaci/5
 
 3. 支付宝
-hanbmei@163.com（接受付费咨询）
+hanbmei@163.com（接受针对在线游戏的付费咨询。）
