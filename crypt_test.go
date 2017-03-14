@@ -3,22 +3,91 @@ package kcp
 import (
 	"bytes"
 	"crypto/rand"
-	"crypto/sha1"
 	"io"
 	"testing"
-
-	"golang.org/x/crypto/pbkdf2"
 )
 
-const cryptKey = "testkey"
-const cryptSalt = "kcptest"
-
 func TestAES(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
-	bc, err := NewAESBlockCrypt(pass)
+	bc, err := NewAESBlockCrypt(pass[:32])
 	if err != nil {
 		t.Fatal(err)
 	}
+	cryptTest(t, bc)
+}
+
+func TestTEA(t *testing.T) {
+	bc, err := NewTEABlockCrypt(pass[:16])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestXOR(t *testing.T) {
+	bc, err := NewSimpleXORBlockCrypt(pass[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestBlowfish(t *testing.T) {
+	bc, err := NewBlowfishBlockCrypt(pass[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestNone(t *testing.T) {
+	bc, err := NewNoneBlockCrypt(pass[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestCast5(t *testing.T) {
+	bc, err := NewCast5BlockCrypt(pass[:16])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func Test3DES(t *testing.T) {
+	bc, err := NewTripleDESBlockCrypt(pass[:24])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestTwofish(t *testing.T) {
+	bc, err := NewTwofishBlockCrypt(pass[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestXTEA(t *testing.T) {
+	bc, err := NewXTEABlockCrypt(pass[:16])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func TestSalsa20(t *testing.T) {
+	bc, err := NewSalsa20BlockCrypt(pass[:32])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
+func cryptTest(t *testing.T, bc BlockCrypt) {
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)
@@ -31,388 +100,106 @@ func TestAES(t *testing.T) {
 }
 
 func BenchmarkAES128(b *testing.B) {
-	pass := make([]byte, 16)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewAESBlockCrypt(pass)
+	bc, err := NewAESBlockCrypt(pass[:16])
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
+	benchCrypt(b, bc)
 }
 
 func BenchmarkAES192(b *testing.B) {
-	pass := make([]byte, 24)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewAESBlockCrypt(pass)
+	bc, err := NewAESBlockCrypt(pass[:24])
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
+	benchCrypt(b, bc)
 }
 
 func BenchmarkAES256(b *testing.B) {
-	pass := make([]byte, 32)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewAESBlockCrypt(pass)
+	bc, err := NewAESBlockCrypt(pass[:32])
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestTEA(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 16, sha1.New)
-	bc, err := NewTEABlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
-
+	benchCrypt(b, bc)
 }
 
 func BenchmarkTEA(b *testing.B) {
-	pass := make([]byte, 16)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewTEABlockCrypt(pass)
+	bc, err := NewTEABlockCrypt(pass[:16])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestXOR(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
-	bc, err := NewSimpleXORBlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkXOR(b *testing.B) {
-	pass := make([]byte, 32)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewSimpleXORBlockCrypt(pass)
+	bc, err := NewSimpleXORBlockCrypt(pass[:32])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestBlowfish(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
-	bc, err := NewBlowfishBlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkBlowfish(b *testing.B) {
-	pass := make([]byte, 32)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewBlowfishBlockCrypt(pass)
+	bc, err := NewBlowfishBlockCrypt(pass[:32])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestNone(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
-	bc, err := NewNoneBlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkNone(b *testing.B) {
-	pass := make([]byte, 32)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewNoneBlockCrypt(pass)
+	bc, err := NewNoneBlockCrypt(pass[:32])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestCast5(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 16, sha1.New)
-	bc, err := NewCast5BlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkCast5(b *testing.B) {
-	pass := make([]byte, 16)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewCast5BlockCrypt(pass)
+	bc, err := NewCast5BlockCrypt(pass[:16])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func Test3DES(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 24, sha1.New)
-	bc, err := NewTripleDESBlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func Benchmark3DES(b *testing.B) {
-	pass := make([]byte, 24)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewTripleDESBlockCrypt(pass)
+	bc, err := NewTripleDESBlockCrypt(pass[:24])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestTwofish(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
-	bc, err := NewTwofishBlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkTwofish(b *testing.B) {
-	pass := make([]byte, 32)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewTwofishBlockCrypt(pass)
+	bc, err := NewTwofishBlockCrypt(pass[:32])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestXTEA(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 16, sha1.New)
-	bc, err := NewXTEABlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
-
+	benchCrypt(b, bc)
 }
 
 func BenchmarkXTEA(b *testing.B) {
-	pass := make([]byte, 16)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewXTEABlockCrypt(pass)
+	bc, err := NewXTEABlockCrypt(pass[:16])
 	if err != nil {
 		b.Fatal(err)
 	}
-
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-
-	for i := 0; i < b.N; i++ {
-		bc.Encrypt(enc, data)
-		bc.Decrypt(dec, enc)
-	}
-	b.SetBytes(int64(len(enc) * 2))
-}
-
-func TestSalsa20(t *testing.T) {
-	pass := pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
-	bc, err := NewSalsa20BlockCrypt(pass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := make([]byte, mtuLimit)
-	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
-	bc.Encrypt(enc, data)
-	bc.Decrypt(dec, enc)
-	if !bytes.Equal(data, dec) {
-		t.Fail()
-	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkSalsa20(b *testing.B) {
-	pass := make([]byte, 32)
-	io.ReadFull(rand.Reader, pass)
-	bc, err := NewSalsa20BlockCrypt(pass)
+	bc, err := NewSalsa20BlockCrypt(pass[:32])
 	if err != nil {
 		b.Fatal(err)
 	}
+	benchCrypt(b, bc)
+}
 
+func benchCrypt(b *testing.B, bc BlockCrypt) {
+	b.ReportAllocs()
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)

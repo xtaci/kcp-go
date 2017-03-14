@@ -425,9 +425,9 @@ func sinkclient(b *testing.B, nbytes int) {
 }
 
 func echo_tester(cli net.Conn, msglen, msgcount int) error {
+	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {
 		// send packet
-		buf := make([]byte, msglen)
 		if _, err := cli.Write(buf); err != nil {
 			return err
 		}
