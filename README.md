@@ -49,11 +49,11 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 
 ## Usage
 
-Client:   [full demo](https://github.com/xtaci/kcptun/blob/master/client/main.go#L231)
+Client:   [full demo](https://github.com/xtaci/kcptun/blob/master/client/main.go)
 ```go
 kcpconn, err := kcp.DialWithOptions("192.168.0.1:10000", nil, 10, 3)
 ```
-Server:   [full demo](https://github.com/xtaci/kcptun/blob/master/server/main.go#L235)
+Server:   [full demo](https://github.com/xtaci/kcptun/blob/master/server/main.go)
 ```go
 lis, err := kcp.ListenWithOptions(":10000", nil, 10, 3)
 ```
