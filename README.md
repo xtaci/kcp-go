@@ -22,13 +22,15 @@
 
 ## Introduction
 
-**kcp-go** is a ***Production-Grade Reliable-UDP*** library for golang. It provides ***reliable, ordered, and error-checked*** delivery of a stream of octets between applications running on hosts communicating over an IP network. **kcp-go** has been well tested and it's running on millions of devices(from low-end MIPS routers to high-end servers). 
+**kcp-go** is a ***Production-Grade Reliable-UDP*** library for golang. 
+
+It provides ***fast, ordered, error-checked*** delivery of streams over **UDP**, and has been well tested and it's running on millions of devices(from low-end MIPS routers to high-end servers).
 
 [Lastest Release](https://github.com/xtaci/kcp-go/releases)
 
 ## Features
 
-1. Optimized for ***Online Realtime Games, Audio/Video Streaming***.
+1. Optimized for ***Realtime Multiplayer Games, Audio/Video Streaming***.
 1. Compatible with [skywind3000's](https://github.com/skywind3000) C version with optimizations.
 1. ***Cache friendly*** and ***Memory optimized*** design in golang.
 1. Compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener).
