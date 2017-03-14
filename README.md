@@ -49,6 +49,28 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 
 <img src="frame.png" alt="Frame Format" height="109px" />
 
+```
++--------------+
+| SESSION      |
++--------------+
+| KCP(ARQ)     |
++--------------+
+| FEC          |
++--------------+
+| CRYPTO       |
++--------------+
+| UDP(PACKET)  |
++--------------+
+| IP           |
++--------------+
+| LINK         |
++--------------+
+| PHY          |
++--------------+
+(LAYER MODEL OF KCP-GO)
+```
+
+
 ## Usage
 
 Client:   [full demo](https://github.com/xtaci/kcptun/blob/master/client/main.go)
