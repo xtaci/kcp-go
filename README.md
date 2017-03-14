@@ -128,4 +128,4 @@ http://www.vultr.com/?ref=6897065
 https://www.paypal.me/xtaci/5
 
 3. 支付宝
-hanbmei@163.com（接受在线付费咨询, Price: ¥128/45min）
+hanbmei@163.com（接受在线付费咨询, Price: ¥128/45min, QQ:301008666，注明意图。）
