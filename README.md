@@ -37,7 +37,7 @@
 
 ## Conventions
 
-Control messages like SYN/FIN/RST in TCP ***are not defined*** in KCP, you need some ***keepalive mechanims*** in the application-level. a real world example is to use some ***multiplexing*** protocol over session, such as [smux](https://github.com/xtaci/smux), see [kcptun](https://github.com/xtaci/kcptun) for example.
+Control messages like **SYN/FIN/RST** in TCP ***are not defined*** in KCP, you need some ***keepalive/heartbeat mechanism*** in the application-level. A real world example is to use some ***multiplexing*** protocol over session, such as [smux](https://github.com/xtaci/smux)(with embeded keepalive mechanism), see [kcptun](https://github.com/xtaci/kcptun) for example.
 
 ## Documentation
 
