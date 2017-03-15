@@ -635,7 +635,7 @@ func (s *UDPSession) receiver(ch chan []byte) {
 
 // read loop for client session
 func (s *UDPSession) readLoop() {
-	chPacket := make(chan []byte, 1)
+	chPacket := make(chan []byte)
 	go s.receiver(chPacket)
 
 	for {
@@ -694,7 +694,7 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	chPacket := make(chan inPacket, 1)
+	chPacket := make(chan inPacket)
 	go l.receiver(chPacket)
 	for {
 		select {
