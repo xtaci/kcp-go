@@ -88,8 +88,7 @@ func (fec *FEC) markData(data []byte) {
 func (fec *FEC) markFEC(data []byte) {
 	binary.LittleEndian.PutUint32(data, fec.next)
 	binary.LittleEndian.PutUint16(data[4:], typeFEC)
-	fec.next++
-	fec.next %= fec.paws
+	fec.next = (fec.next + 1) % fec.paws
 }
 
 // Decode a fec packet
@@ -112,7 +111,7 @@ func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
 		fec.rx = append(fec.rx, pkt)
 	} else {
 		fec.rx = append(fec.rx, fecPacket{})
-		copy(fec.rx[insertIdx+1:], fec.rx[insertIdx:])
+		copy(fec.rx[insertIdx+1:], fec.rx[insertIdx:]) // shift right
 		fec.rx[insertIdx] = pkt
 	}
 
