@@ -154,7 +154,10 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	})
 	sess.kcp.SetMtu(IKCP_MTU_DEF - sess.headerSize)
 
+	// add current session to the global updater,
+	// which periodically calls sess.update()
 	updater.addSession(sess)
+
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
@@ -170,11 +173,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	return sess
 }
 
-// Read implements the Conn Read method.
+// Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
 		s.mu.Lock()
-		if s.buffer.Len() > 0 { // copy from buffer
+		if s.buffer.Len() > 0 { // copy from buffer into b
 			n, _ = s.buffer.Read(b)
 			s.mu.Unlock()
 			return n, nil
@@ -186,26 +189,26 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 
 		if !s.rd.IsZero() {
-			if time.Now().After(s.rd) { // timeout
+			if time.Now().After(s.rd) { // read timeout
 				s.mu.Unlock()
 				return 0, errTimeout{}
 			}
 		}
 
-		if size := s.kcp.PeekSize(); size > 0 { // data arrived
+		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
 			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
-			if len(b) >= size { // direct write
+			if len(b) >= size { // direct write to b
 				s.kcp.Recv(b)
 				s.mu.Unlock()
 				return size, nil
 			}
 
-			if len(s.recvbuf) < size { // resize buf
+			if len(s.recvbuf) < size { // resize kcp receive buffer
 				s.recvbuf = make([]byte, size)
 			}
 			s.kcp.Recv(s.recvbuf)
-			n = copy(b, s.recvbuf[:size])     // direct copy
-			s.buffer.Write(s.recvbuf[n:size]) // save rests to bytes.Buffer
+			n = copy(b, s.recvbuf[:size])     // direct copy to b
+			s.buffer.Write(s.recvbuf[n:size]) // save rest bytes to bytes.Buffer
 			s.mu.Unlock()
 			return n, nil
 		}
@@ -232,7 +235,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	}
 }
 
-// Write implements the Conn Write method.
+// Write implements net.Conn
 func (s *UDPSession) Write(b []byte) (n int, err error) {
 	for {
 		s.mu.Lock()
@@ -242,7 +245,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		}
 
 		if !s.wd.IsZero() {
-			if time.Now().After(s.wd) { // timeout
+			if time.Now().After(s.wd) { // write timeout
 				s.mu.Unlock()
 				return 0, errTimeout{}
 			}
