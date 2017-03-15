@@ -38,6 +38,9 @@ const (
 
 	// FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
 	rxFECMulti = 3
+
+	// accept backlog
+	acceptBacklog = 128
 )
 
 const (
@@ -251,6 +254,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			}
 		}
 
+		// api flow control
 		if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
 			n = len(b)
 			for {
@@ -428,6 +432,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 
 // output pipeline entry
 // steps for output data processing:
+// 0. Header extends
 // 1. FEC
 // 2. CRC32
 // 3. Encryption
@@ -676,13 +681,13 @@ type (
 		fec          *FEC           // FEC mock initialization
 		conn         net.PacketConn // the underlying packet connection
 
-		sessions    map[string]*UDPSession // all sessions accepted by this Listener
-		chAccepts   chan *UDPSession       // Listen() backlog
-		chDeadlinks chan net.Addr          // session close queue
-		headerSize  int                    // the overall header size added before KCP frame
-		die         chan struct{}          // notify the listener has closed
-		rd          atomic.Value           // read deadline for Accept()
-		wd          atomic.Value
+		sessions        map[string]*UDPSession // all sessions accepted by this Listener
+		chAccepts       chan *UDPSession       // Listen() backlog
+		chSessionClosed chan net.Addr          // session close queue
+		headerSize      int                    // the overall header size added before KCP frame
+		die             chan struct{}          // notify the listener has closed
+		rd              atomic.Value           // read deadline for Accept()
+		wd              atomic.Value
 	}
 
 	// incoming packet
@@ -721,24 +726,26 @@ func (l *Listener) monitor() {
 				addr := from.String()
 				s, ok := l.sessions[addr]
 				if !ok { // new session
-					var conv uint32
-					convValid := false
-					if l.fec != nil {
-						isfec := binary.LittleEndian.Uint16(data[4:])
-						if isfec == typeData {
-							conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+					if len(l.chAccepts) < cap(l.chAccepts) { // do not let new session overwhelm accept queue
+						var conv uint32
+						convValid := false
+						if l.fec != nil {
+							isfec := binary.LittleEndian.Uint16(data[4:])
+							if isfec == typeData {
+								conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+								convValid = true
+							}
+						} else {
+							conv = binary.LittleEndian.Uint32(data)
 							convValid = true
 						}
-					} else {
-						conv = binary.LittleEndian.Uint32(data)
-						convValid = true
-					}
 
-					if convValid {
-						s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
-						s.kcpInput(data)
-						l.sessions[addr] = s
-						l.chAccepts <- s
+						if convValid {
+							s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
+							s.kcpInput(data)
+							l.sessions[addr] = s
+							l.chAccepts <- s
+						}
 					}
 				} else {
 					s.kcpInput(data)
@@ -746,7 +753,7 @@ func (l *Listener) monitor() {
 			}
 
 			xmitBuf.Put(raw)
-		case deadlink := <-l.chDeadlinks:
+		case deadlink := <-l.chSessionClosed:
 			delete(l.sessions, deadlink.String())
 		case <-l.die:
 			return
@@ -844,7 +851,7 @@ func (l *Listener) Close() error {
 // closeSession notify the listener that a session has closed
 func (l *Listener) closeSession(remote net.Addr) {
 	select {
-	case l.chDeadlinks <- remote:
+	case l.chSessionClosed <- remote:
 	case <-l.die:
 	}
 }
@@ -879,8 +886,8 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l := new(Listener)
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
-	l.chAccepts = make(chan *UDPSession, 1024)
-	l.chDeadlinks = make(chan net.Addr, 1024)
+	l.chAccepts = make(chan *UDPSession, acceptBacklog)
+	l.chSessionClosed = make(chan net.Addr)
 	l.die = make(chan struct{})
 	l.dataShards = dataShards
 	l.parityShards = parityShards
