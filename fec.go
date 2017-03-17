@@ -32,7 +32,7 @@ type (
 
 		// caches
 		decodeCache [][]byte
-		shardsflag  []bool
+		flagCache   []bool
 
 		// RS decoder
 		enc reedsolomon.Encoder
@@ -58,7 +58,7 @@ func newFECDecoder(rxlimit, dataShards, parityShards int) *FECDecoder {
 	}
 	fec.enc = enc
 	fec.decodeCache = make([][]byte, fec.shardSize)
-	fec.shardsflag = make([]bool, fec.shardSize)
+	fec.flagCache = make([]bool, fec.shardSize)
 	return fec
 }
 
@@ -119,7 +119,7 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 		first := -1
 		maxlen := 0
 		shards := dec.decodeCache
-		shardsflag := dec.shardsflag
+		shardsflag := dec.flagCache
 		for k := range dec.decodeCache {
 			shards[k] = nil
 			shardsflag[k] = false
