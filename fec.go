@@ -35,7 +35,7 @@ type (
 		flagCache   []bool
 
 		// RS decoder
-		enc reedsolomon.Encoder
+		codec reedsolomon.Encoder
 	}
 )
 
@@ -56,7 +56,7 @@ func newFECDecoder(rxlimit, dataShards, parityShards int) *FECDecoder {
 	if err != nil {
 		return nil
 	}
-	fec.enc = enc
+	fec.codec = enc
 	fec.decodeCache = make([][]byte, fec.shardSize)
 	fec.flagCache = make([]bool, fec.shardSize)
 	return fec
@@ -162,7 +162,7 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 					xorBytes(shards[k][dlen:], shards[k][dlen:], shards[k][dlen:])
 				}
 			}
-			if err := dec.enc.Reconstruct(shards); err == nil {
+			if err := dec.codec.Reconstruct(shards); err == nil {
 				for k := range shards[:dec.dataShards] {
 					if !shardsflag[k] {
 						recovered = append(recovered, shards[k])
@@ -214,7 +214,7 @@ type (
 		encodeCache [][]byte
 
 		// RS encoder
-		enc reedsolomon.Encoder
+		codec reedsolomon.Encoder
 	}
 )
 
@@ -234,7 +234,7 @@ func newFECEncoder(dataShards, parityShards, offset int) *FECEncoder {
 	if err != nil {
 		return nil
 	}
-	fec.enc = enc
+	fec.codec = enc
 
 	// caches
 	fec.encodeCache = make([][]byte, fec.shardSize)
@@ -278,7 +278,7 @@ func (enc *FECEncoder) Encode(b []byte) (ps [][]byte) {
 		}
 
 		// rs encode
-		if err := enc.enc.Encode(cache); err == nil {
+		if err := enc.codec.Encode(cache); err == nil {
 			ps = enc.shardCache[enc.dataShards:]
 			for k := range ps {
 				enc.markFEC(ps[k][enc.headerOffset:])
