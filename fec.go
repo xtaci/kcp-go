@@ -22,7 +22,7 @@ type (
 		data  []byte
 	}
 
-	// FECDecoder
+	// FECDecoder for decoding incoming packets
 	FECDecoder struct {
 		rxlimit      int // queue size limit
 		dataShards   int
@@ -63,7 +63,7 @@ func newFECDecoder(rxlimit, dataShards, parityShards int) *FECDecoder {
 }
 
 // decodeBytes a fec packet
-func (fec *FECDecoder) decodeBytes(data []byte) fecPacket {
+func (dec *FECDecoder) decodeBytes(data []byte) fecPacket {
 	var pkt fecPacket
 	pkt.seqid = binary.LittleEndian.Uint32(data)
 	pkt.flag = binary.LittleEndian.Uint16(data[4:])
@@ -75,15 +75,15 @@ func (fec *FECDecoder) decodeBytes(data []byte) fecPacket {
 }
 
 // Decode a fec packet
-func (fec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
+func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 	// insertion
-	n := len(fec.rx) - 1
+	n := len(dec.rx) - 1
 	insertIdx := 0
 	for i := n; i >= 0; i-- {
-		if pkt.seqid == fec.rx[i].seqid { // de-duplicate
+		if pkt.seqid == dec.rx[i].seqid { // de-duplicate
 			xmitBuf.Put(pkt.data)
 			return nil
-		} else if _itimediff(pkt.seqid, fec.rx[i].seqid) > 0 { // insertion
+		} else if _itimediff(pkt.seqid, dec.rx[i].seqid) > 0 { // insertion
 			insertIdx = i + 1
 			break
 		}
@@ -91,70 +91,70 @@ func (fec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 
 	// insert into ordered rx queue
 	if insertIdx == n+1 {
-		fec.rx = append(fec.rx, pkt)
+		dec.rx = append(dec.rx, pkt)
 	} else {
-		fec.rx = append(fec.rx, fecPacket{})
-		copy(fec.rx[insertIdx+1:], fec.rx[insertIdx:]) // shift right
-		fec.rx[insertIdx] = pkt
+		dec.rx = append(dec.rx, fecPacket{})
+		copy(dec.rx[insertIdx+1:], dec.rx[insertIdx:]) // shift right
+		dec.rx[insertIdx] = pkt
 	}
 
 	// shard range for current packet
-	shardBegin := pkt.seqid - pkt.seqid%uint32(fec.shardSize)
-	shardEnd := shardBegin + uint32(fec.shardSize) - 1
+	shardBegin := pkt.seqid - pkt.seqid%uint32(dec.shardSize)
+	shardEnd := shardBegin + uint32(dec.shardSize) - 1
 
 	// max search range in ordered queue for current shard
-	searchBegin := insertIdx - int(pkt.seqid%uint32(fec.shardSize))
+	searchBegin := insertIdx - int(pkt.seqid%uint32(dec.shardSize))
 	if searchBegin < 0 {
 		searchBegin = 0
 	}
-	searchEnd := searchBegin + fec.shardSize - 1
-	if searchEnd >= len(fec.rx) {
-		searchEnd = len(fec.rx) - 1
+	searchEnd := searchBegin + dec.shardSize - 1
+	if searchEnd >= len(dec.rx) {
+		searchEnd = len(dec.rx) - 1
 	}
 
 	// re-construct datashards
-	if searchEnd > searchBegin && searchEnd-searchBegin+1 >= fec.dataShards {
+	if searchEnd > searchBegin && searchEnd-searchBegin+1 >= dec.dataShards {
 		numshard := 0
 		numDataShard := 0
 		first := -1
 		maxlen := 0
-		shards := fec.decodeCache
-		shardsflag := fec.shardsflag
-		for k := range fec.decodeCache {
+		shards := dec.decodeCache
+		shardsflag := dec.shardsflag
+		for k := range dec.decodeCache {
 			shards[k] = nil
 			shardsflag[k] = false
 		}
 
 		for i := searchBegin; i <= searchEnd; i++ {
-			seqid := fec.rx[i].seqid
+			seqid := dec.rx[i].seqid
 			if _itimediff(seqid, shardEnd) > 0 {
 				break
 			} else if _itimediff(seqid, shardBegin) >= 0 {
-				shards[seqid%uint32(fec.shardSize)] = fec.rx[i].data
-				shardsflag[seqid%uint32(fec.shardSize)] = true
+				shards[seqid%uint32(dec.shardSize)] = dec.rx[i].data
+				shardsflag[seqid%uint32(dec.shardSize)] = true
 				numshard++
-				if fec.rx[i].flag == typeData {
+				if dec.rx[i].flag == typeData {
 					numDataShard++
 				}
 				if numshard == 1 {
 					first = i
 				}
-				if len(fec.rx[i].data) > maxlen {
-					maxlen = len(fec.rx[i].data)
+				if len(dec.rx[i].data) > maxlen {
+					maxlen = len(dec.rx[i].data)
 				}
 			}
 		}
 
-		if numDataShard == fec.dataShards { // no lost
+		if numDataShard == dec.dataShards { // no lost
 			for i := first; i < first+numshard; i++ { // free
-				xmitBuf.Put(fec.rx[i].data)
+				xmitBuf.Put(dec.rx[i].data)
 			}
-			copy(fec.rx[first:], fec.rx[first+numshard:])
+			copy(dec.rx[first:], dec.rx[first+numshard:])
 			for i := 0; i < numshard; i++ { // dereference
-				fec.rx[len(fec.rx)-1-i] = fecPacket{}
+				dec.rx[len(dec.rx)-1-i] = fecPacket{}
 			}
-			fec.rx = fec.rx[:len(fec.rx)-numshard]
-		} else if numshard >= fec.dataShards { // recoverable
+			dec.rx = dec.rx[:len(dec.rx)-numshard]
+		} else if numshard >= dec.dataShards { // recoverable
 			for k := range shards {
 				if shards[k] != nil {
 					dlen := len(shards[k])
@@ -162,8 +162,8 @@ func (fec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 					xorBytes(shards[k][dlen:], shards[k][dlen:], shards[k][dlen:])
 				}
 			}
-			if err := fec.enc.Reconstruct(shards); err == nil {
-				for k := range shards[:fec.dataShards] {
+			if err := dec.enc.Reconstruct(shards); err == nil {
+				for k := range shards[:dec.dataShards] {
 					if !shardsflag[k] {
 						recovered = append(recovered, shards[k])
 					}
@@ -171,31 +171,31 @@ func (fec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 			}
 
 			for i := first; i < first+numshard; i++ { // free
-				xmitBuf.Put(fec.rx[i].data)
+				xmitBuf.Put(dec.rx[i].data)
 			}
-			copy(fec.rx[first:], fec.rx[first+numshard:])
+			copy(dec.rx[first:], dec.rx[first+numshard:])
 			for i := 0; i < numshard; i++ { // dereference
-				fec.rx[len(fec.rx)-1-i] = fecPacket{}
+				dec.rx[len(dec.rx)-1-i] = fecPacket{}
 			}
-			fec.rx = fec.rx[:len(fec.rx)-numshard]
+			dec.rx = dec.rx[:len(dec.rx)-numshard]
 		}
 	}
 
 	// keep rxlimit
-	if len(fec.rx) > fec.rxlimit {
-		if fec.rx[0].flag == typeData { // record unrecoverable data
+	if len(dec.rx) > dec.rxlimit {
+		if dec.rx[0].flag == typeData { // record unrecoverable data
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
-		xmitBuf.Put(fec.rx[0].data) // free
-		copy(fec.rx, fec.rx[1:])    // shift left
-		fec.rx[len(fec.rx)-1] = fecPacket{}
-		fec.rx = fec.rx[:len(fec.rx)-1]
+		xmitBuf.Put(dec.rx[0].data) // free
+		copy(dec.rx, dec.rx[1:])    // shift left
+		dec.rx[len(dec.rx)-1] = fecPacket{}
+		dec.rx = dec.rx[:len(dec.rx)-1]
 	}
 	return
 }
 
 type (
-	// FECEncoder
+	// FECEncoder for encoding outgoing packets
 	FECEncoder struct {
 		dataShards   int
 		parityShards int
@@ -294,14 +294,14 @@ func (enc *FECEncoder) Encode(b []byte) (ps [][]byte) {
 	return
 }
 
-func (fec *FECEncoder) markData(data []byte) {
-	binary.LittleEndian.PutUint32(data, fec.next)
+func (enc *FECEncoder) markData(data []byte) {
+	binary.LittleEndian.PutUint32(data, enc.next)
 	binary.LittleEndian.PutUint16(data[4:], typeData)
-	fec.next++
+	enc.next++
 }
 
-func (fec *FECEncoder) markFEC(data []byte) {
-	binary.LittleEndian.PutUint32(data, fec.next)
+func (enc *FECEncoder) markFEC(data []byte) {
+	binary.LittleEndian.PutUint32(data, enc.next)
 	binary.LittleEndian.PutUint16(data[4:], typeFEC)
-	fec.next = (fec.next + 1) % fec.paws
+	enc.next = (enc.next + 1) % enc.paws
 }

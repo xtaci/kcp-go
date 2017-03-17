@@ -634,7 +634,7 @@ type (
 		block        BlockCrypt     // block encryption
 		dataShards   int            // FEC data shard
 		parityShards int            // FEC parity shard
-		fecEnabled   bool           // FEC flag
+		fecDecoder   *FECDecoder    // FEC mock initialization
 		conn         net.PacketConn // the underlying packet connection
 
 		sessions        map[string]*UDPSession // all sessions accepted by this Listener
@@ -685,7 +685,7 @@ func (l *Listener) monitor() {
 					if len(l.chAccepts) < cap(l.chAccepts) { // do not let new session overwhelm accept queue
 						var conv uint32
 						convValid := false
-						if l.fecEnabled {
+						if l.fecDecoder != nil {
 							isfec := binary.LittleEndian.Uint16(data[4:])
 							if isfec == typeData {
 								conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
@@ -848,16 +848,13 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.dataShards = dataShards
 	l.parityShards = parityShards
 	l.block = block
-
-	if dataShards > 0 && parityShards > 0 {
-		l.fecEnabled = true
-	}
+	l.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
 
 	// calculate header size
 	if l.block != nil {
 		l.headerSize += cryptHeaderSize
 	}
-	if l.fecEnabled {
+	if l.fecDecoder != nil {
 		l.headerSize += fecHeaderSizePlus2
 	}
 
