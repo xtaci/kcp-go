@@ -15,34 +15,31 @@ const (
 )
 
 type (
-	// FEC defines forward error correction for packets
-	FEC struct {
-		rxlimit      int // queue size limit
-		dataShards   int
-		parityShards int
-		shardSize    int
-		next         uint32      // next seqid
-		paws         uint32      // Protect Against Wrapped Sequence numbers
-		rx           []fecPacket // ordered receive queue
-
-		// caches
-		decodeCache [][]byte
-		encodeCache [][]byte
-		shardsflag  []bool
-
-		// RS encoder
-		enc reedsolomon.Encoder
-	}
-
 	// fecPacket is a decoded FEC packet
 	fecPacket struct {
 		seqid uint32
 		flag  uint16
 		data  []byte
 	}
+
+	// FECDecoder
+	FECDecoder struct {
+		rxlimit      int // queue size limit
+		dataShards   int
+		parityShards int
+		shardSize    int
+		rx           []fecPacket // ordered receive queue
+
+		// caches
+		decodeCache [][]byte
+		shardsflag  []bool
+
+		// RS decoder
+		enc reedsolomon.Encoder
+	}
 )
 
-func newFEC(rxlimit, dataShards, parityShards int) *FEC {
+func newFECDecoder(rxlimit, dataShards, parityShards int) *FECDecoder {
 	if dataShards <= 0 || parityShards <= 0 {
 		return nil
 	}
@@ -50,25 +47,23 @@ func newFEC(rxlimit, dataShards, parityShards int) *FEC {
 		return nil
 	}
 
-	fec := new(FEC)
+	fec := new(FECDecoder)
 	fec.rxlimit = rxlimit
 	fec.dataShards = dataShards
 	fec.parityShards = parityShards
 	fec.shardSize = dataShards + parityShards
-	fec.paws = (0xffffffff/uint32(fec.shardSize) - 1) * uint32(fec.shardSize)
 	enc, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithMaxGoroutines(1))
 	if err != nil {
 		return nil
 	}
 	fec.enc = enc
 	fec.decodeCache = make([][]byte, fec.shardSize)
-	fec.encodeCache = make([][]byte, fec.shardSize)
 	fec.shardsflag = make([]bool, fec.shardSize)
 	return fec
 }
 
 // decodeBytes a fec packet
-func (fec *FEC) decodeBytes(data []byte) fecPacket {
+func (fec *FECDecoder) decodeBytes(data []byte) fecPacket {
 	var pkt fecPacket
 	pkt.seqid = binary.LittleEndian.Uint32(data)
 	pkt.flag = binary.LittleEndian.Uint16(data[4:])
@@ -79,20 +74,8 @@ func (fec *FEC) decodeBytes(data []byte) fecPacket {
 	return pkt
 }
 
-func (fec *FEC) markData(data []byte) {
-	binary.LittleEndian.PutUint32(data, fec.next)
-	binary.LittleEndian.PutUint16(data[4:], typeData)
-	fec.next++
-}
-
-func (fec *FEC) markFEC(data []byte) {
-	binary.LittleEndian.PutUint32(data, fec.next)
-	binary.LittleEndian.PutUint16(data[4:], typeFEC)
-	fec.next = (fec.next + 1) % fec.paws
-}
-
 // Decode a fec packet
-func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
+func (fec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 	// insertion
 	n := len(fec.rx) - 1
 	insertIdx := 0
@@ -211,18 +194,114 @@ func (fec *FEC) Decode(pkt fecPacket) (recovered [][]byte) {
 	return
 }
 
-// Encode a group of datashards
-func (fec *FEC) Encode(data [][]byte, offset, maxlen int) (ecc [][]byte) {
-	if len(data) != fec.shardSize {
+type (
+	// FECEncoder
+	FECEncoder struct {
+		dataShards   int
+		parityShards int
+		shardSize    int
+		paws         uint32 // Protect Against Wrapped Sequence numbers
+		next         uint32 // next seqid
+
+		shardCount int // count the number of datashards collected
+		maxSize    int // record maximum data length in datashard
+
+		headerOffset  int // FEC header offset
+		payloadOffset int // FEC payload offset
+
+		// caches
+		shardCache  [][]byte
+		encodeCache [][]byte
+
+		// RS encoder
+		enc reedsolomon.Encoder
+	}
+)
+
+func newFECEncoder(dataShards, parityShards, offset int) *FECEncoder {
+	if dataShards <= 0 || parityShards <= 0 {
 		return nil
 	}
-	shards := fec.encodeCache
-	for k := range shards {
-		shards[k] = data[k][offset:maxlen]
+	fec := new(FECEncoder)
+	fec.dataShards = dataShards
+	fec.parityShards = parityShards
+	fec.shardSize = dataShards + parityShards
+	fec.paws = (0xffffffff/uint32(fec.shardSize) - 1) * uint32(fec.shardSize)
+	fec.headerOffset = offset
+	fec.payloadOffset = fec.headerOffset + fecHeaderSize
+
+	enc, err := reedsolomon.New(dataShards, parityShards, reedsolomon.WithMaxGoroutines(1))
+	if err != nil {
+		return nil
+	}
+	fec.enc = enc
+
+	// caches
+	fec.encodeCache = make([][]byte, fec.shardSize)
+	fec.shardCache = make([][]byte, fec.shardSize)
+	for k := range fec.shardCache {
+		fec.shardCache[k] = make([]byte, mtuLimit)
+	}
+	return fec
+}
+
+// Encode the packet, output parity shards if we have enough datashards
+// the content of returned parityshards will change in next Encode
+func (enc *FECEncoder) Encode(b []byte) (ps [][]byte) {
+	enc.markData(b[enc.headerOffset:])
+	binary.LittleEndian.PutUint16(b[enc.payloadOffset:], uint16(len(b[enc.payloadOffset:])))
+
+	// copy data to fec datashards
+	sz := len(b)
+	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
+	copy(enc.shardCache[enc.shardCount], b)
+	enc.shardCount++
+
+	// record max datashard length
+	if sz > enc.maxSize {
+		enc.maxSize = sz
 	}
 
-	if err := fec.enc.Encode(shards); err != nil {
-		return nil
+	//  calculate Reed-Solomon Erasure Code
+	if enc.shardCount == enc.dataShards {
+		// bzero each datashard's tail
+		for i := 0; i < enc.dataShards; i++ {
+			shard := enc.shardCache[i]
+			slen := len(shard)
+			xorBytes(shard[slen:enc.maxSize], shard[slen:enc.maxSize], shard[slen:enc.maxSize])
+		}
+
+		// construct equal-sized slice with stripped header
+		cache := enc.encodeCache
+		for k := range cache {
+			cache[k] = enc.shardCache[k][enc.payloadOffset:enc.maxSize]
+		}
+
+		// rs encode
+		if err := enc.enc.Encode(cache); err == nil {
+			ps = enc.shardCache[enc.dataShards:]
+			for k := range ps {
+				enc.markFEC(ps[k][enc.headerOffset:])
+				ps[k] = ps[k][:enc.maxSize]
+			}
+		}
+
+		// reset counters to zero
+		enc.shardCount = 0
+		enc.maxSize = 0
 	}
-	return data[fec.dataShards:]
+
+	return
+}
+
+func (fec *FECEncoder) markData(data []byte) {
+	binary.LittleEndian.PutUint32(data, fec.next)
+	binary.LittleEndian.PutUint16(data[4:], typeData)
+	fec.next++
+}
+
+func (fec *FECEncoder) markFEC(data []byte) {
+	binary.LittleEndian.PutUint32(data, fec.next)
+	binary.LittleEndian.PutUint16(data[4:], typeFEC)
+	fec.next = (fec.next + 1) % fec.paws
 }
