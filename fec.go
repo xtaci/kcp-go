@@ -184,8 +184,8 @@ func (dec *FECDecoder) freeRange(first, n int, q []fecPacket) []fecPacket {
 		xmitBuf.Put(q[i].data)
 	}
 	copy(q[first:], q[first+n:])
-	for i := 0; i < n; i++ { // dereference
-		q[len(q)-1-i] = fecPacket{}
+	for i := 0; i < n; i++ { // dereference data
+		q[len(q)-1-i].data = nil
 	}
 	return q[:len(q)-n]
 }
