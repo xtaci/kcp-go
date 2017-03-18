@@ -90,6 +90,7 @@ type (
 		headerSize     int           // the overall header size added before KCP frame
 		updateInterval time.Duration // interval in seconds to call kcp.flush()
 		ackNoDelay     bool          // send ack immediately for each incoming packet
+		writeDelay     bool          // delay kcp.flush() for Write() for bulk transfer
 
 		// notifications
 		die          chan struct{} // notify session has Closed
@@ -256,7 +257,9 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 				}
 			}
 
-			s.kcp.flush(false)
+			if !s.writeDelay {
+				s.kcp.flush(false)
+			}
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 			return n, nil
@@ -334,6 +337,13 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	defer s.mu.Unlock()
 	s.wd = t
 	return nil
+}
+
+// SetWriteDelay delays write for bulk transfer until the next update interval
+func (s *UDPSession) SetWriteDelay(delay bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.writeDelay = delay
 }
 
 // SetWindowSize set maximum window size
