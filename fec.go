@@ -113,11 +113,10 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 	}
 
 	// re-construct datashards
-	if searchEnd > searchBegin && searchEnd-searchBegin+1 >= dec.dataShards {
-		numshard := 0
-		numDataShard := 0
-		first := -1
-		maxlen := 0
+	if searchEnd-searchBegin+1 >= dec.dataShards {
+		var numshard, numDataShard, first, maxlen int
+
+		// zero cache
 		shards := dec.decodeCache
 		shardsflag := dec.flagCache
 		for k := range dec.decodeCache {
@@ -125,6 +124,7 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 			shardsflag[k] = false
 		}
 
+		// shard assembly
 		for i := searchBegin; i <= searchEnd; i++ {
 			seqid := dec.rx[i].seqid
 			if _itimediff(seqid, shardEnd) > 0 {
@@ -145,16 +145,11 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 			}
 		}
 
-		if numDataShard == dec.dataShards { // no lost
-			for i := first; i < first+numshard; i++ { // free
-				xmitBuf.Put(dec.rx[i].data)
-			}
-			copy(dec.rx[first:], dec.rx[first+numshard:])
-			for i := 0; i < numshard; i++ { // dereference
-				dec.rx[len(dec.rx)-1-i] = fecPacket{}
-			}
-			dec.rx = dec.rx[:len(dec.rx)-numshard]
-		} else if numshard >= dec.dataShards { // recoverable
+		if numDataShard == dec.dataShards {
+			// case 1:  no lost data shards
+			dec.rx = dec.freeRange(first, numshard, dec.rx)
+		} else if numshard >= dec.dataShards {
+			// case 2: data shard lost, but  recoverable from parity shard
 			for k := range shards {
 				if shards[k] != nil {
 					dlen := len(shards[k])
@@ -169,15 +164,7 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 					}
 				}
 			}
-
-			for i := first; i < first+numshard; i++ { // free
-				xmitBuf.Put(dec.rx[i].data)
-			}
-			copy(dec.rx[first:], dec.rx[first+numshard:])
-			for i := 0; i < numshard; i++ { // dereference
-				dec.rx[len(dec.rx)-1-i] = fecPacket{}
-			}
-			dec.rx = dec.rx[:len(dec.rx)-numshard]
+			dec.rx = dec.freeRange(first, numshard, dec.rx)
 		}
 	}
 
@@ -186,12 +173,21 @@ func (dec *FECDecoder) Decode(pkt fecPacket) (recovered [][]byte) {
 		if dec.rx[0].flag == typeData { // record unrecoverable data
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
-		xmitBuf.Put(dec.rx[0].data) // free
-		copy(dec.rx, dec.rx[1:])    // shift left
-		dec.rx[len(dec.rx)-1] = fecPacket{}
-		dec.rx = dec.rx[:len(dec.rx)-1]
+		dec.rx = dec.freeRange(0, 1, dec.rx)
 	}
 	return
+}
+
+// free a range of fecPacket, and zero for GC recycling
+func (dec *FECDecoder) freeRange(first, n int, q []fecPacket) []fecPacket {
+	for i := first; i < first+n; i++ { // free
+		xmitBuf.Put(q[i].data)
+	}
+	copy(q[first:], q[first+n:])
+	for i := 0; i < n; i++ { // dereference
+		q[len(q)-1-i] = fecPacket{}
+	}
+	return q[:len(q)-n]
 }
 
 type (
