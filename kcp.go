@@ -284,20 +284,20 @@ func (kcp *KCP) Send(buffer []byte) int {
 	if kcp.stream != 0 {
 		n := len(kcp.snd_queue)
 		if n > 0 {
-			old := &kcp.snd_queue[n-1]
-			if len(old.data) < int(kcp.mss) {
-				capacity := int(kcp.mss) - len(old.data)
+			seg := &kcp.snd_queue[n-1]
+			if len(seg.data) < int(kcp.mss) {
+				capacity := int(kcp.mss) - len(seg.data)
 				extend := capacity
 				if len(buffer) < capacity {
 					extend = len(buffer)
 				}
-				seg := kcp.newSegment(len(old.data) + extend)
-				seg.frg = 0
-				copy(seg.data, old.data)
-				copy(seg.data[len(old.data):], buffer)
+
+				// grow slice, the underlying cap is guaranteed to
+				// be larger than kcp.mss
+				oldlen := len(seg.data)
+				seg.data = seg.data[:oldlen+extend]
+				copy(seg.data[oldlen:], buffer)
 				buffer = buffer[extend:]
-				kcp.delSegment(*old)
-				kcp.snd_queue[n-1] = seg
 			}
 		}
 
