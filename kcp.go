@@ -766,8 +766,8 @@ func (kcp *KCP) flush(ackOnly bool) {
 	}
 
 	// check for retransmissions
+	current := currentMs()
 	for k := 0; k < len(kcp.snd_buf)-newSegsCount; k++ {
-		current := currentMs()
 		segment := &kcp.snd_buf[k]
 		needsend := false
 		if _itimediff(current, segment.resendts) >= 0 { // RTO
@@ -810,6 +810,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 
 			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
+				current = currentMs() // time update for a blocking call
 				ptr = buffer
 			}
 
