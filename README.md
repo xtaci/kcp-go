@@ -137,11 +137,11 @@ BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
 BenchmarkLoopList-4    	100000000	        54.6 ns/op
 ```
 
-List structure introduces *heavy cache misses* compared to slice which owns better *locality*, 5000 connections with 32 window size and 20ms interval will cost 6us using slice with 0.03% CPU usage, and 8.7ms for list with 43.5% CPU for each `kcp.flush()`.
+List structure introduces **heavy cache misses** compared to slice which owns better **locality**, 5000 connections with 32 window size and 20ms interval will cost 6us/0.03%(cpu) using slice, and 8.7ms/43.5%(cpu) for list for each `kcp.flush()`.
 
 2. Timing accuracy vs. syscall clock_gettime
 
-Timing is critical to RTT estimator, inaccurate timing introduces false retransmissions in KCP, but calling `time.Now()` costs about 42 cycles(10.5ns on 4GHz CPU, 15.6ns on my MacBook Pro 2.7GHz), the benchmark for time.Now():
+Timing is **critical** to **RTT estimator**, inaccurate timing introduces false retransmissions in KCP, but calling `time.Now()` costs 42 cycles(10.5ns on 4GHz CPU, 15.6ns on my MacBook Pro 2.7GHz), the benchmark for time.Now():
 
 https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
 
@@ -149,7 +149,7 @@ https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
 BenchmarkNow-4         	100000000	        15.6 ns/op
 ```
 
-In kcp-go, each `kcp.output()` will update the current time after function return, and each `kcp.flush()` will get current time in entering, for most of the time, 5000 connections costs 5000 * 15.6ns = 78us(no packet needs to be sent by `kcp.output()`), as for 10MB/s data transfering with 1400 MTU, around 7500 `kcp.output()` will be called and costs 117us for `time.Now()`.
+In kcp-go, after each `kcp.output()` function call, current time will be updated upon return, and each `kcp.flush()` will get current time once. For most of the time, 5000 connections costs 5000 * 15.6ns = 78us(no packet needs to be sent by `kcp.output()`), as for 10MB/s data transfering with 1400 MTU, `kcp.output()` will be called around 7500 times and costs 117us for `time.Now()` in **every second**.
 
 
 ## Tuning
