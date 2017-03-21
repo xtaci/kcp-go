@@ -122,6 +122,33 @@ PASS
 ok  	github.com/xtaci/kcp-go	36.141s
 ```
 
+## Design Considerations
+
+1. slice vs. container/list
+
+kcp.flush() loops through the send queue for retransmission checking for every 20ms(interval).
+
+I've wrote a benchmark for comparing sequential loop through slice and list here:
+
+https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go
+
+
+```
+BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
+BenchmarkLoopList-4    	100000000	        54.6 ns/op
+```
+
+List structure introduces heavy cache misses compared to slice which as better locality, 5000 connections with 32 window size and 20ms interval will cost 6us using slice with 0.03% CPU usage, and 8.3ms for list with 41.5% CPU for each kcp.flush().
+
+2. Timing accuracy vs. syscall clock_gettime
+
+Timing is critical to RTT estimator, inaccurate timing introduces false retransmissions in KCP, but calling time.Now() costs about 42 cycles(10.5ns on 4GHz CPU), the benchmark for time.Now():
+
+https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
+
+In kcp-go, each kcp.output() will update the current time, and each kcp.flush() will update for at least once, for most of the time, 5000 connections costs 5000 * 10.5ns = 52us(without calling kcp.output()), as for 10MB/s data transfering with 1400 MTU, around 7500 kcp.output() will be called and costs 79us for time.Now().
+
+
 ## Tuning
 
 Q: I'm running > 3000 connections on my server. the CPU utilization is high.
