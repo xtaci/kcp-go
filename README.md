@@ -137,11 +137,11 @@ BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
 BenchmarkLoopList-4    	100000000	        54.6 ns/op
 ```
 
-List structure introduces heavy cache misses compared to slice which as better locality, 5000 connections with 32 window size and 20ms interval will cost 6us using slice with 0.03% CPU usage, and 8.3ms for list with 41.5% CPU for each kcp.flush().
+List structure introduces heavy cache misses compared to slice which owns better locality, 5000 connections with 32 window size and 20ms interval will cost 6us using slice with 0.03% CPU usage, and 8.7ms for list with 43.5% CPU for each kcp.flush().
 
 2. Timing accuracy vs. syscall clock_gettime
 
-Timing is critical to RTT estimator, inaccurate timing introduces false retransmissions in KCP, but calling time.Now() costs about 42 cycles(10.5ns on 4GHz CPU), the benchmark for time.Now():
+Timing is critical to RTT estimator, inaccurate timing introduces false retransmissions in KCP, but calling time.Now() costs about 42 cycles(10.5ns on 4GHz CPU, 15.6ns on my MacBook Pro 2.7GHz), the benchmark for time.Now():
 
 https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
 
