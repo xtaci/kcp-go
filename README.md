@@ -132,7 +132,6 @@ I've wrote a benchmark for comparing sequential loop through slice and list here
 
 https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go
 
-
 ```
 BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
 BenchmarkLoopList-4    	100000000	        54.6 ns/op
@@ -146,7 +145,11 @@ Timing is critical to RTT estimator, inaccurate timing introduces false retransm
 
 https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
 
-In kcp-go, each kcp.output() will update the current time, and each kcp.flush() will update for at least once, for most of the time, 5000 connections costs 5000 * 10.5ns = 52us(without calling kcp.output()), as for 10MB/s data transfering with 1400 MTU, around 7500 kcp.output() will be called and costs 79us for time.Now().
+```
+BenchmarkNow-4         	100000000	        15.6 ns/op
+```
+
+In kcp-go, each kcp.output() will update the current time, and each kcp.flush() will update for at least once, for most of the time, 5000 connections costs 5000 * 15.6ns = 78us(without calling kcp.output()), as for 10MB/s data transfering with 1400 MTU, around 7500 kcp.output() will be called and costs 117us for time.Now().
 
 
 ## Tuning
