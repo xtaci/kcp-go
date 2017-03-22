@@ -625,16 +625,13 @@ func (kcp *KCP) wnd_unused() int32 {
 
 // flush pending data
 func (kcp *KCP) flush(ackOnly bool) {
-	buffer := kcp.buffer
-	change := 0
-	lost := false
-
 	var seg Segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
 	seg.wnd = uint32(kcp.wnd_unused())
 	seg.una = kcp.rcv_nxt
 
+	buffer := kcp.buffer
 	// flush acknowledges
 	ptr := buffer
 	for i, ack := range kcp.acklist {
@@ -741,36 +738,19 @@ func (kcp *KCP) flush(ackOnly bool) {
 	// counters
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
 
-	// send new segments
-	for k := len(kcp.snd_buf) - newSegsCount; k < len(kcp.snd_buf); k++ {
-		current := currentMs()
-		segment := &kcp.snd_buf[k]
-		segment.xmit++
-		segment.rto = kcp.rx_rto
-		segment.resendts = current + segment.rto
-		segment.ts = current
-		segment.wnd = seg.wnd
-		segment.una = kcp.rcv_nxt
-
-		size := len(buffer) - len(ptr)
-		need := IKCP_OVERHEAD + len(segment.data)
-
-		if size+need > int(kcp.mtu) {
-			kcp.output(buffer, size)
-			ptr = buffer
-		}
-
-		ptr = segment.encode(ptr)
-		copy(ptr, segment.data)
-		ptr = ptr[len(segment.data):]
-	}
-
-	// check for retransmissions
+	change := 0
+	lost := false
 	current := currentMs()
-	for k := 0; k < len(kcp.snd_buf)-newSegsCount; k++ {
+	// check for retransmissions
+	for k := 0; k < len(kcp.snd_buf); k++ {
 		segment := &kcp.snd_buf[k]
 		needsend := false
-		if _itimediff(current, segment.resendts) >= 0 { // RTO
+		if segment.xmit == 0 { // initial transmit
+			needsend = true
+			segment.xmit++
+			segment.rto = kcp.rx_rto
+			segment.resendts = current + segment.rto
+		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
 			needsend = true
 			segment.xmit++
 			kcp.xmit++

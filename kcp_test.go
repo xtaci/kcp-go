@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 	"time"
 )
@@ -282,4 +283,15 @@ func TestNetwork(t *testing.T) {
 	test(0) // 默认模式，类似 TCP：正常模式，无快速重传，常规流控
 	test(1) // 普通模式，关闭流控等
 	test(2) // 快速模式，所有开关都打开，且关闭流控
+}
+
+func BenchmarkFlush(b *testing.B) {
+	kcp := NewKCP(1, func(buf []byte, size int) {})
+	b.ResetTimer()
+	var mu sync.Mutex
+	for i := 0; i < b.N; i++ {
+		mu.Lock()
+		kcp.flush(false)
+		mu.Unlock()
+	}
 }
