@@ -287,6 +287,7 @@ func TestNetwork(t *testing.T) {
 
 func BenchmarkFlush(b *testing.B) {
 	kcp := NewKCP(1, func(buf []byte, size int) {})
+	kcp.snd_buf = make([]Segment, 32)
 	b.ResetTimer()
 	var mu sync.Mutex
 	for i := 0; i < b.N; i++ {

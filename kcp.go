@@ -742,7 +742,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 	lost := false
 	current := currentMs()
 	// check for retransmissions
-	for k := 0; k < len(kcp.snd_buf); k++ {
+	for k := range kcp.snd_buf {
 		segment := &kcp.snd_buf[k]
 		needsend := false
 		if segment.xmit == 0 { // initial transmit
