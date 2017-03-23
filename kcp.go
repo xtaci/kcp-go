@@ -94,17 +94,17 @@ func _itimediff(later, earlier uint32) int32 {
 // Segment defines a KCP segment
 type Segment struct {
 	conv     uint32
-	cmd      uint32
-	frg      uint32
-	wnd      uint32
+	cmd      uint8
+	frg      uint8
+	wnd      uint16
 	ts       uint32
 	sn       uint32
 	una      uint32
-	data     []byte
-	resendts uint32
 	rto      uint32
-	fastack  uint32
 	xmit     uint32
+	resendts uint32
+	fastack  uint32
+	data     []byte
 }
 
 // encode a segment into buffer
@@ -330,7 +330,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		seg := kcp.newSegment(size)
 		copy(seg.data, buffer[:size])
 		if kcp.stream == 0 { // message mode
-			seg.frg = uint32(count - i - 1)
+			seg.frg = uint8(count - i - 1)
 		} else { // stream mode
 			seg.frg = 0
 		}
@@ -549,9 +549,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
 					seg := kcp.newSegment(int(length))
 					seg.conv = conv
-					seg.cmd = uint32(cmd)
-					seg.frg = uint32(frg)
-					seg.wnd = uint32(wnd)
+					seg.cmd = cmd
+					seg.frg = frg
+					seg.wnd = wnd
 					seg.ts = ts
 					seg.sn = sn
 					seg.una = una
@@ -616,9 +616,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	return 0
 }
 
-func (kcp *KCP) wnd_unused() int32 {
+func (kcp *KCP) wnd_unused() uint16 {
 	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
-		return int32(int(kcp.rcv_wnd) - len(kcp.rcv_queue))
+		return uint16(int(kcp.rcv_wnd) - len(kcp.rcv_queue))
 	}
 	return 0
 }
@@ -628,7 +628,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 	var seg Segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
-	seg.wnd = uint32(kcp.wnd_unused())
+	seg.wnd = kcp.wnd_unused()
 	seg.una = kcp.rcv_nxt
 
 	buffer := kcp.buffer
