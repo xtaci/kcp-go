@@ -129,7 +129,7 @@ type KCP struct {
 	rx_rttvar, rx_srtt                     int32
 	rx_rto, rx_minrto                      uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
-	interval, ts_flush, xmit               uint32
+	interval, ts_flush                     uint32
 	nodelay, updated                       uint32
 	ts_probe, probe_wait                   uint32
 	dead_link, incr                        uint32
@@ -753,7 +753,6 @@ func (kcp *KCP) flush(ackOnly bool) {
 		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
 			needsend = true
 			segment.xmit++
-			kcp.xmit++
 			if kcp.nodelay == 0 {
 				segment.rto += kcp.rx_rto
 			} else {
