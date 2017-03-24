@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"fmt"
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
@@ -832,6 +833,16 @@ func Listen(laddr string) (net.Listener, error) {
 	return ListenWithOptions(laddr, nil, 0, 0)
 }
 
+func ListenTCPWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int, device string) (*Listener, error) {
+    tcp := new(FakeTCP)
+    if err := tcp.Initialize(laddr,device, true); err != nil {
+        panic(err)
+    }
+    //return NewConn(raddr, block, dataShards, parityShards, &FakeTCPConn{
+    //		tcpSession, nil, nil})
+    return ServeConn(block, dataShards, parityShards, tcp)
+}
+
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
@@ -875,6 +886,22 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 // Dial connects to the remote address "raddr" on the network "udp"
 func Dial(raddr string) (net.Conn, error) {
 	return DialWithOptions(raddr, nil, 0, 0)
+}
+
+func DialTCPWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int, tcp *FakeTCP) (*UDPSession, error) {
+    udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+    if err != nil {
+        return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+    }
+    tcpSession := newTCPConn(tcp, udpaddr.IP, udpaddr.Port)
+    addr := fmt.Sprintf("%s:%d", tcpSession.dst_ip, tcpSession.dst_port)
+    tcp.connections[addr] = tcpSession
+    err = tcpSession.Connect()
+    if err != nil {
+        tcp.connections[addr] = nil
+        return nil, err
+    }
+    return NewConn(raddr, block, dataShards, parityShards, tcp)
 }
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
