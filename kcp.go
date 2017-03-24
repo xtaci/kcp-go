@@ -737,9 +737,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 
 	// counters
 	var lostSegs, fastRetransSegs, earlyRetransSegs uint64
-
-	change := 0
-	lost := false
+	var change, lost int
 	current := currentMs()
 	// check for retransmissions
 	for k := range kcp.snd_buf {
@@ -757,7 +755,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 				segment.rto += kcp.rx_rto / 2
 			}
 			segment.resendts = current + segment.rto
-			lost = true
+			lost++
 			lostSegs++
 		} else if segment.fastack >= resent { // fast retransmit
 			needsend = true
@@ -836,7 +834,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 	}
 
 	// congestion control, https://tools.ietf.org/html/rfc5681
-	if lost {
+	if lost > 0 {
 		kcp.ssthresh = cwnd / 2
 		if kcp.ssthresh < IKCP_THRESH_MIN {
 			kcp.ssthresh = IKCP_THRESH_MIN
