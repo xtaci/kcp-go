@@ -22,9 +22,10 @@ type entry struct {
 
 // a global heap managed kcp.flush() caller
 type updateHeap struct {
-	entries []entry
-	indices map[uint32]int
-	mu      sync.Mutex
+	entries  []entry
+	indices  map[uint32]int
+	mu       sync.Mutex
+	chWakeUp chan struct{}
 }
 
 func (h *updateHeap) Len() int           { return len(h.entries) }
@@ -52,12 +53,14 @@ func (h *updateHeap) Pop() interface{} {
 
 func (h *updateHeap) init() {
 	h.indices = make(map[uint32]int)
+	h.chWakeUp = make(chan struct{}, 1)
 }
 
 func (h *updateHeap) addSession(s *UDPSession) {
 	h.mu.Lock()
 	heap.Push(h, entry{s.sid, time.Now(), s})
 	h.mu.Unlock()
+	h.wakeup()
 }
 
 func (h *updateHeap) removeSession(s *UDPSession) {
@@ -68,8 +71,21 @@ func (h *updateHeap) removeSession(s *UDPSession) {
 	h.mu.Unlock()
 }
 
+func (h *updateHeap) wakeup() {
+	select {
+	case h.chWakeUp <- struct{}{}:
+	default:
+	}
+}
+
 func (h *updateHeap) updateTask() {
+	var timer <-chan time.Time
 	for {
+		select {
+		case <-timer:
+		case <-h.chWakeUp:
+		}
+
 		h.mu.Lock()
 		hlen := h.Len()
 		now := time.Now()
@@ -83,12 +99,9 @@ func (h *updateHeap) updateTask() {
 				break
 			}
 		}
-		interval := 10 * time.Millisecond
 		if h.Len() > 0 {
-			interval = h.entries[0].ts.Sub(now)
+			timer = time.After(h.entries[0].ts.Sub(now))
 		}
 		h.mu.Unlock()
-
-		time.Sleep(interval)
 	}
 }
