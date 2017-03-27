@@ -440,7 +440,7 @@ func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
 	// extend buf's header space
-	ext := s.ext
+	ext := buf
 	if s.headerSize > 0 {
 		ext = s.ext[:s.headerSize+len(buf)]
 		copy(ext[s.headerSize:], buf)

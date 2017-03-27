@@ -63,12 +63,7 @@ func dialEcho() (*UDPSession, error) {
 }
 
 func dialSink() (*UDPSession, error) {
-	block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
-	//block, _ := NewSalsa20BlockCrypt(pass)
-	sess, err := DialWithOptions(portSink, block, 10, 3)
+	sess, err := DialWithOptions(portSink, nil, 0, 0)
 	if err != nil {
 		panic(err)
 	}
@@ -119,12 +114,7 @@ func listenTinyBufferEcho() (net.Listener, error) {
 }
 
 func listenSink() (net.Listener, error) {
-	block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
-	//block, _ := NewSalsa20BlockCrypt(pass)
-	return ListenWithOptions(portSink, block, 10, 3)
+	return ListenWithOptions(portSink, nil, 0, 0)
 }
 
 func echoServer() {
