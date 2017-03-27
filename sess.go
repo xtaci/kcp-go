@@ -440,8 +440,11 @@ func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
 	// extend buf's header space
-	ext := s.ext[:s.headerSize+len(buf)]
-	copy(ext[s.headerSize:], buf)
+	ext := s.ext
+	if s.headerSize > 0 {
+		ext = s.ext[:s.headerSize+len(buf)]
+		copy(ext[s.headerSize:], buf)
+	}
 
 	// FEC stage
 	if s.fecEncoder != nil {
