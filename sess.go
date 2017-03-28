@@ -1,7 +1,6 @@
 package kcp
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
@@ -75,7 +74,7 @@ type (
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
 		recvbuf []byte
-		buffer  bytes.Buffer
+		bufptr  []byte
 		// extended output buffer(with header)
 		ext []byte
 
@@ -175,8 +174,9 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
 		s.mu.Lock()
-		if s.buffer.Len() > 0 { // copy from buffer into b
-			n, _ = s.buffer.Read(b)
+		if len(s.bufptr) > 0 { // copy from buffer into b
+			n = copy(b, s.bufptr)
+			s.bufptr = s.bufptr[n:]
 			s.mu.Unlock()
 			return n, nil
 		}
@@ -201,12 +201,17 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 				return size, nil
 			}
 
-			if len(s.recvbuf) < size { // resize kcp receive buffer
+			// resize kcp receive buffer
+			// to make sure recvbuf has enough capacity
+			if cap(s.recvbuf) < size {
 				s.recvbuf = make([]byte, size)
 			}
+
+			// resize recvbuf slice length
+			s.recvbuf = s.recvbuf[:size]
 			s.kcp.Recv(s.recvbuf)
-			n = copy(b, s.recvbuf[:size])     // direct copy to b
-			s.buffer.Write(s.recvbuf[n:size]) // save rest bytes to bytes.Buffer
+			n = copy(b, s.recvbuf)   // copy to b
+			s.bufptr = s.recvbuf[n:] // update pointer
 			s.mu.Unlock()
 			return n, nil
 		}
