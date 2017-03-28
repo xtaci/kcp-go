@@ -598,6 +598,7 @@ func (s *UDPSession) receiver(ch chan []byte) {
 			select {
 			case ch <- data[:n]:
 			case <-s.die:
+				return
 			}
 		} else if err != nil {
 			return
@@ -737,6 +738,7 @@ func (l *Listener) receiver(ch chan inPacket) {
 			select {
 			case ch <- inPacket{from, data[:n]}:
 			case <-l.die:
+				return
 			}
 		} else if err != nil {
 			return
