@@ -122,7 +122,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.l = l
 	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
-	sess.ext = make([]byte, mtuLimit)
 
 	// FEC initialization
 	sess.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
@@ -138,6 +137,12 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 	if sess.fecEncoder != nil {
 		sess.headerSize += fecHeaderSizePlus2
+	}
+
+	// only allocate extended packet buffer
+	// when the extra header is required
+	if sess.headerSize > 0 {
+		sess.ext = make([]byte, mtuLimit)
 	}
 
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
