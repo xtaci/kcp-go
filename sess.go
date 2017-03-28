@@ -186,13 +186,6 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return 0, errors.New(errBrokenPipe)
 		}
 
-		if !s.rd.IsZero() {
-			if time.Now().After(s.rd) { // read timeout
-				s.mu.Unlock()
-				return 0, errTimeout{}
-			}
-		}
-
 		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
 			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
 			if len(b) >= size { // direct write to b
@@ -216,9 +209,15 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return n, nil
 		}
 
+		// read deadline
 		var timeout *time.Timer
 		var c <-chan time.Time
 		if !s.rd.IsZero() {
+			if time.Now().After(s.rd) {
+				s.mu.Unlock()
+				return 0, errTimeout{}
+			}
+
 			delay := s.rd.Sub(time.Now())
 			timeout = time.NewTimer(delay)
 			c = timeout.C
@@ -247,13 +246,6 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			return 0, errors.New(errBrokenPipe)
 		}
 
-		if !s.wd.IsZero() {
-			if time.Now().After(s.wd) { // write timeout
-				s.mu.Unlock()
-				return 0, errTimeout{}
-			}
-		}
-
 		// api flow control
 		if s.kcp.WaitSnd() < int(s.kcp.Cwnd()) {
 			n = len(b)
@@ -275,9 +267,14 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			return n, nil
 		}
 
+		// write deadline
 		var timeout *time.Timer
 		var c <-chan time.Time
 		if !s.wd.IsZero() {
+			if time.Now().After(s.wd) {
+				s.mu.Unlock()
+				return 0, errTimeout{}
+			}
 			delay := s.wd.Sub(time.Now())
 			timeout = time.NewTimer(delay)
 			c = timeout.C
