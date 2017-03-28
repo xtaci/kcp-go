@@ -293,6 +293,7 @@ func BenchmarkFlush(b *testing.B) {
 		kcp.snd_buf[k].resendts = currentMs() + 10000
 	}
 	b.ResetTimer()
+	b.ReportAllocs()
 	var mu sync.Mutex
 	for i := 0; i < b.N; i++ {
 		mu.Lock()
