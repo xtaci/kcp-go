@@ -96,30 +96,31 @@ lis, err := kcp.ListenWithOptions(":10000", nil, 10, 3)
   Memory:	8 GB
 ```
 ```
-$ go test -run=^$ -bench .
+$ go test -v -run=^$ -bench .
 beginning tests, encryption:salsa20, fec:10/3
-BenchmarkAES128-4          	  200000	      8455 ns/op	 354.81 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES192-4          	  200000	      9370 ns/op	 320.16 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES256-4          	  200000	     10262 ns/op	 292.32 MB/s	       0 B/op	       0 allocs/op
-BenchmarkTEA-4             	  100000	     18747 ns/op	 160.02 MB/s	       0 B/op	       0 allocs/op
-BenchmarkXOR-4             	 5000000	       319 ns/op	9379.21 MB/s	       0 B/op	       0 allocs/op
-BenchmarkBlowfish-4        	   50000	     35845 ns/op	  83.69 MB/s	       0 B/op	       0 allocs/op
-BenchmarkNone-4            	30000000	        58.5 ns/op	51252.66 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCast5-4           	   30000	     46058 ns/op	  65.14 MB/s	       0 B/op	       0 allocs/op
-Benchmark3DES-4            	    2000	    650290 ns/op	   4.61 MB/s	       6 B/op	       0 allocs/op
-BenchmarkTwofish-4         	   30000	     44042 ns/op	  68.12 MB/s	       0 B/op	       0 allocs/op
-BenchmarkXTEA-4            	   30000	     59862 ns/op	  50.11 MB/s	       0 B/op	       0 allocs/op
-BenchmarkSalsa20-4         	  300000	      4045 ns/op	 741.50 MB/s	       0 B/op	       0 allocs/op
-BenchmarkEchoSpeed4K-4     	    5000	    286664 ns/op	  14.29 MB/s	    5534 B/op	     174 allocs/op
-BenchmarkEchoSpeed64K-4    	     500	   3026142 ns/op	  21.66 MB/s	   69494 B/op	    2132 allocs/op
-BenchmarkEchoSpeed512K-4   	      50	  26078786 ns/op	  20.10 MB/s	  630231 B/op	   16933 allocs/op
-BenchmarkEchoSpeed1M-4     	      20	  75141637 ns/op	  13.95 MB/s	 1671859 B/op	   44578 allocs/op
-BenchmarkSinkSpeed4K-4     	   10000	    147721 ns/op	  27.73 MB/s	    4206 B/op	      84 allocs/op
-BenchmarkSinkSpeed64K-4    	    1000	   1033438 ns/op	  63.42 MB/s	   40962 B/op	     954 allocs/op
-BenchmarkSinkSpeed256K-4   	     200	   7336797 ns/op	  71.46 MB/s	  272973 B/op	    6839 allocs/op
-BenchmarkSinkSpeed1M-4     	     100	  14701943 ns/op	  71.32 MB/s	  614016 B/op	   13549 allocs/op
+BenchmarkAES128-4          	  200000	      8256 ns/op	 363.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES192-4          	  200000	      9153 ns/op	 327.74 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES256-4          	  200000	     10079 ns/op	 297.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTEA-4             	  100000	     18643 ns/op	 160.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXOR-4             	 5000000	       316 ns/op	9486.46 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBlowfish-4        	   50000	     35643 ns/op	  84.17 MB/s	       0 B/op	       0 allocs/op
+BenchmarkNone-4            	30000000	        56.2 ns/op	53371.83 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCast5-4           	   30000	     44744 ns/op	  67.05 MB/s	       0 B/op	       0 allocs/op
+Benchmark3DES-4            	    2000	    639839 ns/op	   4.69 MB/s	       2 B/op	       0 allocs/op
+BenchmarkTwofish-4         	   30000	     43368 ns/op	  69.17 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXTEA-4            	   30000	     57673 ns/op	  52.02 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSalsa20-4         	  300000	      3917 ns/op	 765.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkFlush-4           	10000000	       226 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEchoSpeed4K-4     	    5000	    300030 ns/op	  13.65 MB/s	    5672 B/op	     177 allocs/op
+BenchmarkEchoSpeed64K-4    	     500	   3202335 ns/op	  20.47 MB/s	   73295 B/op	    2198 allocs/op
+BenchmarkEchoSpeed512K-4   	      50	  24926924 ns/op	  21.03 MB/s	  659339 B/op	   17602 allocs/op
+BenchmarkEchoSpeed1M-4     	      20	  64857821 ns/op	  16.17 MB/s	 1772437 B/op	   42869 allocs/op
+BenchmarkSinkSpeed4K-4     	   30000	     50230 ns/op	  81.54 MB/s	    2058 B/op	      48 allocs/op
+BenchmarkSinkSpeed64K-4    	    2000	    648718 ns/op	 101.02 MB/s	   31165 B/op	     687 allocs/op
+BenchmarkSinkSpeed256K-4   	     300	   4635905 ns/op	 113.09 MB/s	  286229 B/op	    5516 allocs/op
+BenchmarkSinkSpeed1M-4     	     200	   9566933 ns/op	 109.60 MB/s	  463771 B/op	   10701 allocs/op
 PASS
-ok  	github.com/xtaci/kcp-go	36.141s
+ok  	_/Users/xtaci/.godeps/src/github.com/xtaci/kcp-go	39.689s
 ```
 
 ## Design Considerations
