@@ -248,10 +248,6 @@ func TestTimeout(t *testing.T) {
 	if n != 0 || err == nil {
 		t.Fail()
 	}
-	n, err = cli.Write(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
 	cli.Close()
 }
 
