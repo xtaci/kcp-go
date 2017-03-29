@@ -620,7 +620,7 @@ func (s *UDPSession) receiver(ch chan []byte) {
 
 // read loop for client session
 func (s *UDPSession) readLoop() {
-	chPacket := make(chan []byte)
+	chPacket := make(chan []byte, qlen)
 	go s.receiver(chPacket)
 
 	for {
