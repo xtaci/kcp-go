@@ -40,6 +40,9 @@ const (
 
 	// accept backlog
 	acceptBacklog = 128
+
+	// prerouting(to session) queue
+	qlen = 128
 )
 
 const (
@@ -676,7 +679,7 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	chPacket := make(chan inPacket)
+	chPacket := make(chan inPacket, qlen)
 	go l.receiver(chPacket)
 	for {
 		select {
