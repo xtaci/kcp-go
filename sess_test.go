@@ -18,6 +18,7 @@ import (
 const portEcho = "127.0.0.1:9999"
 const portSink = "127.0.0.1:19999"
 const portTinyBufferEcho = "127.0.0.1:29999"
+const portListerner = "127.0.0.1:9998"
 const salt = "kcptest"
 
 var key = []byte("testkey")
@@ -94,7 +95,6 @@ func dialTinyBufferEcho() (*UDPSession, error) {
 }
 
 //////////////////////////
-
 func listenEcho() (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
@@ -103,7 +103,6 @@ func listenEcho() (net.Listener, error) {
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(portEcho, block, 10, 3)
 }
-
 func listenTinyBufferEcho() (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
@@ -453,4 +452,24 @@ func TestSNMP(t *testing.T) {
 	t.Log(DefaultSnmp.ToSlice())
 	DefaultSnmp.Reset()
 	t.Log(DefaultSnmp.ToSlice())
+}
+
+func TestListenerClose(t *testing.T) {
+	l, err := ListenWithOptions(portListerner, nil, 10, 3)
+	if err != nil {
+		t.Fail()
+	}
+	l.SetReadDeadline(time.Now().Add(time.Second))
+	l.SetWriteDeadline(time.Now().Add(time.Second))
+	l.SetDeadline(time.Now().Add(time.Second))
+	time.Sleep(2 * time.Second)
+	if _, err := l.Accept(); err == nil {
+		t.Fail()
+	}
+
+	l.Close()
+	fakeaddr, _ := net.ResolveUDPAddr("udp6", "127.0.0.1:1111")
+	if l.closeSession(fakeaddr) {
+		t.Fail()
+	}
 }

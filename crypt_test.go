@@ -3,6 +3,7 @@ package kcp
 import (
 	"bytes"
 	"crypto/rand"
+	"hash/crc32"
 	"io"
 	"testing"
 )
@@ -210,4 +211,12 @@ func benchCrypt(b *testing.B, bc BlockCrypt) {
 		bc.Decrypt(dec, enc)
 	}
 	b.SetBytes(int64(len(enc) * 2))
+}
+
+func BenchmarkCRC32(b *testing.B) {
+	content := make([]byte, 1024)
+	b.SetBytes(int64(len(content)))
+	for i := 0; i < b.N; i++ {
+		crc32.ChecksumIEEE(content)
+	}
 }

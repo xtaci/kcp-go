@@ -830,10 +830,12 @@ func (l *Listener) Close() error {
 }
 
 // closeSession notify the listener that a session has closed
-func (l *Listener) closeSession(remote net.Addr) {
+func (l *Listener) closeSession(remote net.Addr) bool {
 	select {
 	case l.chSessionClosed <- remote:
+		return true
 	case <-l.die:
+		return false
 	}
 }
 
