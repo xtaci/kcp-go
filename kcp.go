@@ -988,15 +988,6 @@ func (kcp *KCP) WaitSnd() int {
 	return len(kcp.snd_buf) + len(kcp.snd_queue)
 }
 
-// Cwnd returns current congestion window size
-func (kcp *KCP) Cwnd() uint32 {
-	cwnd := _imin_(kcp.snd_wnd, kcp.rmt_wnd)
-	if kcp.nocwnd == 0 {
-		cwnd = _imin_(kcp.cwnd, cwnd)
-	}
-	return cwnd
-}
-
 // remove front n elements from queue
 func (kcp *KCP) remove_front(q []Segment, n int) []Segment {
 	newn := copy(q, q[n:])
