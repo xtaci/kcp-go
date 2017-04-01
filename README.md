@@ -40,7 +40,7 @@ It provides ***fast, ordered and error-checked*** delivery of streams over **UDP
 
 ## Conventions
 
-Control messages like **SYN/FIN/RST** in TCP ***are not defined*** in KCP, you need some ***keepalive/heartbeat mechanism*** in the application-level. A real world example is to use some ***multiplexing*** protocol over session, such as [smux](https://github.com/xtaci/smux)(with embeded keepalive mechanism), see [kcptun](https://github.com/xtaci/kcptun) for example.
+Control messages like **SYN/FIN/RST** in TCP ***are not defined*** in KCP, you need some ***keepalive/heartbeat mechanism*** in the application-level. A real world example is to use some ***multiplexing*** protocol over session, such as [smux](https://github.com/xtaci/smux)(with embedded keepalive mechanism), see [kcptun](https://github.com/xtaci/kcptun) for example.
 
 ## Documentation
 
