@@ -93,6 +93,7 @@ type (
 		updateInterval time.Duration // interval in seconds to call kcp.flush()
 		ackNoDelay     bool          // send ack immediately for each incoming packet
 		writeDelay     bool          // delay kcp.flush() for Write() for bulk transfer
+		dup            int           // duplicate udp packets
 
 		// notifications
 		die          chan struct{} // notify session has Closed
@@ -393,6 +394,13 @@ func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 	s.ackNoDelay = nodelay
 }
 
+// SetDUP duplicates udp packets for kcp output, for testing purpose only
+func (s *UDPSession) SetDUP(dup int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dup = dup
+}
+
 // SetNoDelay calls nodelay() of kcp
 func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Lock()
@@ -482,9 +490,11 @@ func (s *UDPSession) output(buf []byte) {
 	nbytes := 0
 	npkts := 0
 	// if mrand.Intn(100) < 50 {
-	if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
-		nbytes += n
-		npkts++
+	for i := 0; i < s.dup+1; i++ {
+		if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
+			nbytes += n
+			npkts++
+		}
 	}
 	// }
 

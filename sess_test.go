@@ -256,6 +256,7 @@ func TestSendRecv(t *testing.T) {
 		panic(err)
 	}
 	cli.SetWriteDelay(true)
+	cli.SetDUP(1)
 	const N = 100
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
