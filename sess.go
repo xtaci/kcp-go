@@ -86,14 +86,13 @@ type (
 		fecEncoder *FECEncoder
 
 		// settings
-		remote         net.Addr      // remote peer address
-		rd             time.Time     // read deadline
-		wd             time.Time     // write deadline
-		headerSize     int           // the overall header size added before KCP frame
-		updateInterval time.Duration // interval in seconds to call kcp.flush()
-		ackNoDelay     bool          // send ack immediately for each incoming packet
-		writeDelay     bool          // delay kcp.flush() for Write() for bulk transfer
-		dup            int           // duplicate udp packets
+		remote     net.Addr  // remote peer address
+		rd         time.Time // read deadline
+		wd         time.Time // write deadline
+		headerSize int       // the overall header size added before KCP frame
+		ackNoDelay bool      // send ack immediately for each incoming packet
+		writeDelay bool      // delay kcp.flush() for Write() for bulk transfer
+		dup        int       // duplicate udp packets
 
 		// notifications
 		die          chan struct{} // notify session has Closed
@@ -406,7 +405,6 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
-	s.updateInterval = time.Duration(interval) * time.Millisecond
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header, no effect if it's accepted from Listener
@@ -517,7 +515,7 @@ func (s *UDPSession) update() (interval time.Duration) {
 	if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 		s.notifyWriteEvent()
 	}
-	interval = s.updateInterval
+	interval = time.Duration(s.kcp.interval) * time.Millisecond
 	s.mu.Unlock()
 	return
 }
