@@ -110,9 +110,9 @@ type Segment struct {
 // encode a segment into buffer
 func (seg *Segment) encode(ptr []byte) []byte {
 	ptr = ikcp_encode32u(ptr, seg.conv)
-	ptr = ikcp_encode8u(ptr, uint8(seg.cmd))
-	ptr = ikcp_encode8u(ptr, uint8(seg.frg))
-	ptr = ikcp_encode16u(ptr, uint16(seg.wnd))
+	ptr = ikcp_encode8u(ptr, seg.cmd)
+	ptr = ikcp_encode8u(ptr, seg.frg)
+	ptr = ikcp_encode16u(ptr, seg.wnd)
 	ptr = ikcp_encode32u(ptr, seg.ts)
 	ptr = ikcp_encode32u(ptr, seg.sn)
 	ptr = ikcp_encode32u(ptr, seg.una)
