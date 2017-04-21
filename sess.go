@@ -609,7 +609,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	}
 }
 
-func (s *UDPSession) receiver(ch chan <- []byte) {
+func (s *UDPSession) receiver(ch chan<- []byte) {
 	for {
 		data := xmitBuf.Get().([]byte)[:mtuLimit]
 		if n, _, err := s.conn.ReadFrom(data); err == nil && n >= s.headerSize+IKCP_OVERHEAD {
@@ -749,7 +749,7 @@ func (l *Listener) monitor() {
 	}
 }
 
-func (l *Listener) receiver(ch chan <- inPacket) {
+func (l *Listener) receiver(ch chan<- inPacket) {
 	for {
 		data := xmitBuf.Get().([]byte)[:mtuLimit]
 		if n, from, err := l.conn.ReadFrom(data); err == nil && n >= l.headerSize+IKCP_OVERHEAD {
