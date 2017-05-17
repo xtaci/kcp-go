@@ -98,9 +98,8 @@ type (
 		die          chan struct{} // notify session has Closed
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
-		chErrorEvent chan struct{} // notify Read() have an error
+		chErrorEvent chan error    // notify Read() have an error
 
-		err      error
 		isClosed bool // flag the session has Closed
 		mu       sync.Mutex
 	}
@@ -121,7 +120,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
-	sess.chErrorEvent = make(chan struct{})
+	sess.chErrorEvent = make(chan error, 1)
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -235,11 +234,11 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		case <-s.chReadEvent:
 		case <-c:
 		case <-s.die:
-		case <-s.chErrorEvent:
+		case err = <-s.chErrorEvent:
 			if timeout != nil {
 				timeout.Stop()
 			}
-			return n, s.err
+			return n, err
 		}
 
 		if timeout != nil {
@@ -627,8 +626,7 @@ func (s *UDPSession) receiver(ch chan<- []byte) {
 				return
 			}
 		} else if err != nil {
-			s.err = err
-			close(s.chErrorEvent)
+			s.chErrorEvent <- err
 			return
 		} else {
 			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
