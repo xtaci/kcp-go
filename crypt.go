@@ -68,7 +68,9 @@ func NewTwofishBlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, twofish.BlockSize)
+	c.block.Encrypt(c.encbuf[:twofish.BlockSize], initialVector[:twofish.BlockSize])
 	c.decbuf = make([]byte, 2*twofish.BlockSize)
+	c.block.Encrypt(c.decbuf[:twofish.BlockSize], initialVector[:twofish.BlockSize])
 	return c, nil
 }
 
@@ -90,7 +92,10 @@ func NewTripleDESBlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, des.BlockSize)
+	c.block.Encrypt(c.encbuf[:des.BlockSize], initialVector[:des.BlockSize])
 	c.decbuf = make([]byte, 2*des.BlockSize)
+	c.block.Encrypt(c.decbuf[:des.BlockSize], initialVector[:des.BlockSize])
+
 	return c, nil
 }
 
@@ -112,7 +117,10 @@ func NewCast5BlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, cast5.BlockSize)
+	c.block.Encrypt(c.encbuf[:cast5.BlockSize], initialVector[:cast5.BlockSize])
 	c.decbuf = make([]byte, 2*cast5.BlockSize)
+	c.block.Encrypt(c.decbuf[:cast5.BlockSize], initialVector[:cast5.BlockSize])
+
 	return c, nil
 }
 
@@ -134,7 +142,10 @@ func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, blowfish.BlockSize)
+	c.block.Encrypt(c.encbuf[:blowfish.BlockSize], initialVector[:blowfish.BlockSize])
 	c.decbuf = make([]byte, 2*blowfish.BlockSize)
+	c.block.Encrypt(c.decbuf[:blowfish.BlockSize], initialVector[:blowfish.BlockSize])
+
 	return c, nil
 }
 
@@ -156,7 +167,10 @@ func NewAESBlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, aes.BlockSize)
+	c.block.Encrypt(c.encbuf[:aes.BlockSize], initialVector[:aes.BlockSize])
 	c.decbuf = make([]byte, 2*aes.BlockSize)
+	c.block.Encrypt(c.decbuf[:aes.BlockSize], initialVector[:aes.BlockSize])
+
 	return c, nil
 }
 
@@ -178,7 +192,10 @@ func NewTEABlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, tea.BlockSize)
+	c.block.Encrypt(c.encbuf[:tea.BlockSize], initialVector[:tea.BlockSize])
 	c.decbuf = make([]byte, 2*tea.BlockSize)
+	c.block.Encrypt(c.decbuf[:tea.BlockSize], initialVector[:tea.BlockSize])
+
 	return c, nil
 }
 
@@ -200,7 +217,10 @@ func NewXTEABlockCrypt(key []byte) (BlockCrypt, error) {
 	}
 	c.block = block
 	c.encbuf = make([]byte, xtea.BlockSize)
+	c.block.Encrypt(c.encbuf[:xtea.BlockSize], initialVector[:xtea.BlockSize])
 	c.decbuf = make([]byte, 2*xtea.BlockSize)
+	c.block.Encrypt(c.decbuf[:xtea.BlockSize], initialVector[:xtea.BlockSize])
+
 	return c, nil
 }
 
@@ -235,7 +255,7 @@ func (c *noneBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
 func encrypt(block cipher.Block, dst, src, buf []byte) {
 	blocksize := block.BlockSize()
 	tbl := buf[:blocksize]
-	block.Encrypt(tbl, initialVector)
+	block.Encrypt(tbl, tbl)
 	n := len(src) / blocksize
 	base := 0
 	for i := 0; i < n; i++ {
@@ -250,7 +270,7 @@ func decrypt(block cipher.Block, dst, src, buf []byte) {
 	blocksize := block.BlockSize()
 	tbl := buf[:blocksize]
 	next := buf[blocksize:]
-	block.Encrypt(tbl, initialVector)
+	block.Encrypt(tbl, tbl)
 	n := len(src) / blocksize
 	base := 0
 	for i := 0; i < n; i++ {
