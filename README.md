@@ -16,10 +16,6 @@
 [11]: https://img.shields.io/badge/license-MIT-blue.svg
 [12]: LICENSE
 
-[![Claude_Shannon](shannon.jpg)](https://en.wikipedia.org/wiki/Claude_Shannon)
-
-> *(Claude Elwood Shannon)*
-
 ## Introduction
 
 **kcp-go** is a **Production-Grade Reliable-UDP** library for [golang](https://golang.org/). 
