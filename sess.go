@@ -54,9 +54,6 @@ var (
 	// global packet buffer
 	// shared among sending/receiving/FEC
 	xmitBuf sync.Pool
-
-	// monotonic session id
-	sid uint32
 )
 
 func init() {
@@ -68,11 +65,11 @@ func init() {
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
-		sid   uint32         // session id(monotonic)
-		conn  net.PacketConn // the underlying packet connection
-		kcp   *KCP           // KCP ARQ protocol
-		l     *Listener      // point to the Listener if it's accepted by Listener
-		block BlockCrypt     // block encryption
+		updaterIdx int            // record slice index in updater
+		conn       net.PacketConn // the underlying packet connection
+		kcp        *KCP           // KCP ARQ protocol
+		l          *Listener      // point to the Listener if it's accepted by Listener
+		block      BlockCrypt     // block encryption
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -116,7 +113,6 @@ type (
 // newUDPSession create a new udp session for client or server
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
-	sess.sid = atomic.AddUint32(&sid, 1)
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
