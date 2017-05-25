@@ -61,11 +61,11 @@ func (h *updateHeap) addSession(s *UDPSession) {
 }
 
 func (h *updateHeap) removeSession(s *UDPSession) {
+	h.mu.Lock()
 	if s.updaterIdx != -1 {
-		h.mu.Lock()
 		heap.Remove(h, s.updaterIdx)
-		h.mu.Unlock()
 	}
+	h.mu.Unlock()
 }
 
 func (h *updateHeap) wakeup() {
