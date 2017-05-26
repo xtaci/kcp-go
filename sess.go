@@ -46,8 +46,7 @@ const (
 )
 
 const (
-	errBrokenPipe       = "broken pipe"
-	errInvalidOperation = "invalid operation"
+	errBrokenPipe = "broken pipe"
 )
 
 var (
@@ -421,7 +420,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 			return ipv4.NewConn(nc).SetTOS(dscp << 2)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return nil
 }
 
 // SetReadBuffer sets the socket read buffer, no effect if it's accepted from Listener
@@ -433,7 +432,7 @@ func (s *UDPSession) SetReadBuffer(bytes int) error {
 			return nc.SetReadBuffer(bytes)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return nil
 }
 
 // SetWriteBuffer sets the socket write buffer, no effect if it's accepted from Listener
@@ -445,7 +444,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 			return nc.SetWriteBuffer(bytes)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return nil
 }
 
 // output pipeline entry
@@ -775,7 +774,7 @@ func (l *Listener) SetReadBuffer(bytes int) error {
 	if nc, ok := l.conn.(setReadBuffer); ok {
 		return nc.SetReadBuffer(bytes)
 	}
-	return errors.New(errInvalidOperation)
+	return nil
 }
 
 // SetWriteBuffer sets the socket write buffer for the Listener
@@ -783,7 +782,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	if nc, ok := l.conn.(setWriteBuffer); ok {
 		return nc.SetWriteBuffer(bytes)
 	}
-	return errors.New(errInvalidOperation)
+	return nil
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header
@@ -791,7 +790,7 @@ func (l *Listener) SetDSCP(dscp int) error {
 	if nc, ok := l.conn.(net.Conn); ok {
 		return ipv4.NewConn(nc).SetTOS(dscp << 2)
 	}
-	return errors.New(errInvalidOperation)
+	return nil
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
@@ -857,18 +856,49 @@ func (l *Listener) Addr() net.Addr {
 }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
-func Listen(laddr string) (net.Listener, error) {
-	return ListenWithOptions(laddr, nil, 0, 0)
+func Listen(laddr string, udp4 string, ipv4Only bool) (net.Listener, error) {
+	return ListenWithOptions(laddr, nil, 0, 0, ipv4Only)
 }
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
-func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int, ipv4Only bool) (*Listener, error) {
+	if true == ipv4Only {
+		udpaddr, err := net.ResolveUDPAddr("udp4", laddr)
+
+		if err != nil {
+			return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		}
+
+		conn, err := net.ListenUDP("udp4", udpaddr)
+		if err != nil {
+			return nil, errors.Wrap(err, "net.ListenUDP")
+		}
+
+		return ServeConn(block, dataShards, parityShards, conn)
+	} else {
+		udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+		if err != nil {
+			return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		}
+		conn, err := net.ListenUDP("udp", udpaddr)
+		if err != nil {
+			return nil, errors.Wrap(err, "net.ListenUDP")
+		}
+
+		return ServeConn(block, dataShards, parityShards, conn)
+	}
+}
+
+// ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
+// dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
+func ListenWithOptionsUDP4(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
+	udpaddr, err := net.ResolveUDPAddr("udp4", laddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
-	conn, err := net.ListenUDP("udp", udpaddr)
+
+	conn, err := net.ListenUDP("udp4", udpaddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ListenUDP")
 	}
