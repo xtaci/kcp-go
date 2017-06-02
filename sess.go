@@ -845,14 +845,10 @@ func (l *Listener) closeSession(remote net.Addr) bool {
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
-func (l *Listener) Addr() net.Addr {
-	return l.conn.LocalAddr()
-}
+func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
-func Listen(laddr string) (net.Listener, error) {
-	return ListenWithOptions(laddr, nil, 0, 0)
-}
+func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr, nil, 0, 0) }
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
@@ -926,9 +922,8 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
 }
 
-func currentMs() uint32 {
-	return uint32(time.Now().UnixNano() / int64(time.Millisecond))
-}
+// returns current time in milliseconds
+func currentMs() uint32 { return uint32(time.Now().UnixNano() / int64(time.Millisecond)) }
 
 // ConnectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
 // to Write syscalls that are 4 times faster on some OS'es. This should only be
@@ -936,6 +931,4 @@ func currentMs() uint32 {
 type ConnectedUDPConn struct{ *net.UDPConn }
 
 // WriteTo redirects all writes to the Write syscall, which is 4 times faster.
-func (c *ConnectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
-	return c.Write(b)
-}
+func (c *ConnectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
