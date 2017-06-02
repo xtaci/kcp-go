@@ -520,9 +520,7 @@ func (s *UDPSession) update() (interval time.Duration) {
 }
 
 // GetConv gets conversation id of a session
-func (s *UDPSession) GetConv() uint32 {
-	return s.kcp.conv
-}
+func (s *UDPSession) GetConv() uint32 { return s.kcp.conv }
 
 func (s *UDPSession) notifyReadEvent() {
 	select {
