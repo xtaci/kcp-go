@@ -416,7 +416,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	defer s.mu.Unlock()
 	if s.l == nil {
 		if nc, ok := s.conn.(*ConnectedUDPConn); ok {
-			return ipv4.NewConn(nc.Conn).SetTOS(dscp << 2)
+			return ipv4.NewConn(nc.UDPConn).SetTOS(dscp << 2)
 		} else if nc, ok := s.conn.(net.Conn); ok {
 			return ipv4.NewConn(nc).SetTOS(dscp << 2)
 		}
@@ -913,7 +913,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
-	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn, udpconn})
+	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn})
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
@@ -935,10 +935,7 @@ func currentMs() uint32 {
 // ConnectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
 // to Write syscalls that are 4 times faster on some OS'es. This should only be
 // used for connections that were produced by a net.Dial* call.
-type ConnectedUDPConn struct {
-	*net.UDPConn
-	Conn net.Conn // underlying connection if any
-}
+type ConnectedUDPConn struct{ *net.UDPConn }
 
 // WriteTo redirects all writes to the Write syscall, which is 4 times faster.
 func (c *ConnectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
