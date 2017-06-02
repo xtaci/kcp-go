@@ -891,9 +891,7 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 }
 
 // Dial connects to the remote address "raddr" on the network "udp"
-func Dial(raddr string) (net.Conn, error) {
-	return DialWithOptions(raddr, nil, 0, 0)
-}
+func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0) }
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
