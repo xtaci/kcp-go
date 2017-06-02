@@ -555,22 +555,21 @@ func (s *UDPSession) kcpInput(data []byte) {
 				fecParityShards++
 			}
 
-			if recovers := s.fecDecoder.Decode(f); recovers != nil {
-				for _, r := range recovers {
-					if len(r) >= 2 { // must be larger than 2bytes
-						sz := binary.LittleEndian.Uint16(r)
-						if int(sz) <= len(r) && sz >= 2 {
-							if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
-								fecRecovered++
-							} else {
-								kcpInErrors++
-							}
+			recovers := s.fecDecoder.Decode(f)
+			for _, r := range recovers {
+				if len(r) >= 2 { // must be larger than 2bytes
+					sz := binary.LittleEndian.Uint16(r)
+					if int(sz) <= len(r) && sz >= 2 {
+						if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
+							fecRecovered++
 						} else {
-							fecErrs++
+							kcpInErrors++
 						}
 					} else {
 						fecErrs++
 					}
+				} else {
+					fecErrs++
 				}
 			}
 		}
