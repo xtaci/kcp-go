@@ -477,13 +477,11 @@ func (s *UDPSession) output(buf []byte) {
 		binary.LittleEndian.PutUint32(ext[nonceSize:], checksum)
 		s.block.Encrypt(ext, ext)
 
-		if ecc != nil {
-			for k := range ecc {
-				io.ReadFull(rand.Reader, ecc[k][:nonceSize])
-				checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
-				binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
-				s.block.Encrypt(ecc[k], ecc[k])
-			}
+		for k := range ecc {
+			io.ReadFull(rand.Reader, ecc[k][:nonceSize])
+			checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
+			binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
+			s.block.Encrypt(ecc[k], ecc[k])
 		}
 	}
 
@@ -499,12 +497,10 @@ func (s *UDPSession) output(buf []byte) {
 	}
 	// }
 
-	if ecc != nil {
-		for k := range ecc {
-			if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
-				nbytes += n
-				npkts++
-			}
+	for k := range ecc {
+		if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
+			nbytes += n
+			npkts++
 		}
 	}
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
