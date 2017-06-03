@@ -302,6 +302,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
+	// remove this session from updater & listener(if necessary)
 	updater.removeSession(s)
 	if s.l != nil { // notify listener
 		s.l.closeSession(s.remote)
@@ -404,6 +405,7 @@ func (s *UDPSession) SetDUP(dup int) {
 }
 
 // SetNoDelay calls nodelay() of kcp
+// https://github.com/skywind3000/kcp/blob/master/README.en.md#protocol-configuration
 func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -458,19 +460,19 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
-	// extend buf's header space
+	// 0. extend buf's header space(if necessary)
 	ext := buf
 	if s.headerSize > 0 {
 		ext = s.ext[:s.headerSize+len(buf)]
 		copy(ext[s.headerSize:], buf)
 	}
 
-	// FEC stage
+	// 1. FEC encoding
 	if s.fecEncoder != nil {
 		ecc = s.fecEncoder.Encode(ext)
 	}
 
-	// encryption stage
+	// 2&3. crc32 & encryption
 	if s.block != nil {
 		io.ReadFull(rand.Reader, ext[:nonceSize])
 		checksum := crc32.ChecksumIEEE(ext[cryptHeaderSize:])
@@ -485,17 +487,15 @@ func (s *UDPSession) output(buf []byte) {
 		}
 	}
 
-	// WriteTo kernel
+	// 4. WriteTo kernel
 	nbytes := 0
 	npkts := 0
-	// if mrand.Intn(100) < 50 {
 	for i := 0; i < s.dup+1; i++ {
 		if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
 			nbytes += n
 			npkts++
 		}
 	}
-	// }
 
 	for k := range ecc {
 		if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
