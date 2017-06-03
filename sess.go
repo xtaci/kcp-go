@@ -79,8 +79,8 @@ type (
 		ext []byte
 
 		// FEC
-		fecDecoder *FECDecoder
-		fecEncoder *FECEncoder
+		fecDecoder *fecDecoder
+		fecEncoder *fecEncoder
 
 		// settings
 		remote     net.Addr  // remote peer address
@@ -417,7 +417,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.l == nil {
-		if nc, ok := s.conn.(*ConnectedUDPConn); ok {
+		if nc, ok := s.conn.(*connectedUDPConn); ok {
 			return ipv4.NewConn(nc.UDPConn).SetTOS(dscp << 2)
 		} else if nc, ok := s.conn.(net.Conn); ok {
 			return ipv4.NewConn(nc).SetTOS(dscp << 2)
@@ -469,7 +469,7 @@ func (s *UDPSession) output(buf []byte) {
 
 	// 1. FEC encoding
 	if s.fecEncoder != nil {
-		ecc = s.fecEncoder.Encode(ext)
+		ecc = s.fecEncoder.encode(ext)
 	}
 
 	// 2&3. crc32 & encryption
@@ -553,7 +553,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 				fecParityShards++
 			}
 
-			recovers := s.fecDecoder.Decode(f)
+			recovers := s.fecDecoder.decode(f)
 			for _, r := range recovers {
 				if len(r) >= 2 { // must be larger than 2bytes
 					sz := binary.LittleEndian.Uint16(r)
@@ -663,7 +663,7 @@ type (
 		block        BlockCrypt     // block encryption
 		dataShards   int            // FEC data shard
 		parityShards int            // FEC parity shard
-		fecDecoder   *FECDecoder    // FEC mock initialization
+		fecDecoder   *fecDecoder    // FEC mock initialization
 		conn         net.PacketConn // the underlying packet connection
 
 		sessions        map[string]*UDPSession // all sessions accepted by this Listener
@@ -905,7 +905,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 
-	return NewConn(raddr, block, dataShards, parityShards, &ConnectedUDPConn{udpconn})
+	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
@@ -923,10 +923,10 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 // returns current time in milliseconds
 func currentMs() uint32 { return uint32(time.Now().UnixNano() / int64(time.Millisecond)) }
 
-// ConnectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
+// connectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
 // to Write syscalls that are 4 times faster on some OS'es. This should only be
 // used for connections that were produced by a net.Dial* call.
-type ConnectedUDPConn struct{ *net.UDPConn }
+type connectedUDPConn struct{ *net.UDPConn }
 
 // WriteTo redirects all writes to the Write syscall, which is 4 times faster.
-func (c *ConnectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
+func (c *connectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
