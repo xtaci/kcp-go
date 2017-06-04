@@ -26,7 +26,7 @@ It provides **fast, ordered and error-checked** delivery of streams over **UDP**
 
 ## Features
 
-1. Optimized for **Realtime Multiplayer Games, Audio/Video Streaming**.
+1. Optimized for **Realtime Online Games, Audio/Video Streaming and Latency-Sensitive Distributed Consensus**.
 1. Compatible with [skywind3000's](https://github.com/skywind3000) C version with language specific optimizations.
 1. **Cache friendly** and **Memory optimized** design, offers extremely **High Performance** core.
 1. Handles **>5K concurrent connections** on a single commodity server.
