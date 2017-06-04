@@ -30,10 +30,10 @@ It provides **fast, ordered and error-checked** delivery of streams over **UDP**
 1. Compatible with [skywind3000's](https://github.com/skywind3000) C version with language specific optimizations.
 1. **Cache friendly** and **Memory optimized** design, offers extremely **High Performance** core.
 1. Handles **>5K concurrent connections** on a single commodity server.
-1. Compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener), a drop-in replacement for **net.TCPConn**.
+1. Compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener), a drop-in replacement for [net.TCPConn](https://golang.org/pkg/net/#TCPConn).
 1. [FEC(Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) Support with [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction)
 1. Packet level encryption support with [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm), [3DES](https://en.wikipedia.org/wiki/Triple_DES), [Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher)), [Cast5](https://en.wikipedia.org/wiki/CAST-128), [Salsa20]( https://en.wikipedia.org/wiki/Salsa20), etc. in [CFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_.28CFB.29) mode.
-1. **O(1) goroutines** created for the entire server application, minimized goroutine context switch.
+1. **Fixed number of goroutines** created for the entire server application, minimized goroutine context switch.
 
 ## Conventions
 
@@ -152,7 +152,7 @@ In kcp-go, after each `kcp.output()` function call, current time will be updated
 
 ## Tuning
 
-Q: I'm running > 3000 connections on my server. the CPU utilization is high.
+Q: I'm handling >5K connections on my server. the CPU utilization is high.
 
 A: A standalone `agent` or `gate` server for kcp-go is suggested, not only for CPU utilization, but also important to the **precision** of RTT measurements which indirectly affects retransmission. By increasing update `interval` with `SetNoDelay` like `conn.SetNoDelay(1, 40, 1, 1)` will dramatically reduce system load.
 
