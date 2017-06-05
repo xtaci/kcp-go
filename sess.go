@@ -684,6 +684,10 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
+	// cache last session
+	var lastAddr string
+	var lastSession *UDPSession
+
 	chPacket := make(chan inPacket, qlen)
 	go l.receiver(chPacket)
 	for {
@@ -709,7 +713,20 @@ func (l *Listener) monitor() {
 
 			if dataValid {
 				addr := from.String()
-				s, ok := l.sessions[addr]
+				var s *UDPSession
+				var ok bool
+
+				// packets received from an address always come in batch.
+				// cache the session for next packet, without querying map.
+				if addr == lastAddr {
+					s, ok = lastSession, true
+				} else {
+					if s, ok = l.sessions[addr]; ok {
+						lastSession = s
+						lastAddr = addr
+					}
+				}
+
 				if !ok { // new session
 					if len(l.chAccepts) < cap(l.chAccepts) { // do not let new session overwhelm accept queue
 						var conv uint32
