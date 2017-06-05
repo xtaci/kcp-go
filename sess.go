@@ -720,11 +720,9 @@ func (l *Listener) monitor() {
 				// cache the session for next packet, without querying map.
 				if addr == lastAddr {
 					s, ok = lastSession, true
-				} else {
-					if s, ok = l.sessions[addr]; ok {
-						lastSession = s
-						lastAddr = addr
-					}
+				} else if s, ok = l.sessions[addr]; ok {
+					lastSession = s
+					lastAddr = addr
 				}
 
 				if !ok { // new session
