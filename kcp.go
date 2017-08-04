@@ -521,8 +521,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 			return -2
 		}
 
-		if cmd != IKCP_CMD_PUSH && cmd != IKCP_CMD_ACK &&
-			cmd != IKCP_CMD_WASK && cmd != IKCP_CMD_WINS {
+		switch cmd {
+		case IKCP_CMD_PUSH, IKCP_CMD_ACK, IKCP_CMD_WASK, IKCP_CMD_WINS:
+		default:
 			return -3
 		}
 
