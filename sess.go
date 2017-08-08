@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"strings"	
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
@@ -868,7 +869,7 @@ func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+	udpaddr, err := net.ResolveUDPAddr("udp", strings.Split(laddr,":")[0])
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
