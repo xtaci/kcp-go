@@ -3,6 +3,7 @@ package kcp
 import (
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"net"
@@ -305,7 +306,8 @@ func (s *UDPSession) Close() error {
 	// remove this session from updater & listener(if necessary)
 	updater.removeSession(s)
 	if s.l != nil { // notify listener
-		s.l.closeSession(s.remote)
+		key := fmt.Sprintf("%s/%d", s.remote.String(), s.kcp.conv)
+		s.l.closeSession(key)
 	}
 
 	s.mu.Lock()
@@ -668,7 +670,7 @@ type (
 
 		sessions        map[string]*UDPSession // all sessions accepted by this Listener
 		chAccepts       chan *UDPSession       // Listen() backlog
-		chSessionClosed chan net.Addr          // session close queue
+		chSessionClosed chan string            // session close queue
 		headerSize      int                    // the overall header size added before KCP frame
 		die             chan struct{}          // notify the listener has closed
 		rd              atomic.Value           // read deadline for Accept()
@@ -685,7 +687,7 @@ type (
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
 	// cache last session
-	var lastAddr string
+	var lastKey string
 	var lastSession *UDPSession
 
 	chPacket := make(chan inPacket, qlen)
@@ -712,49 +714,53 @@ func (l *Listener) monitor() {
 			}
 
 			if dataValid {
-				addr := from.String()
-				var s *UDPSession
-				var ok bool
-
-				// packets received from an address always come in batch.
-				// cache the session for next packet, without querying map.
-				if addr == lastAddr {
-					s, ok = lastSession, true
-				} else if s, ok = l.sessions[addr]; ok {
-					lastSession = s
-					lastAddr = addr
-				}
-
-				if !ok { // new session
-					if len(l.chAccepts) < cap(l.chAccepts) { // do not let new session overwhelm accept queue
-						var conv uint32
-						convValid := false
-						if l.fecDecoder != nil {
-							isfec := binary.LittleEndian.Uint16(data[4:])
-							if isfec == typeData {
-								conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
-								convValid = true
-							}
-						} else {
-							conv = binary.LittleEndian.Uint32(data)
-							convValid = true
-						}
-
-						if convValid {
-							s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
-							s.kcpInput(data)
-							l.sessions[addr] = s
-							l.chAccepts <- s
-						}
+				var conv uint32
+				convValid := false
+				if l.fecDecoder != nil {
+					isfec := binary.LittleEndian.Uint16(data[4:])
+					if isfec == typeData {
+						conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+						convValid = true
 					}
 				} else {
-					s.kcpInput(data)
+					conv = binary.LittleEndian.Uint32(data)
+					convValid = true
+				}
+
+				if convValid {
+					addr := from.String()
+					key := fmt.Sprintf("%s/%d", addr, conv)
+					var s *UDPSession
+					var ok bool
+
+					// packets received from an address always come in batch.
+					// cache the session for next packet, without querying map.
+					if key == lastKey {
+						s, ok = lastSession, true
+					} else if s, ok = l.sessions[key]; ok {
+						lastSession = s
+						lastKey = addr
+					}
+
+					if !ok { // new session
+						if len(l.chAccepts) < cap(l.chAccepts) && len(l.sessions) < 4096 { // do not let new session overwhelm accept queue and connection count
+							s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
+							s.kcpInput(data)
+							l.sessions[key] = s
+							l.chAccepts <- s
+						}
+					} else {
+						s.kcpInput(data)
+					}
 				}
 			}
 
 			xmitBuf.Put(raw)
-		case deadlink := <-l.chSessionClosed:
-			delete(l.sessions, deadlink.String())
+		case key := <-l.chSessionClosed:
+			if key == lastKey {
+				lastKey = ""
+			}
+			delete(l.sessions, key)
 		case <-l.die:
 			return
 		}
@@ -850,9 +856,9 @@ func (l *Listener) Close() error {
 }
 
 // closeSession notify the listener that a session has closed
-func (l *Listener) closeSession(remote net.Addr) bool {
+func (l *Listener) closeSession(key string) bool {
 	select {
-	case l.chSessionClosed <- remote:
+	case l.chSessionClosed <- key:
 		return true
 	case <-l.die:
 		return false
@@ -886,7 +892,7 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.conn = conn
 	l.sessions = make(map[string]*UDPSession)
 	l.chAccepts = make(chan *UDPSession, acceptBacklog)
-	l.chSessionClosed = make(chan net.Addr)
+	l.chSessionClosed = make(chan string)
 	l.die = make(chan struct{})
 	l.dataShards = dataShards
 	l.parityShards = parityShards
