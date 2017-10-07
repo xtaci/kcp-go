@@ -469,8 +469,7 @@ func TestListenerClose(t *testing.T) {
 	}
 
 	l.Close()
-	fakeaddr, _ := net.ResolveUDPAddr("udp6", "127.0.0.1:1111")
-	if l.closeSession(fakeaddr) {
+	if l.closeSession("127.0.0.1:1111/1234") {
 		t.Fail()
 	}
 }
