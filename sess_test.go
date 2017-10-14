@@ -469,7 +469,10 @@ func TestListenerClose(t *testing.T) {
 	}
 
 	l.Close()
-	if l.closeSession("127.0.0.1:1111/1234") {
+	if l.closeSession(sessionKey{
+		addr:   "127.0.0.1:1111",
+		convID: 1234,
+	}) {
 		t.Fail()
 	}
 }
