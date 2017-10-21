@@ -8,6 +8,14 @@ import (
 	"testing"
 )
 
+func TestSM4(t *testing.T) {
+	bc, err := NewSM4BlockCrypt(pass[:16])
+	if err != nil {
+		t.Fatal(err)
+	}
+	cryptTest(t, bc)
+}
+
 func TestAES(t *testing.T) {
 	bc, err := NewAESBlockCrypt(pass[:32])
 	if err != nil {
@@ -98,6 +106,14 @@ func cryptTest(t *testing.T, bc BlockCrypt) {
 	if !bytes.Equal(data, dec) {
 		t.Fail()
 	}
+}
+
+func BenchmarkSM4(b *testing.B) {
+	bc, err := NewSM4BlockCrypt(pass[:16])
+	if err != nil {
+		b.Fatal(err)
+	}
+	benchCrypt(b, bc)
 }
 
 func BenchmarkAES128(b *testing.B) {
