@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/getlantern/golog"
 	"github.com/getlantern/netx"
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
@@ -56,6 +57,8 @@ var (
 	// global packet buffer
 	// shared among sending/receiving/FEC
 	xmitBuf sync.Pool
+
+	log = golog.LoggerFor("kcp")
 )
 
 func init() {
@@ -919,13 +922,16 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
 	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
 	if err != nil {
+		log.Errorf("Error resolving %v: %v", raddr, err)
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
 
 	udpconn, err := netx.DialUDP("udp", nil, udpaddr)
 	if err != nil {
+		log.Errorf("Error dialing %v: %v", udpaddr, err)
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
+	log.Debugf("Successfully dialed %v", udpaddr)
 
 	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
 }
