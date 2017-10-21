@@ -938,7 +938,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
