@@ -922,10 +922,10 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
 	udpconn, err := netx.Dial("udp", raddr)
 	if err != nil {
-		log.Errorf("Error dialing %v: %v", udpaddr, err)
+		log.Errorf("Error dialing %v: %v", raddr, err)
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
-	log.Debugf("Successfully dialed %v", udpaddr)
+	log.Debugf("Successfully dialed %s: %v", raddr, udpconn)
 
 	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
 }
