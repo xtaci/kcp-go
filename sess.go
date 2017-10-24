@@ -925,7 +925,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		log.Errorf("Error dialing %v: %v", raddr, err)
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
-	log.Debugf("Successfully dialed %s: %v", raddr, udpconn)
+	log.Debugf("Successfully dialed %s: %v", raddr, conn)
 	udpconn := conn.(*net.UDPConn)
 	log.Debugf("Converted to udp conn %v", udpconn)
 	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
