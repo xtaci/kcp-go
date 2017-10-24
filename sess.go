@@ -920,7 +920,7 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		log.Errorf("Error resolving %v: %v", raddr, err)
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
