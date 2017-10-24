@@ -920,19 +920,20 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	udpconn, err := netx.Dial("udp", raddr)
+	conn, err := netx.Dial("udp", raddr)
 	if err != nil {
 		log.Errorf("Error dialing %v: %v", raddr, err)
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
 	log.Debugf("Successfully dialed %s: %v", raddr, udpconn)
-
+	udpconn := conn.(*net.UDPConn)
+	log.Debugf("Converted to udp conn %v", udpconn)
 	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := netx.ResolveUDP("udp", raddr)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
 	}
