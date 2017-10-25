@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/getlantern/golog"
+	"github.com/getlantern/netx"
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 )
@@ -55,6 +57,8 @@ var (
 	// global packet buffer
 	// shared among sending/receiving/FEC
 	xmitBuf sync.Pool
+
+	log = golog.LoggerFor("kcp")
 )
 
 func init() {
@@ -874,9 +878,9 @@ func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", laddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.Wrap(err, "netx.ResolveUDPAddr")
 	}
 	conn, err := net.ListenUDP("udp", udpaddr)
 	if err != nil {
@@ -916,24 +920,25 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		log.Errorf("Error resolving %v: %v", raddr, err)
+		return nil, errors.Wrap(err, "netx.ResolveUDPAddr")
 	}
-
-	udpconn, err := net.DialUDP("udp", nil, udpaddr)
+	conn, err := netx.DialUDP("udp", nil, udpaddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.DialUDP")
+		log.Errorf("Error dialing %v: %v", udpaddr, err)
+		return nil, errors.Wrap(err, "netx.DialUDP")
 	}
-
-	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{udpconn})
+	log.Debugf("Successfully dialed %s %v: %v", raddr, udpaddr, conn)
+	return NewConn(raddr, block, dataShards, parityShards, &connectedUDPConn{conn})
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.Wrap(err, "netx.ResolveUDPAddr")
 	}
 
 	var convid uint32
