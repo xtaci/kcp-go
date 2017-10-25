@@ -878,9 +878,9 @@ func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", laddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.Wrap(err, "netx.ResolveUDPAddr")
 	}
 	conn, err := net.ListenUDP("udp", udpaddr)
 	if err != nil {
@@ -920,10 +920,10 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		log.Errorf("Error resolving %v: %v", raddr, err)
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.Wrap(err, "netx.ResolveUDPAddr")
 	}
 	conn, err := netx.DialUDP("udp", nil, udpaddr)
 	if err != nil {
@@ -936,9 +936,9 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	udpaddr, err := netx.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.Wrap(err, "netx.ResolveUDPAddr")
 	}
 
 	var convid uint32
