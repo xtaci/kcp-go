@@ -539,10 +539,11 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 			if flag == 0 {
 				flag = 1
 				maxack = sn
+				lastackts = ts
 			} else if _itimediff(sn, maxack) > 0 {
 				maxack = sn
+				lastackts = ts
 			}
-			lastackts = ts
 		} else if cmd == IKCP_CMD_PUSH {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
