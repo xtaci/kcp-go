@@ -5,7 +5,6 @@ import (
 	"sync/atomic"
 
 	"github.com/templexxx/reedsolomon"
-	"github.com/templexxx/xor"
 )
 
 const (
@@ -155,7 +154,7 @@ func (dec *fecDecoder) decode(pkt fecPacket) (recovered [][]byte) {
 				if shards[k] != nil {
 					dlen := len(shards[k])
 					shards[k] = shards[k][:maxlen]
-					xor.Bytes(shards[k][dlen:], shards[k][dlen:], shards[k][dlen:])
+					xorBytes(shards[k][dlen:], shards[k][dlen:], shards[k][dlen:])
 				}
 			}
 			if err := dec.codec.ReconstructData(shards); err == nil {
@@ -265,7 +264,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 		for i := 0; i < enc.dataShards; i++ {
 			shard := enc.shardCache[i]
 			slen := len(shard)
-			xor.Bytes(shard[slen:enc.maxSize], shard[slen:enc.maxSize], shard[slen:enc.maxSize])
+			xorBytes(shard[slen:enc.maxSize], shard[slen:enc.maxSize], shard[slen:enc.maxSize])
 		}
 
 		// construct equal-sized slice with stripped header
