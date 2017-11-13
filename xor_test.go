@@ -26,3 +26,22 @@ func TestXORBytes(t *testing.T) {
 		}
 	}
 }
+
+func BenchmarkZeroByXOR(b *testing.B) {
+	d := make([]byte, 1024)
+	b.ResetTimer()
+	b.SetBytes(1024)
+	for i := 0; i < b.N; i++ {
+		xorBytes(d, d, d)
+	}
+}
+
+func BenchmarkZeroByCopy(b *testing.B) {
+	d := make([]byte, 1024)
+	zero := make([]byte, 1024)
+	b.ResetTimer()
+	b.SetBytes(1024)
+	for i := 0; i < b.N; i++ {
+		copy(d, zero)
+	}
+}
