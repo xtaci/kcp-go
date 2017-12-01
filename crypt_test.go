@@ -240,7 +240,7 @@ func BenchmarkCRC32(b *testing.B) {
 }
 
 func BenchmarkCsprngSystem(b *testing.B) {
-	data := make([]byte, mtuLimit)
+	data := make([]byte, md5.Size)
 	b.SetBytes(int64(len(data)))
 
 	for i := 0; i < b.N; i++ {
