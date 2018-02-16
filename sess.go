@@ -44,7 +44,7 @@ const (
 	qlen = 128
 
 	// maximum absolute number of sessions
-	maxSessions = 4096
+	maxSessions = 32768
 )
 
 const (
