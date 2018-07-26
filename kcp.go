@@ -18,7 +18,7 @@ const (
 	IKCP_ASK_SEND    = 1  // need to send IKCP_CMD_WASK
 	IKCP_ASK_TELL    = 2  // need to send IKCP_CMD_WINS
 	IKCP_WND_SND     = 32
-	IKCP_WND_RCV     = 32
+	IKCP_WND_RCV     = 256
 	IKCP_MTU_DEF     = 1400
 	IKCP_ACK_FAST    = 3
 	IKCP_INTERVAL    = 100
@@ -977,7 +977,11 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 		kcp.snd_wnd = uint32(sndwnd)
 	}
 	if rcvwnd > 0 {
-		kcp.rcv_wnd = uint32(rcvwnd)
+		if rcvwnd < IKCP_WND_RCV {
+			kcp.rcv_wnd = IKCP_WND_RCV
+		} else {
+			kcp.rcv_wnd = uint32(rcvwnd)
+		}
 	}
 	return 0
 }
