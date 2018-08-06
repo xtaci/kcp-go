@@ -42,6 +42,9 @@ const (
 
 	// prerouting(to session) queue
 	qlen = 128
+
+	// maximum absolute number of sessions
+	maxSessions = 32768
 )
 
 const (
@@ -758,7 +761,7 @@ func (l *Listener) monitor() {
 					}
 
 					if !ok { // new session
-						if !blacklist.has(from.String(), conv) && len(l.chAccepts) < cap(l.chAccepts) && len(l.sessions) < 4096 { // do not let new session overwhelm accept queue and connection count
+						if !blacklist.has(from.String(), conv) && len(l.chAccepts) < cap(l.chAccepts) && len(l.sessions) < maxSessions { // do not let new session overwhelm accept queue and connection count
 							ses := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
 							ses.kcpInput(data)
 							l.sessions[key] = ses
