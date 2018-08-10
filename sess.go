@@ -731,7 +731,7 @@ func (l *Listener) monitor() {
 				convValid := false
 				if l.fecDecoder != nil {
 					isfec := binary.LittleEndian.Uint16(data[4:])
-					if isfec == typeData {
+					if isfec == typeData || isfec == typeFEC {
 						conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
 						convValid = true
 					}
