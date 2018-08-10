@@ -732,7 +732,7 @@ func (l *Listener) monitor() {
 				}
 
 				if !ok { // new session
-					if len(l.chAccepts) < cap(l.chAccepts) && len(l.sessions) < 4096 { // do not let new session overwhelm accept queue
+					if len(l.chAccepts) < cap(l.chAccepts) { // do not let new session overwhelm accept queue
 						var conv uint32
 						convValid := false
 						if l.fecDecoder != nil {
