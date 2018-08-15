@@ -22,7 +22,7 @@ func (errTimeout) Temporary() bool { return true }
 func (errTimeout) Error() string   { return "i/o timeout" }
 
 const (
-	// 16-bytes magic number for each packet
+	// 16-bytes nonce for each packet
 	nonceSize = 16
 
 	// 4-bytes packet checksum
@@ -50,8 +50,8 @@ const (
 )
 
 var (
-	// global packet buffer
-	// shared among sending/receiving/FEC
+	// a system-wide packet buffer shared among sending, receiving and FEC
+	// to mitigate high-frequency memory allocation for packets
 	xmitBuf sync.Pool
 )
 
@@ -67,17 +67,17 @@ type (
 		updaterIdx int            // record slice index in updater
 		conn       net.PacketConn // the underlying packet connection
 		kcp        *KCP           // KCP ARQ protocol
-		l          *Listener      // point to the Listener if it's accepted by Listener
-		block      BlockCrypt     // block encryption
+		l          *Listener      // pointing to the Listener object if it's been accepted by a Listener
+		block      BlockCrypt     // block encryption object
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
 		recvbuf []byte
 		bufptr  []byte
-		// extended output buffer(with header)
+		// header extended output buffer, if has header
 		ext []byte
 
-		// FEC
+		// FEC codec
 		fecDecoder *fecDecoder
 		fecEncoder *fecEncoder
 
@@ -85,13 +85,13 @@ type (
 		remote     net.Addr  // remote peer address
 		rd         time.Time // read deadline
 		wd         time.Time // write deadline
-		headerSize int       // the overall header size added before KCP frame
-		ackNoDelay bool      // send ack immediately for each incoming packet
+		headerSize int       // the header size additional to a KCP frame
+		ackNoDelay bool      // send ack immediately for each incoming packet(testing purpose)
 		writeDelay bool      // delay kcp.flush() for Write() for bulk transfer
-		dup        int       // duplicate udp packets
+		dup        int       // duplicate udp packets(testing purpose)
 
 		// notifications
-		die          chan struct{} // notify session has Closed
+		die          chan struct{} // notify current session has Closed
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
 		chErrorEvent chan error    // notify Read() have an error
@@ -125,7 +125,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
 
-	// FEC initialization
+	// FEC codec initialization
 	sess.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
 	if sess.block != nil {
 		sess.fecEncoder = newFECEncoder(dataShards, parityShards, cryptHeaderSize)
@@ -133,7 +133,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		sess.fecEncoder = newFECEncoder(dataShards, parityShards, 0)
 	}
 
-	// calculate header size
+	// calculate additional header size introduced by FEC and encryption
 	if sess.block != nil {
 		sess.headerSize += cryptHeaderSize
 	}
@@ -141,8 +141,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		sess.headerSize += fecHeaderSizePlus2
 	}
 
-	// only allocate extended packet buffer
-	// when the extra header is required
+	// we only need to allocate extended packet buffer if we have the additional header
 	if sess.headerSize > 0 {
 		sess.ext = make([]byte, mtuLimit)
 	}
@@ -154,8 +153,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	})
 	sess.kcp.SetMtu(IKCP_MTU_DEF - sess.headerSize)
 
-	// add current session to the global updater,
-	// which periodically calls sess.update()
+	// register current session to the global updater,
+	// which call sess.update() periodically.
 	updater.addSession(sess)
 
 	if sess.l == nil { // it's a client connection
@@ -191,28 +190,27 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 
 		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
 			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
-			if len(b) >= size { // direct write to b
+			if len(b) >= size { // receive data into 'b' directly
 				s.kcp.Recv(b)
 				s.mu.Unlock()
 				return size, nil
 			}
 
-			// resize kcp receive buffer
-			// to make sure recvbuf has enough capacity
+			// if necessary resize the stream buffer to guarantee a sufficent buffer space
 			if cap(s.recvbuf) < size {
 				s.recvbuf = make([]byte, size)
 			}
 
-			// resize recvbuf slice length
+			// resize the length of recvbuf to correspond to data size
 			s.recvbuf = s.recvbuf[:size]
 			s.kcp.Recv(s.recvbuf)
-			n = copy(b, s.recvbuf)   // copy to b
-			s.bufptr = s.recvbuf[n:] // update pointer
+			n = copy(b, s.recvbuf)   // copy to 'b'
+			s.bufptr = s.recvbuf[n:] // pointer update
 			s.mu.Unlock()
 			return n, nil
 		}
 
-		// read deadline
+		// deadline for current reading operation
 		var timeout *time.Timer
 		var c <-chan time.Time
 		if !s.rd.IsZero() {
@@ -254,7 +252,8 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			return 0, errors.New(errBrokenPipe)
 		}
 
-		// api flow control
+		// controls how much data will be sent to kcp core
+		// to prevent the memory from exhuasting
 		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 			n = len(b)
 			for {
@@ -275,7 +274,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		// write deadline
+		// deadline for current writing operation
 		var timeout *time.Timer
 		var c <-chan time.Time
 		if !s.wd.IsZero() {
@@ -304,7 +303,7 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
-	// remove this session from updater & listener(if necessary)
+	// remove current session from updater & listener(if necessary)
 	updater.removeSession(s)
 	if s.l != nil { // notify listener
 		s.l.closeSession(s.remote)
@@ -456,11 +455,11 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	return errors.New(errInvalidOperation)
 }
 
-// output pipeline entry
-// steps for output data processing:
-// 0. Header extends
-// 1. FEC
-// 2. CRC32
+// post-processing for sending a packet from kcp core
+// steps:
+// 0. Header extending
+// 1. FEC packet generation
+// 2. CRC32 caculation
 // 3. Encryption
 // 4. WriteTo kernel
 func (s *UDPSession) output(buf []byte) {
@@ -578,7 +577,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 			}
 		}
 
-		// notify reader
+		// to notify the readers to receive the data
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
 		}
@@ -588,7 +587,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if ret := s.kcp.Input(data, true, s.ackNoDelay); ret != 0 {
 			kcpInErrors++
 		}
-		// notify reader
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
 		}
@@ -629,7 +627,7 @@ func (s *UDPSession) receiver(ch chan<- []byte) {
 	}
 }
 
-// read loop for client session
+// the read loop for a client session
 func (s *UDPSession) readLoop() {
 	chPacket := make(chan []byte, qlen)
 	go s.receiver(chPacket)
@@ -664,7 +662,7 @@ func (s *UDPSession) readLoop() {
 }
 
 type (
-	// Listener defines a server listening for connections
+	// Listener defines a server which will be waiting to accept incoming connections
 	Listener struct {
 		block        BlockCrypt     // block encryption
 		dataShards   int            // FEC data shard
@@ -675,13 +673,13 @@ type (
 		sessions        map[string]*UDPSession // all sessions accepted by this Listener
 		chAccepts       chan *UDPSession       // Listen() backlog
 		chSessionClosed chan net.Addr          // session close queue
-		headerSize      int                    // the overall header size added before KCP frame
+		headerSize      int                    // the additional header to a KCP frame
 		die             chan struct{}          // notify the listener has closed
 		rd              atomic.Value           // read deadline for Accept()
 		wd              atomic.Value
 	}
 
-	// incoming packet
+	// a incoming packet definition
 	inPacket struct {
 		from net.Addr
 		data []byte
@@ -690,7 +688,7 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	// cache last session
+	// a cache for session object last used
 	var lastAddr string
 	var lastSession *UDPSession
 
@@ -722,7 +720,7 @@ func (l *Listener) monitor() {
 				var s *UDPSession
 				var ok bool
 
-				// packets received from an address always come in batch.
+				// the packets received from an address always come in batch,
 				// cache the session for next packet, without querying map.
 				if addr == lastAddr {
 					s, ok = lastSession, true
@@ -732,7 +730,7 @@ func (l *Listener) monitor() {
 				}
 
 				if !ok { // new session
-					if len(l.chAccepts) < cap(l.chAccepts) { // do not let new session overwhelm accept queue
+					if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
 						var conv uint32
 						convValid := false
 						if l.fecDecoder != nil {
@@ -746,7 +744,7 @@ func (l *Listener) monitor() {
 							convValid = true
 						}
 
-						if convValid {
+						if convValid { // creates a new session only if the 'conv' field in kcp is accessible
 							s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
 							s.kcpInput(data)
 							l.sessions[addr] = s
