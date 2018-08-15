@@ -120,7 +120,7 @@ func (dec *fecDecoder) decode(pkt fecPacket) (recovered [][]byte) {
 	if searchEnd-searchBegin+1 >= dec.dataShards {
 		var numshard, numDataShard, first, maxlen int
 
-		// zero cache
+		// zero caches
 		shards := dec.decodeCache
 		shardsflag := dec.flagCache
 		for k := range dec.decodeCache {
@@ -150,10 +150,10 @@ func (dec *fecDecoder) decode(pkt fecPacket) (recovered [][]byte) {
 		}
 
 		if numDataShard == dec.dataShards {
-			// case 1:  no lost data shards
+			// case 1: no loss on data shards
 			dec.rx = dec.freeRange(first, numshard, dec.rx)
 		} else if numshard >= dec.dataShards {
-			// case 2: data shard lost, but  recoverable from parity shard
+			// case 2: loss on data shards, but it's recoverable from parity shards
 			for k := range shards {
 				if shards[k] != nil {
 					dlen := len(shards[k])
@@ -174,7 +174,7 @@ func (dec *fecDecoder) decode(pkt fecPacket) (recovered [][]byte) {
 
 	// keep rxlimit
 	if len(dec.rx) > dec.rxlimit {
-		if dec.rx[0].flag == typeData { // record unrecoverable data
+		if dec.rx[0].flag == typeData { // track the unrecoverable data
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
 		dec.rx = dec.freeRange(0, 1, dec.rx)
@@ -184,7 +184,7 @@ func (dec *fecDecoder) decode(pkt fecPacket) (recovered [][]byte) {
 
 // free a range of fecPacket, and zero for GC recycling
 func (dec *fecDecoder) freeRange(first, n int, q []fecPacket) []fecPacket {
-	for i := first; i < first+n; i++ { // free
+	for i := first; i < first+n; i++ { // recycle buffer
 		xmitBuf.Put(q[i].data)
 	}
 	copy(q[first:], q[first+n:])
@@ -204,7 +204,7 @@ type (
 		next         uint32 // next seqid
 
 		shardCount int // count the number of datashards collected
-		maxSize    int // record maximum data length in datashard
+		maxSize    int // track maximum data length in datashard
 
 		headerOffset  int // FEC header offset
 		payloadOffset int // FEC payload offset
@@ -249,8 +249,8 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 	return enc
 }
 
-// encode the packet, output parity shards if we have enough datashards
-// the content of returned parityshards will change in next encode
+// encodes the packet, outputs parity shards if we have collected quorum datashards
+// notice: the contents of 'ps' will be re-written in successive calling
 func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	enc.markData(b[enc.headerOffset:])
 	binary.LittleEndian.PutUint16(b[enc.payloadOffset:], uint16(len(b[enc.payloadOffset:])))
@@ -261,14 +261,14 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	copy(enc.shardCache[enc.shardCount], b)
 	enc.shardCount++
 
-	// record max datashard length
+	// track max datashard length
 	if sz > enc.maxSize {
 		enc.maxSize = sz
 	}
 
-	//  calculate Reed-Solomon Erasure Code
+	//  Generation of Reed-Solomon Erasure Code
 	if enc.shardCount == enc.dataShards {
-		// bzero each datashard's tail
+		// fill '0' into the tail of each datashard
 		for i := 0; i < enc.dataShards; i++ {
 			shard := enc.shardCache[i]
 			slen := len(shard)
@@ -281,7 +281,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 			cache[k] = enc.shardCache[k][enc.payloadOffset:enc.maxSize]
 		}
 
-		// rs encode
+		// encoding
 		if err := enc.codec.Encode(cache); err == nil {
 			ps = enc.shardCache[enc.dataShards:]
 			for k := range ps {
@@ -290,7 +290,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 			}
 		}
 
-		// reset counters to zero
+		// counters resetting
 		enc.shardCount = 0
 		enc.maxSize = 0
 	}
