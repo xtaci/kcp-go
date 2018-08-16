@@ -20,7 +20,7 @@
 
 **kcp-go** is a **Production-Grade Reliable-UDP** library for [golang](https://golang.org/). 
 
-It provides **fast, ordered and error-checked** delivery of streams over **UDP** packets, has been well tested with opensource project [kcptun](https://github.com/xtaci/kcptun). Millions of devices(from low-end MIPS routers to high-end servers) are running with **kcp-go** at present, including applications like **online games, live broadcasting, file synchronization and network acceleration**.
+This library was intented to provides **fast, ordered and error-checked** delivery of streams over **UDP** packets, it has been well tested with opensource project [kcptun](https://github.com/xtaci/kcptun). Millions of devices(from low-end MIPS routers to high-end servers) are running with **kcp-go** at present, in various applicatinos like **online games, live broadcasting, file synchronization and network acceleration**.
 
 [Lastest Release](https://github.com/xtaci/kcp-go/releases)
 
@@ -32,10 +32,10 @@ It provides **fast, ordered and error-checked** delivery of streams over **UDP**
 1. Handles **>5K concurrent connections** on a single commodity server.
 1. Compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener), a drop-in replacement for [net.TCPConn](https://golang.org/pkg/net/#TCPConn).
 1. [FEC(Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) Support with [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction)
-1. Packet level encryption support with [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm), [3DES](https://en.wikipedia.org/wiki/Triple_DES), [Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher)), [Cast5](https://en.wikipedia.org/wiki/CAST-128), [Salsa20]( https://en.wikipedia.org/wiki/Salsa20), etc. in [CFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_.28CFB.29) mode.
-1. **Fixed number of goroutines** created for the entire server application, minimized goroutine context switch.
+1. Packet level encryption support with [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm), [3DES](https://en.wikipedia.org/wiki/Triple_DES), [Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher)), [Cast5](https://en.wikipedia.org/wiki/CAST-128), [Salsa20]( https://en.wikipedia.org/wiki/Salsa20), etc. in [CFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_.28CFB.29) mode, which generates completely anonymous packet.
+1. Only **A fixed number of goroutines** will be created for the entire server application, costs in context switch between goroutines have been taken into consideration.
 
-## Conventions
+## Connection Termination
 
 Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP, you need some **keepalive/heartbeat mechanism** in the application-level. A real world example is to use some **multiplexing** protocol over session, such as [smux](https://github.com/xtaci/smux)(with embedded keepalive mechanism), see [kcptun](https://github.com/xtaci/kcptun) for example.
 
@@ -80,7 +80,7 @@ Server:   [full demo](https://github.com/xtaci/kcptun/blob/master/server/main.go
 lis, err := kcp.ListenWithOptions(":10000", nil, 10, 3)
 ```
 
-## Performance
+## Benchmark
 ```
   Model Name:	MacBook Pro
   Model Identifier:	MacBookPro12,1
@@ -120,7 +120,7 @@ PASS
 ok  	_/Users/xtaci/.godeps/src/github.com/xtaci/kcp-go	39.689s
 ```
 
-## Design Considerations
+## Key Design Considerations
 
 1. slice vs. container/list
 
@@ -139,7 +139,9 @@ List structure introduces **heavy cache misses** compared to slice which owns be
 
 2. Timing accuracy vs. syscall clock_gettime
 
-Timing is **critical** to **RTT estimator**, inaccurate timing introduces false retransmissions in KCP, but calling `time.Now()` costs 42 cycles(10.5ns on 4GHz CPU, 15.6ns on my MacBook Pro 2.7GHz), the benchmark for time.Now():
+Timing is **critical** to **RTT estimator**, inaccurate timing leads to false retransmissions in KCP, but calling `time.Now()` costs 42 cycles(10.5ns on 4GHz CPU, 15.6ns on my MacBook Pro 2.7GHz). 
+
+The benchmark for time.Now() lies here:
 
 https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
 
@@ -147,14 +149,14 @@ https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go
 BenchmarkNow-4         	100000000	        15.6 ns/op
 ```
 
-In kcp-go, after each `kcp.output()` function call, current time will be updated upon return, and each `kcp.flush()` will get current time once. For most of the time, 5000 connections costs 5000 * 15.6ns = 78us(no packet needs to be sent by `kcp.output()`), as for 10MB/s data transfering with 1400 MTU, `kcp.output()` will be called around 7500 times and costs 117us for `time.Now()` in **every second**.
+In kcp-go, after each `kcp.output()` function call, current clock time will be updated upon return, and for a single `kcp.flush()` operation, current time will be queried from system once. For most of the time, 5000 connections costs 5000 * 15.6ns = 78us(a fixed cost while no packet needs to be sent), as for 10MB/s data transfering with 1400 MTU, `kcp.output()` will be called around 7500 times and costs 117us for `time.Now()` in **every second**.
 
 
-## Tuning
+## FAQ
 
-Q: I'm handling >5K connections on my server. the CPU utilization is high.
+Q: I'm handling >5K connections on my server, the CPU utilization is so high.
 
-A: A standalone `agent` or `gate` server for kcp-go is suggested, not only for CPU utilization, but also important to the **precision** of RTT measurements which indirectly affects retransmission. By increasing update `interval` with `SetNoDelay` like `conn.SetNoDelay(1, 40, 1, 1)` will dramatically reduce system load.
+A: A standalone `agent` or `gate` server for running kcp-go is suggested, not only for CPU utilization, but also important to the **precision** of RTT measurements(timing) which indirectly affects retransmission. By increasing update `interval` with `SetNoDelay` like `conn.SetNoDelay(1, 40, 1, 1)` will dramatically reduce system load, but lower the performance.
 
 ## Who is using this?
 
