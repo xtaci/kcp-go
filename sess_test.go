@@ -2,7 +2,6 @@ package kcp
 
 import (
 	"crypto/sha1"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -250,28 +249,28 @@ func TestTimeout(t *testing.T) {
 	cli.Close()
 }
 
-func TestSendRecv(t *testing.T) {
-	cli, err := dialEcho()
-	if err != nil {
-		panic(err)
-	}
-	cli.SetWriteDelay(true)
-	cli.SetDUP(1)
-	const N = 100
-	buf := make([]byte, 10)
-	for i := 0; i < N; i++ {
-		msg := fmt.Sprintf("hello%v", i)
-		cli.Write([]byte(msg))
-		if n, err := cli.Read(buf); err == nil {
-			if string(buf[:n]) != msg {
-				t.Fail()
-			}
-		} else {
-			panic(err)
-		}
-	}
-	cli.Close()
-}
+//func TestSendRecv(t *testing.T) {
+//	cli, err := dialEcho()
+//	if err != nil {
+//		panic(err)
+//	}
+//	cli.SetWriteDelay(true)
+//	cli.SetDUP(1)
+//	const N = 100
+//	buf := make([]byte, 10)
+//	for i := 0; i < N; i++ {
+//		msg := fmt.Sprintf("hello%v", i)
+//		cli.Write([]byte(msg))
+//		if n, err := cli.Read(buf); err == nil {
+//			if string(buf[:n]) != msg {
+//				t.Fail()
+//			}
+//		} else {
+//			panic(err)
+//		}
+//	}
+//	cli.Close()
+//}
 
 func TestTinyBufferReceiver(t *testing.T) {
 	cli, err := dialTinyBufferEcho()

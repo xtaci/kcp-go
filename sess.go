@@ -69,6 +69,7 @@ type (
 		kcp        *KCP           // KCP ARQ protocol
 		l          *Listener      // pointing to the Listener object if it's been accepted by a Listener
 		block      BlockCrypt     // block encryption object
+		ahead 	   AheadCipher 	  // ahead cipher
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -169,6 +170,12 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
 	}
 
+	return sess
+}
+// wrap around newUDPSession in order to add ahead cipher without break backward compatibility
+func newUDPSessionAhead(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, remote net.Addr, ahead AheadCipher) *UDPSession {
+	sess := newUDPSession(conv, dataShards, parityShards, l, conn, remote, nil)
+	sess.ahead = ahead
 	return sess
 }
 
@@ -495,6 +502,7 @@ func (s *UDPSession) output(buf []byte) {
 	// 4. WriteTo kernel
 	nbytes := 0
 	npkts := 0
+
 	for i := 0; i < s.dup+1; i++ {
 		if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
 			nbytes += n
@@ -508,6 +516,7 @@ func (s *UDPSession) output(buf []byte) {
 			npkts++
 		}
 	}
+
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
@@ -609,6 +618,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	}
 }
 
+
 func (s *UDPSession) receiver(ch chan<- []byte) {
 	for {
 		data := xmitBuf.Get().([]byte)[:mtuLimit]
@@ -637,19 +647,30 @@ func (s *UDPSession) readLoop() {
 		case data := <-chPacket:
 			raw := data
 			dataValid := false
-			if s.block != nil {
-				s.block.Decrypt(data, data)
-				data = data[nonceSize:]
-				checksum := crc32.ChecksumIEEE(data[crcSize:])
-				if checksum == binary.LittleEndian.Uint32(data) {
-					data = data[crcSize:]
-					dataValid = true
-				} else {
+			if s.ahead != nil{
+				if buf, err := s.ahead.Decrypt(data[s.ahead.SaltSize():], data); err != nil{
 					atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+				}else{
+					data = data[:len(buf)]
+					copy(data, buf)
+					dataValid = true
 				}
-			} else if s.block == nil {
-				dataValid = true
+			}else{
+				if s.block != nil {
+					s.block.Decrypt(data, data)
+					data = data[nonceSize:]
+					checksum := crc32.ChecksumIEEE(data[crcSize:])
+					if checksum == binary.LittleEndian.Uint32(data) {
+						data = data[crcSize:]
+						dataValid = true
+					} else {
+						atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+					}
+				} else if s.block == nil {
+					dataValid = true
+				}
 			}
+
 
 			if dataValid {
 				s.kcpInput(data)
@@ -664,6 +685,7 @@ func (s *UDPSession) readLoop() {
 type (
 	// Listener defines a server which will be waiting to accept incoming connections
 	Listener struct {
+		ahead		 AheadCipher
 		block        BlockCrypt     // block encryption
 		dataShards   int            // FEC data shard
 		parityShards int            // FEC parity shard
@@ -694,6 +716,7 @@ func (l *Listener) monitor() {
 
 	chPacket := make(chan inPacket, qlen)
 	go l.receiver(chPacket)
+
 	for {
 		select {
 		case p := <-chPacket:
@@ -701,19 +724,30 @@ func (l *Listener) monitor() {
 			data := p.data
 			from := p.from
 			dataValid := false
-			if l.block != nil {
-				l.block.Decrypt(data, data)
-				data = data[nonceSize:]
-				checksum := crc32.ChecksumIEEE(data[crcSize:])
-				if checksum == binary.LittleEndian.Uint32(data) {
-					data = data[crcSize:]
-					dataValid = true
-				} else {
+			if l.ahead != nil{
+				if buf, err := l.ahead.Decrypt(data[l.ahead.SaltSize():], data); err != nil{
 					atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+				}else{
+					data = data[:len(buf)]
+					copy(data, buf)
+					dataValid = true
 				}
-			} else if l.block == nil {
-				dataValid = true
+			}else{
+				if l.block != nil {
+					l.block.Decrypt(data, data)
+					data = data[nonceSize:]
+					checksum := crc32.ChecksumIEEE(data[crcSize:])
+					if checksum == binary.LittleEndian.Uint32(data) {
+						data = data[crcSize:]
+						dataValid = true
+					} else {
+						atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+					}
+				}else if l.block == nil {
+					dataValid = true
+				}
 			}
+
 
 			if dataValid {
 				addr := from.String()
@@ -766,6 +800,7 @@ func (l *Listener) monitor() {
 }
 
 func (l *Listener) receiver(ch chan<- inPacket) {
+	// create and decryption buffer
 	for {
 		data := xmitBuf.Get().([]byte)[:mtuLimit]
 		if n, from, err := l.conn.ReadFrom(data); err == nil && n >= l.headerSize+IKCP_OVERHEAD {
@@ -871,6 +906,18 @@ func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr
 
 // ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
 // dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
+func ListenWithOptionsAhead(laddr string, ahead AheadCipher, dataShards, parityShards int) (*Listener, error) {
+	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+	}
+	conn, err := net.ListenUDP("udp", udpaddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "net.ListenUDP")
+	}
+
+	return ServeConnAhead(ahead, dataShards, parityShards, conn)
+}
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
@@ -882,6 +929,28 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 	}
 
 	return ServeConn(block, dataShards, parityShards, conn)
+}
+
+// ServeConn serves KCP protocol for a single packet connection.
+func ServeConnAhead(ahead AheadCipher, dataShards, parityShards int, conn net.PacketConn) (*Listener, error) {
+	l := new(Listener)
+	l.conn = conn
+	l.sessions = make(map[string]*UDPSession)
+	l.chAccepts = make(chan *UDPSession, acceptBacklog)
+	l.chSessionClosed = make(chan net.Addr)
+	l.die = make(chan struct{})
+	l.dataShards = dataShards
+	l.parityShards = parityShards
+	l.ahead = ahead
+	l.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
+
+	// calculate header size
+	if l.fecDecoder != nil {
+		l.headerSize += fecHeaderSizePlus2
+	}
+
+	go l.monitor()
+	return l, nil
 }
 
 // ServeConn serves KCP protocol for a single packet connection.
@@ -911,6 +980,28 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 
 // Dial connects to the remote address "raddr" on the network "udp"
 func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0) }
+
+
+// Wrap around DialWithOptions to add ahead cipher
+func DialWithOptionsAhead(raddr string, ahead AheadCipher, dataShards, parityShards int) (*UDPSession, error) {
+	if sess, err := DialWithOptions(raddr, nil, dataShards, parityShards); err != nil{
+		return nil, err
+	}else{
+		sess.ahead = ahead
+		return sess, nil
+	}
+}
+
+// Wrap around NewConn to add ahead cipher
+func NewConnAhead(raddr string, ahead AheadCipher, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
+	if sess, err := NewConn(raddr, nil, dataShards, parityShards, conn); err != nil{
+		return nil, err
+	}else{
+		sess.ahead = ahead
+		return sess, nil
+	}
+}
+
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
@@ -942,10 +1033,31 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 // returns current time in milliseconds
 func currentMs() uint32 { return uint32(time.Now().UnixNano() / int64(time.Millisecond)) }
 
+
+type connectedUDPWrapper interface {
+	WriteTo(b []byte, addr net.Addr) (int, error)
+}
 // connectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
 // to Write syscalls that are 4 times faster on some OS'es. This should only be
 // used for connections that were produced by a net.Dial* call.
 type connectedUDPConn struct{ *net.UDPConn }
 
 // WriteTo redirects all writes to the Write syscall, which is 4 times faster.
-func (c *connectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
+//func (c *connectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
+
+// using session level writeTo method to add encryption
+func (s* UDPSession)WriteTo(b []byte, addr net.Addr) (int, error){
+	if s.ahead != nil {
+		cipher := s.ahead.(*metaAheadBlockCipher)
+		cipher.Lock()
+		defer cipher.Unlock()
+		if buf, err := cipher.Encrypt(cipher.Buf, b); err != nil{
+			return 0, err
+		}else{
+			_, err = s.conn.(*net.UDPConn).Write(buf)
+			return len(b), err
+		}
+	}else{
+		return s.conn.(*net.UDPConn).Write(b)
+	}
+}
