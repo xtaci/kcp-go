@@ -292,7 +292,7 @@ func TestAheadAES128GCM(t *testing.T){
 	}
 }
 func TestAheadAES192GCM(t *testing.T){
-	if bc, err := NewAES192GCM(pass[:24]); err != nil{
+	if bc, err := NewAES196GCM(pass[:24]); err != nil{
 		t.Fatal(err)
 	}else{
 		aheadTest(t, bc)
@@ -346,7 +346,7 @@ func BenchmarkAES128GCM(b *testing.B) {
 	}
 }
 func BenchmarkAES192GCM(b *testing.B) {
-	if bc, err := NewAES192GCM(pass[:24]); err != nil{
+	if bc, err := NewAES196GCM(pass[:24]); err != nil{
 		b.Fatal(err)
 	}else{
 		benchAhead(b, bc)

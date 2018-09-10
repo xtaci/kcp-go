@@ -411,7 +411,7 @@ func NewAES128GCM(key[] byte) (AheadCipher, error){
 	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM, Buf: make([]byte, 2 * mtuLimit)}, nil
 }
 
-func NewAES192GCM(key[] byte) (AheadCipher, error){
+func NewAES196GCM(key[] byte) (AheadCipher, error){
 	if len(key) != 24{
 		return nil, KeySizeError(24)
 	}
