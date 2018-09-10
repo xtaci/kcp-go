@@ -504,14 +504,14 @@ func (s *UDPSession) output(buf []byte) {
 	npkts := 0
 
 	for i := 0; i < s.dup+1; i++ {
-		if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
+		if n, err := s.WriteTo(ext, s.remote); err == nil {
 			nbytes += n
 			npkts++
 		}
 	}
 
 	for k := range ecc {
-		if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
+		if n, err := s.WriteTo(ecc[k], s.remote); err == nil {
 			nbytes += n
 			npkts++
 		}
@@ -779,7 +779,13 @@ func (l *Listener) monitor() {
 						}
 
 						if convValid { // creates a new session only if the 'conv' field in kcp is accessible
-							s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
+							var s *UDPSession
+							if l.ahead != nil{
+								s = newUDPSessionAhead(conv, l.dataShards, l.parityShards, l, l.conn, from, l.ahead)
+							}else{
+								s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
+							}
+
 							s.kcpInput(data)
 							l.sessions[addr] = s
 							l.chAccepts <- s
@@ -1033,17 +1039,15 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 // returns current time in milliseconds
 func currentMs() uint32 { return uint32(time.Now().UnixNano() / int64(time.Millisecond)) }
 
-
-type connectedUDPWrapper interface {
-	WriteTo(b []byte, addr net.Addr) (int, error)
-}
 // connectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
 // to Write syscalls that are 4 times faster on some OS'es. This should only be
 // used for connections that were produced by a net.Dial* call.
 type connectedUDPConn struct{ *net.UDPConn }
 
 // WriteTo redirects all writes to the Write syscall, which is 4 times faster.
-//func (c *connectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) { return c.Write(b) }
+func (c *connectedUDPConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+	return c.Write(b)
+}
 
 // using session level writeTo method to add encryption
 func (s* UDPSession)WriteTo(b []byte, addr net.Addr) (int, error){
@@ -1054,10 +1058,10 @@ func (s* UDPSession)WriteTo(b []byte, addr net.Addr) (int, error){
 		if buf, err := cipher.Encrypt(cipher.Buf, b); err != nil{
 			return 0, err
 		}else{
-			_, err = s.conn.(*net.UDPConn).Write(buf)
+			_, err = s.conn.WriteTo(buf, addr)
 			return len(b), err
 		}
 	}else{
-		return s.conn.(*net.UDPConn).Write(b)
+		return s.conn.WriteTo(b, addr)
 	}
 }

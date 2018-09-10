@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"crypto/sha1"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -24,15 +25,21 @@ var key = []byte("testkey")
 var fec = 4
 var pass = pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 
+const USING_AHEAD = true
 func init() {
 	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
+		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
 	}()
 
 	go echoServer()
 	go sinkServer()
 	go tinyBufferEchoServer()
-	println("beginning tests, encryption:salsa20, fec:10/3")
+	if USING_AHEAD{
+		println("beginning tests, encryption:ahead_chacha20_poly1305, fec:10/3")
+	}else{
+		println("beginning tests, encryption:salsa20, fec:10/3")
+	}
+
 }
 
 func dialEcho() (*UDPSession, error) {
@@ -40,11 +47,21 @@ func dialEcho() (*UDPSession, error) {
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
-	sess, err := DialWithOptions(portEcho, block, 10, 3)
-	if err != nil {
-		panic(err)
+
+	var sess *UDPSession
+	var err error
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		if sess, err = DialWithOptionsAhead(portEcho, cipher, 10, 3); err != nil{
+			panic(err)
+		}
+	}else{
+		block, _ := NewSalsa20BlockCrypt(pass)
+		if sess, err = DialWithOptions(portEcho, block, 10, 3); err != nil{
+			panic(err)
+		}
 	}
+
 
 	sess.SetStreamMode(true)
 	sess.SetStreamMode(false)
@@ -85,10 +102,19 @@ func dialTinyBufferEcho() (*UDPSession, error) {
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
-	sess, err := DialWithOptions(portTinyBufferEcho, block, 10, 3)
-	if err != nil {
-		panic(err)
+
+	var sess *UDPSession
+	var err error
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		if sess, err = DialWithOptionsAhead(portTinyBufferEcho, cipher, 10, 3); err != nil{
+			panic(err)
+		}
+	}else{
+		block, _ := NewSalsa20BlockCrypt(pass)
+		if sess, err = DialWithOptions(portTinyBufferEcho, block, 10, 3); err != nil{
+			panic(err)
+		}
 	}
 	return sess, err
 }
@@ -99,16 +125,30 @@ func listenEcho() (net.Listener, error) {
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
-	return ListenWithOptions(portEcho, block, 10, 3)
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		return ListenWithOptionsAhead(portEcho, cipher, 10, 3)
+	}else{
+		block, _ := NewSalsa20BlockCrypt(pass)
+		return ListenWithOptions(portEcho, block, 10, 3)
+	}
+
 }
 func listenTinyBufferEcho() (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
-	return ListenWithOptions(portTinyBufferEcho, block, 10, 3)
+
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		return ListenWithOptionsAhead(portTinyBufferEcho, cipher, 10, 3)
+	}else{
+		block, _ := NewSalsa20BlockCrypt(pass)
+		return ListenWithOptions(portTinyBufferEcho, block, 10, 3)
+	}
+
+
 }
 
 func listenSink() (net.Listener, error) {
@@ -232,45 +272,45 @@ func handleTinyBufferEcho(conn *UDPSession) {
 
 ///////////////////////////
 
-func TestTimeout(t *testing.T) {
-	cli, err := dialEcho()
-	if err != nil {
-		panic(err)
-	}
-	buf := make([]byte, 10)
-
-	//timeout
-	cli.SetDeadline(time.Now().Add(time.Second))
-	<-time.After(2 * time.Second)
-	n, err := cli.Read(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-	cli.Close()
-}
-
-//func TestSendRecv(t *testing.T) {
+//func TestTimeout(t *testing.T) {
 //	cli, err := dialEcho()
 //	if err != nil {
 //		panic(err)
 //	}
-//	cli.SetWriteDelay(true)
-//	cli.SetDUP(1)
-//	const N = 100
 //	buf := make([]byte, 10)
-//	for i := 0; i < N; i++ {
-//		msg := fmt.Sprintf("hello%v", i)
-//		cli.Write([]byte(msg))
-//		if n, err := cli.Read(buf); err == nil {
-//			if string(buf[:n]) != msg {
-//				t.Fail()
-//			}
-//		} else {
-//			panic(err)
-//		}
+//
+//	//timeout
+//	cli.SetDeadline(time.Now().Add(time.Second))
+//	<-time.After(2 * time.Second)
+//	n, err := cli.Read(buf)
+//	if n != 0 || err == nil {
+//		t.Fail()
 //	}
 //	cli.Close()
 //}
+
+func TestSendRecv(t *testing.T) {
+	cli, err := dialEcho()
+	if err != nil {
+		panic(err)
+	}
+	cli.SetWriteDelay(true)
+	cli.SetDUP(1)
+	const N = 1
+	buf := make([]byte, 10)
+	for i := 0; i < N; i++ {
+		msg := fmt.Sprintf("hello%v", i)
+		cli.Write([]byte(msg))
+		if n, err := cli.Read(buf); err == nil {
+			if string(buf[:n]) != msg {
+				t.Fail()
+			}
+		} else {
+			panic(err)
+		}
+	}
+	cli.Close()
+}
 
 func TestTinyBufferReceiver(t *testing.T) {
 	cli, err := dialTinyBufferEcho()
