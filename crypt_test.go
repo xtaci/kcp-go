@@ -7,6 +7,7 @@ import (
 	"crypto/sha1"
 	"hash/crc32"
 	"io"
+	"sync"
 	"testing"
 )
 
@@ -109,6 +110,91 @@ func cryptTest(t *testing.T, bc BlockCrypt) {
 		t.Fail()
 	}
 }
+
+func BenchmarkAheadChaCha20Poly1305(b *testing.B) {
+	if bc, err := NewChacha20Ploy1305(pass[:32]); err != nil{
+		b.Fatal(err)
+	}else{
+		benchAhead(b, bc, 4)
+	}
+}
+func BenchmarkAES128GCM(b *testing.B) {
+	if bc, err := NewAES128GCM(pass[:16]); err != nil{
+		b.Fatal(err)
+	}else{
+		benchAhead(b, bc, 4)
+	}
+}
+func BenchmarkAES192GCM(b *testing.B) {
+	if bc, err := NewAES196GCM(pass[:24]); err != nil{
+		b.Fatal(err)
+	}else{
+		benchAhead(b, bc, 4)
+	}
+}
+func BenchmarkAES256GCM(b *testing.B) {
+	if bc, err := NewAES256GCM(pass[:32]); err != nil{
+		b.Fatal(err)
+	}else{
+		benchAhead(b, bc, 4)
+	}
+}
+
+
+func goRoutingEncDec(b *testing.B, bc AheadCipher, workers chan bool, data []byte, mutex sync.Mutex){
+	var err error
+	dec := make([]byte, 2*mtuLimit)
+	enc := make([]byte, 2*mtuLimit)
+	for{
+		select{
+		case signal := <-workers:
+			if signal {
+				if enc, err = bc.Encrypt(enc, data); err != nil {
+					b.Errorf("Ahead encryption failed: %s", err.Error())
+					b.Fail()
+					return
+				}
+				if dec, err = bc.Decrypt(dec, enc); err != nil {
+					b.Errorf("Ahead dencryption failed: %s", err.Error())
+					b.Fail()
+					return
+				}
+				mutex.Lock()
+				b.SetBytes(mtuLimit * 2)
+				mutex.Unlock()
+			}else{
+				// quit
+				return
+			}
+		}
+	}
+}
+func benchAhead(b *testing.B, bc AheadCipher, parallel int) {
+	b.ReportAllocs()
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+
+	workers := make(chan bool, parallel)
+	var mux sync.Mutex
+	for c := 0; c < parallel; c++{
+		go goRoutingEncDec(b, bc, workers, data, mux)
+	}
+	workerIdx := 0
+	for i := 0; i < b.N; i++ {
+		workers <- true
+		workerIdx++
+		if workerIdx >= parallel{
+			workerIdx = 0
+		}
+	}
+
+	for c := 0; c < parallel; c++{
+		workers <- false
+	}
+
+
+}
+
 
 func BenchmarkSM4(b *testing.B) {
 	bc, err := NewSM4BlockCrypt(pass[:16])
@@ -274,3 +360,60 @@ func BenchmarkCsprngMD5AndSystem(b *testing.B) {
 		ng.Fill(data)
 	}
 }
+
+
+func TestAheadChaCha20Poly1305(t *testing.T){
+	if bc, err := NewChacha20Ploy1305(pass[:32]); err != nil{
+		t.Fatal(err)
+	}else{
+		aheadTest(t, bc)
+	}
+}
+
+func TestAheadAES128GCM(t *testing.T){
+	if bc, err := NewAES128GCM(pass[:16]); err != nil{
+		t.Fatal(err)
+	}else{
+		aheadTest(t, bc)
+	}
+}
+func TestAheadAES192GCM(t *testing.T){
+	if bc, err := NewAES196GCM(pass[:24]); err != nil{
+		t.Fatal(err)
+	}else{
+		aheadTest(t, bc)
+	}
+}
+
+func TestAheadAES256GCM(t *testing.T){
+	if bc, err := NewAES256GCM(pass[:32]); err != nil{
+		t.Fatal(err)
+	}else{
+		aheadTest(t, bc)
+	}
+}
+
+
+func aheadTest(t *testing.T, bc AheadCipher) {
+	data := make([]byte, mtuLimit)
+	io.ReadFull(rand.Reader, data)
+
+	var err error
+	dec := make([]byte, 2 * mtuLimit)
+	enc := make([]byte, 2 * mtuLimit)
+
+	if enc, err = bc.Encrypt(enc, data); err != nil{
+		t.Errorf("Ahead encryption failed: %s", err.Error())
+		t.Fail()
+	}
+
+	if dec, err = bc.Decrypt(dec, enc); err != nil{
+		t.Errorf("Ahead dencryption failed: %s", err.Error())
+		t.Fail()
+	}
+
+	if !bytes.Equal(data, dec) {
+		t.Fail()
+	}
+}
+

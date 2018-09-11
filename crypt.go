@@ -4,13 +4,18 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/des"
+	"crypto/rand"
 	"crypto/sha1"
-
 	"github.com/templexxx/xor"
 	"github.com/tjfoc/gmsm/sm4"
+	"golang.org/x/crypto/chacha20poly1305"
+	"io"
+	"strconv"
 
+	"errors"
 	"golang.org/x/crypto/blowfish"
 	"golang.org/x/crypto/cast5"
+	"golang.org/x/crypto/hkdf"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/salsa20"
 	"golang.org/x/crypto/tea"
@@ -22,6 +27,12 @@ var (
 	initialVector = []byte{167, 115, 79, 156, 18, 172, 27, 1, 164, 21, 242, 193, 252, 120, 230, 107}
 	saltxor       = `sH3CIVoF#rWLtJo6`
 )
+
+type KeySizeError int
+
+func (e KeySizeError) Error() string {
+	return "key size error: need " + strconv.Itoa(int(e)) + " bytes"
+}
 
 // BlockCrypt defines encryption/decryption methods for a given byte slice.
 // Notes on implementing: the data to be encrypted contains a builtin
@@ -285,4 +296,126 @@ func decrypt(block cipher.Block, dst, src, buf []byte) {
 		base += blocksize
 	}
 	xor.BytesSrc0(dst[base:], src[base:], tbl)
+}
+
+// Add ahead encryption & decryption
+var ErrShortPacket = errors.New("short packet")
+var _zerononce [128]byte
+
+type AheadCipher interface {
+	KeySize() int
+	SaltSize() int
+
+	Encrypt(dst, src []byte) ([]byte, error)
+	Decrypt(dst, pkt []byte) ([]byte, error)
+
+	Encrypter(salt []byte) (cipher.AEAD, error)
+	Decrypter(salt []byte) (cipher.AEAD, error)
+}
+
+type metaAheadBlockCipher struct{
+	psk	[]byte
+	makeAEAD func(key []byte) (cipher.AEAD, error)
+}
+
+func (c *metaAheadBlockCipher)KeySize() int{
+	return len(c.psk)
+}
+func (c *metaAheadBlockCipher)SaltSize() int{
+	if ks := c.KeySize(); ks > 16{
+		return ks
+	}
+	return 16
+}
+func hkdfSHA1(secret, salt, info, outkey []byte) {
+	r := hkdf.New(sha1.New, secret, salt, info)
+	if _, err := io.ReadFull(r, outkey); err != nil {
+		panic(err) // should never happen
+	}
+}
+
+func (c *metaAheadBlockCipher) Encrypter(salt []byte) (cipher.AEAD, error) {
+	subkey := make([]byte, c.KeySize())
+	hkdfSHA1(c.psk, salt, []byte("too simple, sometimes naive"), subkey)
+	return c.makeAEAD(subkey)
+}
+func (c *metaAheadBlockCipher) Decrypter(salt []byte) (cipher.AEAD, error) {
+	subkey := make([]byte, c.KeySize())
+	hkdfSHA1(c.psk, salt, []byte("too simple, sometimes naive"), subkey)
+	return c.makeAEAD(subkey)
+}
+
+
+func (c *metaAheadBlockCipher)Encrypt(dst, src []byte) ([]byte, error) {
+	saltSize := c.SaltSize()
+	salt := dst[:saltSize]
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return nil, err
+	}
+
+	aead, err := c.Encrypter(salt)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(dst) < saltSize+len(src)+aead.Overhead() {
+		return nil, io.ErrShortBuffer
+	}
+	b := aead.Seal(dst[saltSize:saltSize], _zerononce[:aead.NonceSize()], src, nil)
+	return dst[:saltSize+len(b)], nil
+}
+func (c *metaAheadBlockCipher)Decrypt(dst, pkt []byte) ([]byte, error) {
+	saltSize := c.SaltSize()
+	if len(pkt) < saltSize {
+		return nil, ErrShortPacket
+	}
+	salt := pkt[:saltSize]
+	aead, err := c.Decrypter(salt)
+	if err != nil {
+		return nil, err
+	}
+	if len(pkt) < saltSize+aead.Overhead() {
+		return nil, ErrShortPacket
+	}
+	if saltSize+len(dst)+aead.Overhead() < len(pkt) {
+		return nil, io.ErrShortBuffer
+	}
+	b, err := aead.Open(dst[:0], _zerononce[:aead.NonceSize()], pkt[saltSize:], nil)
+	return b, err
+}
+
+func aesGCM(key []byte) (cipher.AEAD, error) {
+	blk, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+	return cipher.NewGCM(blk)
+}
+
+func NewChacha20Ploy1305(key[] byte) (AheadCipher, error){
+	if len(key) != chacha20poly1305.KeySize {
+		return nil, KeySizeError(chacha20poly1305.KeySize)
+	}
+	return &metaAheadBlockCipher{psk: key, makeAEAD: chacha20poly1305.New}, nil
+}
+
+func NewAES128GCM(key[] byte) (AheadCipher, error){
+	if len(key) != 16{
+		return nil, KeySizeError(16)
+	}
+	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM}, nil
+}
+
+func NewAES196GCM(key[] byte) (AheadCipher, error){
+	if len(key) != 24{
+		return nil, KeySizeError(24)
+	}
+	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM}, nil
+}
+
+func NewAES256GCM(key[] byte) (AheadCipher, error){
+	if len(key) != 32{
+		return nil, KeySizeError(32)
+	}
+	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM}, nil
 }
