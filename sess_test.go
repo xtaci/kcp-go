@@ -52,7 +52,7 @@ func dialEcho() (*UDPSession, error) {
 	var err error
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if sess, err = DialWithOptionsAhead(portEcho, cipher, 10, 3); err != nil{
+		if sess, err = DialWithOptionsAhead(portEcho, cipher, 4, 0, 0); err != nil{
 			panic(err)
 		}
 	}else{
@@ -80,10 +80,24 @@ func dialEcho() (*UDPSession, error) {
 }
 
 func dialSink() (*UDPSession, error) {
-	sess, err := DialWithOptions(portSink, nil, 0, 0)
-	if err != nil {
-		panic(err)
+	var sess *UDPSession
+	var err error
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		if sess, err = DialWithOptionsAhead(portEcho, cipher, 4, 0, 0); err != nil{
+			panic(err)
+		}
+	}else{
+		block, _ := NewSalsa20BlockCrypt(pass)
+		if sess, err = DialWithOptions(portEcho, block, 10, 3); err != nil{
+			panic(err)
+		}
 	}
+	//
+	//sess, err := DialWithOptions(portSink, nil, 0, 0)
+	//if err != nil {
+	//	panic(err)
+	//}
 
 	sess.SetStreamMode(true)
 	sess.SetWindowSize(4096, 4096)
@@ -107,7 +121,7 @@ func dialTinyBufferEcho() (*UDPSession, error) {
 	var err error
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if sess, err = DialWithOptionsAhead(portTinyBufferEcho, cipher, 10, 3); err != nil{
+		if sess, err = DialWithOptionsAhead(portTinyBufferEcho, cipher, 4, 0, 0); err != nil{
 			panic(err)
 		}
 	}else{
@@ -127,7 +141,7 @@ func listenEcho() (net.Listener, error) {
 	//block, _ := NewAESBlockCrypt(pass)
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		return ListenWithOptionsAhead(portEcho, cipher, 10, 3)
+		return ListenWithOptionsAhead(portEcho, 4, cipher, 0, 0)
 	}else{
 		block, _ := NewSalsa20BlockCrypt(pass)
 		return ListenWithOptions(portEcho, block, 10, 3)
@@ -142,7 +156,7 @@ func listenTinyBufferEcho() (net.Listener, error) {
 
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		return ListenWithOptionsAhead(portTinyBufferEcho, cipher, 10, 3)
+		return ListenWithOptionsAhead(portTinyBufferEcho, 4,  cipher, 0, 0)
 	}else{
 		block, _ := NewSalsa20BlockCrypt(pass)
 		return ListenWithOptions(portTinyBufferEcho, block, 10, 3)
@@ -152,7 +166,13 @@ func listenTinyBufferEcho() (net.Listener, error) {
 }
 
 func listenSink() (net.Listener, error) {
-	return ListenWithOptions(portSink, nil, 0, 0)
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		return ListenWithOptionsAhead(portSink, 4, cipher, 0,0)
+	}else{
+		return ListenWithOptions(portSink, nil, 10, 3)
+	}
+
 }
 
 func echoServer() {
@@ -384,9 +404,18 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 }
 
 func parallel_client(wg *sync.WaitGroup) (err error) {
-	cli, err := dialEcho()
-	if err != nil {
-		panic(err)
+
+	var cli *UDPSession
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		if cli, err = DialWithOptionsAhead(portEcho, cipher, 4, 0, 0); err != nil{
+			panic(err)
+		}
+	}else{
+		block, _ := NewSalsa20BlockCrypt(pass)
+		if cli, err = DialWithOptions(portEcho, block, 10, 3); err != nil{
+			panic(err)
+		}
 	}
 
 	err = echo_tester(cli, 64, 64)
@@ -495,10 +524,19 @@ func TestSNMP(t *testing.T) {
 }
 
 func TestListenerClose(t *testing.T) {
-	l, err := ListenWithOptions(portListerner, nil, 10, 3)
-	if err != nil {
-		t.Fail()
+	var l *Listener
+	var err error
+	if USING_AHEAD{
+		cipher, _ := NewChacha20Ploy1305(pass[:32])
+		if l, err = ListenWithOptionsAhead(portListerner, 4, cipher, 0, 0); err != nil{
+			t.Fail()
+		}
+	}else{
+		if l, err = ListenWithOptions(portListerner, nil, 10, 3); err != nil{
+			t.Fail()
+		}
 	}
+
 	l.SetReadDeadline(time.Now().Add(time.Second))
 	l.SetWriteDeadline(time.Now().Add(time.Second))
 	l.SetDeadline(time.Now().Add(time.Second))

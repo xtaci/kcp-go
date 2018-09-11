@@ -6,13 +6,11 @@ import (
 	"crypto/des"
 	"crypto/rand"
 	"crypto/sha1"
+	"github.com/templexxx/xor"
+	"github.com/tjfoc/gmsm/sm4"
 	"golang.org/x/crypto/chacha20poly1305"
 	"io"
 	"strconv"
-	"sync"
-
-	"github.com/templexxx/xor"
-	"github.com/tjfoc/gmsm/sm4"
 
 	"errors"
 	"golang.org/x/crypto/blowfish"
@@ -318,9 +316,6 @@ type AheadCipher interface {
 type metaAheadBlockCipher struct{
 	psk	[]byte
 	makeAEAD func(key []byte) (cipher.AEAD, error)
-
-	Buf []byte
-	sync.Mutex
 }
 
 func (c *metaAheadBlockCipher)KeySize() int{
@@ -401,26 +396,26 @@ func NewChacha20Ploy1305(key[] byte) (AheadCipher, error){
 	if len(key) != chacha20poly1305.KeySize {
 		return nil, KeySizeError(chacha20poly1305.KeySize)
 	}
-	return &metaAheadBlockCipher{psk: key, makeAEAD: chacha20poly1305.New, Buf: make([]byte, 2 * mtuLimit)}, nil
+	return &metaAheadBlockCipher{psk: key, makeAEAD: chacha20poly1305.New}, nil
 }
 
 func NewAES128GCM(key[] byte) (AheadCipher, error){
 	if len(key) != 16{
 		return nil, KeySizeError(16)
 	}
-	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM, Buf: make([]byte, 2 * mtuLimit)}, nil
+	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM}, nil
 }
 
 func NewAES196GCM(key[] byte) (AheadCipher, error){
 	if len(key) != 24{
 		return nil, KeySizeError(24)
 	}
-	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM, Buf: make([]byte, 2 * mtuLimit)}, nil
+	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM}, nil
 }
 
 func NewAES256GCM(key[] byte) (AheadCipher, error){
 	if len(key) != 32{
 		return nil, KeySizeError(32)
 	}
-	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM, Buf: make([]byte, 2 * mtuLimit)}, nil
+	return &metaAheadBlockCipher{psk: key, makeAEAD: aesGCM}, nil
 }
