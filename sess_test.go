@@ -26,6 +26,7 @@ var fec = 4
 var pass = pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 
 const USING_AHEAD = true
+const AHED_THREAD_COUNT = 4
 func init() {
 	go func() {
 		log.Println(http.ListenAndServe("127.0.0.1:6060", nil))
@@ -52,7 +53,7 @@ func dialEcho() (*UDPSession, error) {
 	var err error
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if sess, err = DialWithOptionsAhead(portEcho, cipher, 4, 0, 0); err != nil{
+		if sess, err = DialWithOptionsAhead(portEcho, cipher, AHED_THREAD_COUNT, 0, 0); err != nil{
 			panic(err)
 		}
 	}else{
@@ -80,24 +81,24 @@ func dialEcho() (*UDPSession, error) {
 }
 
 func dialSink() (*UDPSession, error) {
-	var sess *UDPSession
-	var err error
-	if USING_AHEAD{
-		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if sess, err = DialWithOptionsAhead(portEcho, cipher, 4, 0, 0); err != nil{
-			panic(err)
-		}
-	}else{
-		block, _ := NewSalsa20BlockCrypt(pass)
-		if sess, err = DialWithOptions(portEcho, block, 10, 3); err != nil{
-			panic(err)
-		}
-	}
-	//
-	//sess, err := DialWithOptions(portSink, nil, 0, 0)
-	//if err != nil {
-	//	panic(err)
+	//var sess *UDPSession
+	//var err error
+	//if USING_AHEAD{
+	//	//cipher, _ := NewChacha20Ploy1305(pass[:32])
+	//	if sess, err = DialWithOptionsAhead(portEcho, nil, 4, 0, 0); err != nil{
+	//		panic(err)
+	//	}
+	//}else{
+	//	//block, _ := NewSalsa20BlockCrypt(pass)
+	//	if sess, err = DialWithOptions(portEcho, nil, 0, 0); err != nil{
+	//		panic(err)
+	//	}
 	//}
+	//
+	sess, err := DialWithOptions(portSink, nil, 0, 0)
+	if err != nil {
+		panic(err)
+	}
 
 	sess.SetStreamMode(true)
 	sess.SetWindowSize(4096, 4096)
@@ -121,7 +122,7 @@ func dialTinyBufferEcho() (*UDPSession, error) {
 	var err error
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if sess, err = DialWithOptionsAhead(portTinyBufferEcho, cipher, 4, 0, 0); err != nil{
+		if sess, err = DialWithOptionsAhead(portTinyBufferEcho, cipher, AHED_THREAD_COUNT, 0, 0); err != nil{
 			panic(err)
 		}
 	}else{
@@ -141,7 +142,7 @@ func listenEcho() (net.Listener, error) {
 	//block, _ := NewAESBlockCrypt(pass)
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		return ListenWithOptionsAhead(portEcho, 4, cipher, 0, 0)
+		return ListenWithOptionsAhead(portEcho, AHED_THREAD_COUNT, cipher, 0, 0)
 	}else{
 		block, _ := NewSalsa20BlockCrypt(pass)
 		return ListenWithOptions(portEcho, block, 10, 3)
@@ -156,7 +157,7 @@ func listenTinyBufferEcho() (net.Listener, error) {
 
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		return ListenWithOptionsAhead(portTinyBufferEcho, 4,  cipher, 0, 0)
+		return ListenWithOptionsAhead(portTinyBufferEcho, AHED_THREAD_COUNT,  cipher, 0, 0)
 	}else{
 		block, _ := NewSalsa20BlockCrypt(pass)
 		return ListenWithOptions(portTinyBufferEcho, block, 10, 3)
@@ -166,12 +167,14 @@ func listenTinyBufferEcho() (net.Listener, error) {
 }
 
 func listenSink() (net.Listener, error) {
-	if USING_AHEAD{
-		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		return ListenWithOptionsAhead(portSink, 4, cipher, 0,0)
-	}else{
-		return ListenWithOptions(portSink, nil, 10, 3)
-	}
+	//if USING_AHEAD{
+	//	//cipher, _ := NewChacha20Ploy1305(pass[:32])
+	//	return ListenWithOptionsAhead(portSink, 0, nil, 0,0)
+	//}else{
+	//	//block, _ := NewSalsa20BlockCrypt(pass)
+	//	return ListenWithOptions(portSink, nil, 10, 3)
+	//}
+	return ListenWithOptions(portSink, nil, 0, 0)
 
 }
 
@@ -292,22 +295,22 @@ func handleTinyBufferEcho(conn *UDPSession) {
 
 ///////////////////////////
 
-//func TestTimeout(t *testing.T) {
-//	cli, err := dialEcho()
-//	if err != nil {
-//		panic(err)
-//	}
-//	buf := make([]byte, 10)
-//
-//	//timeout
-//	cli.SetDeadline(time.Now().Add(time.Second))
-//	<-time.After(2 * time.Second)
-//	n, err := cli.Read(buf)
-//	if n != 0 || err == nil {
-//		t.Fail()
-//	}
-//	cli.Close()
-//}
+func TestTimeout(t *testing.T) {
+	cli, err := dialEcho()
+	if err != nil {
+		panic(err)
+	}
+	buf := make([]byte, 10)
+
+	//timeout
+	cli.SetDeadline(time.Now().Add(time.Second))
+	<-time.After(2 * time.Second)
+	n, err := cli.Read(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	cli.Close()
+}
 
 func TestSendRecv(t *testing.T) {
 	cli, err := dialEcho()
@@ -408,7 +411,7 @@ func parallel_client(wg *sync.WaitGroup) (err error) {
 	var cli *UDPSession
 	if USING_AHEAD{
 		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if cli, err = DialWithOptionsAhead(portEcho, cipher, 4, 0, 0); err != nil{
+		if cli, err = DialWithOptionsAhead(portEcho, cipher, AHED_THREAD_COUNT, 0, 0); err != nil{
 			panic(err)
 		}
 	}else{
@@ -527,8 +530,7 @@ func TestListenerClose(t *testing.T) {
 	var l *Listener
 	var err error
 	if USING_AHEAD{
-		cipher, _ := NewChacha20Ploy1305(pass[:32])
-		if l, err = ListenWithOptionsAhead(portListerner, 4, cipher, 0, 0); err != nil{
+		if l, err = ListenWithOptionsAhead(portListerner, 0, nil, 0, 0); err != nil{
 			t.Fail()
 		}
 	}else{

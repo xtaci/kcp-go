@@ -351,15 +351,6 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
-	// close all enc dec go-routing
-	if s.ahead != nil{
-		aheadCount := len(s.aheadEncQuitEvent)
-		for i := 0; i < aheadCount; i++{
-			s.aheadEncQuitEvent <- true
-			s.aheadDecQuitEvent <- true
-		}
-	}
-
 
 	// remove current session from updater & listener(if necessary)
 	updater.removeSession(s)
@@ -671,17 +662,19 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 
 func (s * UDPSession)receiverDecryption(){
+	buf := make([]byte, 2 * mtuLimit)
 	for{
 		select{
 			case evt := <- s.aheadDecEvent:
 				cipher := s.ahead.(*metaAheadBlockCipher)
-				data := xmitBuf.Get().([]byte)[:mtuLimit]
-				if buf, err := cipher.Decrypt(data, evt.Data); err != nil{
+				if out, err := cipher.Decrypt(buf, evt.Data); err != nil{
+					xmitBuf.Put(evt.Data)
 					atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 				}else{
-					evt.Channel <- buf
+					evt.Data = evt.Data[:len(out)]
+					copy(evt.Data, out)
+					evt.Channel <- evt.Data
 				}
-				xmitBuf.Put(evt.Data)
 			case <- s.aheadDecQuitEvent:
 				return
 		}
@@ -696,9 +689,25 @@ func (s *UDPSession) receiver(ch chan<- []byte) {
 				select {
 				case s.aheadDecEvent <- aheadDecryptionSessionEvent{ch, data[:n]}:
 				case <-s.die:
+					// close all enc dec go-routing
+					if s.ahead != nil{
+						aheadCount := len(s.aheadEncQuitEvent)
+						for i := 0; i < aheadCount; i++{
+							s.aheadEncQuitEvent <- true
+							s.aheadDecQuitEvent <- true
+						}
+					}
 					return
 				}
 			} else if err != nil {
+				// close all enc dec go-routing
+				if s.ahead != nil{
+					aheadCount := len(s.aheadEncQuitEvent)
+					for i := 0; i < aheadCount; i++{
+						s.aheadEncQuitEvent <- true
+						s.aheadDecQuitEvent <- true
+					}
+				}
 				s.chErrorEvent <- err
 				return
 			} else {
@@ -745,7 +754,7 @@ func (s *UDPSession) readLoop() {
 				} else {
 					atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 				}
-			} else if s.block == nil {
+			}else{
 				dataValid = true
 			}
 
@@ -814,7 +823,7 @@ func (l *Listener) monitor() {
 				} else {
 					atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 				}
-			}else if l.block == nil {
+			}else {
 				dataValid = true
 			}
 
@@ -876,17 +885,20 @@ func (l *Listener) monitor() {
 }
 
 func (l *Listener)receiverDecryption(){
+	buf := make([]byte, 2 * mtuLimit)
 	for{
 		select{
 		case evt := <- l.aheadDecEvent:
 			cipher := l.ahead.(*metaAheadBlockCipher)
-			data := xmitBuf.Get().([]byte)[:mtuLimit]
-			if buf, err := cipher.Decrypt(data, evt.Data); err != nil{
+			if out, err := cipher.Decrypt(buf, evt.Data); err != nil{
+				xmitBuf.Put(evt.Data)
 				atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 			}else{
-				evt.Channel <- inPacket{evt.From, buf}
+				evt.Data = evt.Data[:len(out)]
+				copy(evt.Data, out)
+				evt.Channel <- inPacket{evt.From, evt.Data}
 			}
-			xmitBuf.Put(evt.Data)
+
 		case <- l.aheadDecQuitEvent:
 			return
 		}
@@ -903,9 +915,23 @@ func (l *Listener) receiver(ch chan<- inPacket) {
 				select {
 				case l.aheadDecEvent <- aheadDecryptionListenerEvent{ch, from, data[:n]}:
 				case <-l.die:
+					//close all go-routing
+					if l.ahead != nil{
+						decThreadCount := len(l.aheadDecQuitEvent)
+						for i := 0; i < decThreadCount; i++{
+							l.aheadDecQuitEvent <- true
+						}
+					}
 					return
 				}
 			} else if err != nil {
+				//close all go-routing
+				if l.ahead != nil{
+					decThreadCount := len(l.aheadDecQuitEvent)
+					for i := 0; i < decThreadCount; i++{
+						l.aheadDecQuitEvent <- true
+					}
+				}
 				return
 			} else {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
@@ -999,13 +1025,6 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() error {
-	// close all go-routing
-	if l.ahead != nil{
-		decThreadCount := len(l.aheadDecQuitEvent)
-		for i := 0; i < decThreadCount; i++{
-			l.aheadDecQuitEvent <- true
-		}
-	}
 
 	close(l.die)
 	return l.conn.Close()
