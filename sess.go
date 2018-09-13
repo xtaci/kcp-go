@@ -459,7 +459,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 // steps:
 // 0. Header extending
 // 1. FEC packet generation
-// 2. CRC32 caculation
+// 2. CRC32 integrity
 // 3. Encryption
 // 4. WriteTo kernel
 func (s *UDPSession) output(buf []byte) {
