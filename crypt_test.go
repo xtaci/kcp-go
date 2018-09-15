@@ -265,7 +265,7 @@ func BenchmarkCsprngSHA1(b *testing.B) {
 	}
 }
 
-func BenchmarkCsprngMD5AndSystem(b *testing.B) {
+func BenchmarkCsprngNonceMD5(b *testing.B) {
 	var ng nonceMD5
 
 	b.SetBytes(md5.Size)
