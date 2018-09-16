@@ -1,24 +1,51 @@
 package kcp
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/md5"
 	"crypto/rand"
 	"io"
 )
 
-// nonceMD5 is a nonce generator for each packet header
-// which took the advantages of both MD5 and CSPRNG(like /dev/urandom).
-// The benchmark shows it's faster than previous CSPRNG only method.
-type nonceMD5 struct {
-	data [md5.Size]byte
+type Entropy interface {
+	Init()
+	Fill(nonce []byte)
 }
 
-// Fill fills a nonce into the provided slice with no more than md5.Size bytes
-// the entropy will be updated whenever a leading 0 appears
+// nonceMD5 nonce generator for packet header
+type nonceMD5 struct {
+	seed [md5.Size]byte
+}
+
+func (n *nonceMD5) Init() { /*nothing required*/ }
+
 func (n *nonceMD5) Fill(nonce []byte) {
-	if n.data[0] == 0 { // 1/256 chance for entropy update
-		io.ReadFull(rand.Reader, n.data[:])
+	if n.seed[0] == 0 { // entropy update
+		io.ReadFull(rand.Reader, n.seed[:])
 	}
-	n.data = md5.Sum(n.data[:])
-	copy(nonce, n.data[:])
+	n.seed = md5.Sum(n.seed[:])
+	copy(nonce, n.seed[:])
+}
+
+// nonceAES128 nonce generator for packet headers
+type nonceAES128 struct {
+	seed  [aes.BlockSize]byte
+	block cipher.Block
+}
+
+func (n *nonceAES128) Init() {
+	var key [16]byte //aes-128
+	io.ReadFull(rand.Reader, key[:])
+	io.ReadFull(rand.Reader, n.seed[:])
+	block, _ := aes.NewCipher(key[:])
+	n.block = block
+}
+
+func (n *nonceAES128) Fill(nonce []byte) {
+	if n.seed[0] == 0 { // entropy update
+		io.ReadFull(rand.Reader, n.seed[:])
+	}
+	n.block.Encrypt(n.seed[:], n.seed[:])
+	copy(nonce, n.seed[:])
 }

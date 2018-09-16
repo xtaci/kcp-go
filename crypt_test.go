@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"bytes"
+	"crypto/aes"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha1"
@@ -267,9 +268,20 @@ func BenchmarkCsprngSHA1(b *testing.B) {
 
 func BenchmarkCsprngNonceMD5(b *testing.B) {
 	var ng nonceMD5
-
+	ng.Init()
 	b.SetBytes(md5.Size)
 	data := make([]byte, md5.Size)
+	for i := 0; i < b.N; i++ {
+		ng.Fill(data)
+	}
+}
+
+func BenchmarkCsprngNonceAES128(b *testing.B) {
+	var ng nonceAES128
+	ng.Init()
+
+	b.SetBytes(aes.BlockSize)
+	data := make([]byte, aes.BlockSize)
 	for i := 0; i < b.N; i++ {
 		ng.Fill(data)
 	}
