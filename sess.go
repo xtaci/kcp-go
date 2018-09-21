@@ -268,7 +268,8 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 				}
 			}
 
-			if !s.writeDelay {
+			// flush immediately if the queue is full
+			if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
 				s.kcp.flush(false)
 			}
 			s.mu.Unlock()
@@ -549,6 +550,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if s.fecDecoder != nil {
 		f := s.fecDecoder.decodeBytes(data)
 		s.mu.Lock()
+		waitsnd := s.kcp.WaitSnd()
 		if f.flag == typeData {
 			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
 				kcpInErrors++
@@ -583,14 +585,22 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
 		}
+		// to notify the writers when queue is shorter(e.g. ACKed)
+		if s.kcp.WaitSnd() < waitsnd {
+			s.notifyWriteEvent()
+		}
 		s.mu.Unlock()
 	} else {
 		s.mu.Lock()
+		waitsnd := s.kcp.WaitSnd()
 		if ret := s.kcp.Input(data, true, s.ackNoDelay); ret != 0 {
 			kcpInErrors++
 		}
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
+		}
+		if s.kcp.WaitSnd() < waitsnd {
+			s.notifyWriteEvent()
 		}
 		s.mu.Unlock()
 	}
