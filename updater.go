@@ -85,11 +85,11 @@ func (h *updateHeap) updateTask() {
 
 		h.mu.Lock()
 		hlen := h.Len()
-		now := time.Now()
 		for i := 0; i < hlen; i++ {
 			entry := &h.entries[0]
-			if now.After(entry.ts) {
-				entry.ts = now.Add(entry.s.update())
+			if time.Now().After(entry.ts) {
+				interval := entry.s.update()
+				entry.ts = time.Now().Add(interval)
 				heap.Fix(h, 0)
 			} else {
 				break
@@ -97,7 +97,7 @@ func (h *updateHeap) updateTask() {
 		}
 
 		if hlen > 0 {
-			timer = time.After(h.entries[0].ts.Sub(now))
+			timer = time.After(h.entries[0].ts.Sub(time.Now()))
 		}
 		h.mu.Unlock()
 	}
