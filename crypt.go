@@ -263,12 +263,89 @@ func encrypt(block cipher.Block, dst, src, buf []byte) {
 	block.Encrypt(tbl, initialVector)
 	n := len(src) / blocksize
 	base := 0
-	for i := 0; i < n; i++ {
+	repeat := n / 8
+	left := n % 8
+	for i := 0; i < repeat; i++ {
+		// 1
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 2
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 3
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 4
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 5
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 6
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 7
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+
+		// 8
 		xor.BytesSrc1(dst[base:], src[base:], tbl)
 		block.Encrypt(tbl, dst[base:])
 		base += blocksize
 	}
-	xor.BytesSrc0(dst[base:], src[base:], tbl)
+
+	switch left {
+	case 7:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 6:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 5:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 4:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 3:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 2:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 1:
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		block.Encrypt(tbl, dst[base:])
+		base += blocksize
+		fallthrough
+	case 0:
+		xor.BytesSrc0(dst[base:], src[base:], tbl)
+	}
 }
 
 func decrypt(block cipher.Block, dst, src, buf []byte) {
@@ -278,11 +355,102 @@ func decrypt(block cipher.Block, dst, src, buf []byte) {
 	block.Encrypt(tbl, initialVector)
 	n := len(src) / blocksize
 	base := 0
-	for i := 0; i < n; i++ {
+	repeat := n / 8
+	left := n % 8
+	for i := 0; i < repeat; i++ {
+		// 1
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 2
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 3
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 4
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 5
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 6
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 7
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+
+		// 8
 		block.Encrypt(next, src[base:])
 		xor.BytesSrc1(dst[base:], src[base:], tbl)
 		tbl, next = next, tbl
 		base += blocksize
 	}
-	xor.BytesSrc0(dst[base:], src[base:], tbl)
+
+	switch left {
+	case 7:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 6:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 5:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 4:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 3:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 2:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 1:
+		block.Encrypt(next, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], tbl)
+		tbl, next = next, tbl
+		base += blocksize
+		fallthrough
+	case 0:
+		xor.BytesSrc0(dst[base:], src[base:], tbl)
+	}
 }
