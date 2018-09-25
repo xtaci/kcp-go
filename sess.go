@@ -953,12 +953,11 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 
 // monotonic nanoseconds reference point
 var refTime time.Time = time.Now()
-var refUnixNano int64 = refTime.UnixNano()
 
 // returns current time in milliseconds
 func currentMs() uint32 {
 	d := time.Now().Sub(refTime)
-	return uint32((refUnixNano + int64(d)) / int64(time.Millisecond))
+	return uint32(d / time.Millisecond)
 }
 
 // connectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
