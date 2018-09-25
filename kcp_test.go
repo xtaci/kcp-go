@@ -12,7 +12,7 @@ import (
 )
 
 func iclock() int32 {
-	return int32((time.Now().UnixNano() / 1000000) & 0xffffffff)
+	return int32(currentMs())
 }
 
 type DelayPacket struct {
