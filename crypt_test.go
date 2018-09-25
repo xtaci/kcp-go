@@ -219,17 +219,18 @@ func BenchmarkSalsa20(b *testing.B) {
 }
 
 func benchCrypt(b *testing.B, bc BlockCrypt) {
-	b.ReportAllocs()
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)
 	enc := make([]byte, mtuLimit)
 
+	b.ReportAllocs()
+	b.SetBytes(int64(len(enc) * 2))
+	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		bc.Encrypt(enc, data)
 		bc.Decrypt(dec, enc)
 	}
-	b.SetBytes(int64(len(enc) * 2))
 }
 
 func BenchmarkCRC32(b *testing.B) {
