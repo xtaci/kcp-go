@@ -57,8 +57,8 @@ func (c *salsa20BlockCrypt) Decrypt(dst, src []byte) {
 }
 
 type sm4BlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [sm4.BlockSize]byte
+	decbuf [2 * sm4.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -70,17 +70,15 @@ func NewSM4BlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, sm4.BlockSize)
-	c.decbuf = make([]byte, 2*sm4.BlockSize)
 	return c, nil
 }
 
-func (c *sm4BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *sm4BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *sm4BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *sm4BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type twofishBlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [twofish.BlockSize]byte
+	decbuf [2 * twofish.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -92,17 +90,15 @@ func NewTwofishBlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, twofish.BlockSize)
-	c.decbuf = make([]byte, 2*twofish.BlockSize)
 	return c, nil
 }
 
-func (c *twofishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *twofishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *twofishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *twofishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type tripleDESBlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [des.BlockSize]byte
+	decbuf [2 * des.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -114,17 +110,15 @@ func NewTripleDESBlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, des.BlockSize)
-	c.decbuf = make([]byte, 2*des.BlockSize)
 	return c, nil
 }
 
-func (c *tripleDESBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *tripleDESBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *tripleDESBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *tripleDESBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type cast5BlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [cast5.BlockSize]byte
+	decbuf [2 * cast5.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -136,17 +130,15 @@ func NewCast5BlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, cast5.BlockSize)
-	c.decbuf = make([]byte, 2*cast5.BlockSize)
 	return c, nil
 }
 
-func (c *cast5BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *cast5BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *cast5BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *cast5BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type blowfishBlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [blowfish.BlockSize]byte
+	decbuf [2 * blowfish.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -158,17 +150,15 @@ func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, blowfish.BlockSize)
-	c.decbuf = make([]byte, 2*blowfish.BlockSize)
 	return c, nil
 }
 
-func (c *blowfishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *blowfishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *blowfishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *blowfishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type aesBlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [aes.BlockSize]byte
+	decbuf [2 * aes.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -180,17 +170,15 @@ func NewAESBlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, aes.BlockSize)
-	c.decbuf = make([]byte, 2*aes.BlockSize)
 	return c, nil
 }
 
-func (c *aesBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *aesBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *aesBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *aesBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type teaBlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [tea.BlockSize]byte
+	decbuf [2 * tea.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -202,17 +190,15 @@ func NewTEABlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, tea.BlockSize)
-	c.decbuf = make([]byte, 2*tea.BlockSize)
 	return c, nil
 }
 
-func (c *teaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *teaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *teaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *teaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type xteaBlockCrypt struct {
-	encbuf []byte
-	decbuf []byte
+	encbuf [xtea.BlockSize]byte
+	decbuf [2 * xtea.BlockSize]byte
 	block  cipher.Block
 }
 
@@ -224,13 +210,11 @@ func NewXTEABlockCrypt(key []byte) (BlockCrypt, error) {
 		return nil, err
 	}
 	c.block = block
-	c.encbuf = make([]byte, xtea.BlockSize)
-	c.decbuf = make([]byte, 2*xtea.BlockSize)
 	return c, nil
 }
 
-func (c *xteaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf) }
-func (c *xteaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf) }
+func (c *xteaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
+func (c *xteaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type simpleXORBlockCrypt struct {
 	xortbl []byte
