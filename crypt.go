@@ -535,49 +535,41 @@ func decryptVariant(block cipher.Block, dst, src, buf []byte) {
 		// 1
 		block.Encrypt(next, src[base:])
 		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
 		base += blocksize
 
 		// 2
-		block.Encrypt(next, src[base:])
-		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
+		block.Encrypt(tbl, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], next)
 		base += blocksize
 
 		// 3
 		block.Encrypt(next, src[base:])
 		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
 		base += blocksize
 
 		// 4
-		block.Encrypt(next, src[base:])
-		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
+		block.Encrypt(tbl, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], next)
 		base += blocksize
 
 		// 5
 		block.Encrypt(next, src[base:])
 		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
 		base += blocksize
 
 		// 6
-		block.Encrypt(next, src[base:])
-		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
+		block.Encrypt(tbl, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], next)
 		base += blocksize
 
 		// 7
 		block.Encrypt(next, src[base:])
 		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
 		base += blocksize
 
 		// 8
-		block.Encrypt(next, src[base:])
-		xor.BytesSrc1(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
+		block.Encrypt(tbl, src[base:])
+		xor.BytesSrc1(dst[base:], src[base:], next)
 		base += blocksize
 	}
 
