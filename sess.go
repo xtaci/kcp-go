@@ -951,8 +951,15 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
 }
 
+// monotonic nanoseconds reference point
+var refTime time.Time = time.Now()
+var refUnixNano int64 = refTime.UnixNano()
+
 // returns current time in milliseconds
-func currentMs() uint32 { return uint32(time.Now().UnixNano() / int64(time.Millisecond)) }
+func currentMs() uint32 {
+	d := time.Now().Sub(refTime)
+	return uint32((refUnixNano + int64(d)) / int64(time.Millisecond))
+}
 
 // connectedUDPConn is a wrapper for net.UDPConn which converts WriteTo syscalls
 // to Write syscalls that are 4 times faster on some OS'es. This should only be
