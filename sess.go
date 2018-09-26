@@ -518,11 +518,11 @@ func (s *UDPSession) output(buf []byte) {
 // kcp update, returns interval for next calling
 func (s *UDPSession) update() (interval time.Duration) {
 	s.mu.Lock()
-	s.kcp.flush(false)
-	if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
+	waitsnd := s.kcp.WaitSnd()
+	interval = time.Duration(s.kcp.flush(false)) * time.Millisecond
+	if s.kcp.WaitSnd() < waitsnd {
 		s.notifyWriteEvent()
 	}
-	interval = time.Duration(s.kcp.interval) * time.Millisecond
 	s.mu.Unlock()
 	return
 }

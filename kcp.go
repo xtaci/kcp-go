@@ -623,7 +623,7 @@ func (kcp *KCP) wnd_unused() uint16 {
 }
 
 // flush pending data
-func (kcp *KCP) flush(ackOnly bool) {
+func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var seg segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
@@ -652,7 +652,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 		if size > 0 {
 			kcp.output(buffer, size)
 		}
-		return
+		return kcp.interval
 	}
 
 	// probe window size (if remote window size equals zero)
@@ -737,6 +737,7 @@ func (kcp *KCP) flush(ackOnly bool) {
 	// check for retransmissions
 	current := currentMs()
 	var change, lost, lostSegs, fastRetransSegs, earlyRetransSegs uint64
+	minrto := int32(kcp.interval)
 	for k := range kcp.snd_buf {
 		segment := &kcp.snd_buf[k]
 		needsend := false
@@ -793,6 +794,11 @@ func (kcp *KCP) flush(ackOnly bool) {
 				kcp.state = 0xFFFFFFFF
 			}
 		}
+
+		// get the nearest rto
+		if rto := _itimediff(segment.rto, current); rto < minrto {
+			minrto = rto
+		}
 	}
 
 	// flash remain segments
@@ -844,6 +850,11 @@ func (kcp *KCP) flush(ackOnly bool) {
 		kcp.cwnd = 1
 		kcp.incr = kcp.mss
 	}
+
+	if minrto < 0 {
+		return 0
+	}
+	return uint32(minrto)
 }
 
 // Update updates state (call it repeatedly, every 10ms-100ms), or you can ask
