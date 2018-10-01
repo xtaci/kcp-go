@@ -94,36 +94,38 @@ beginning tests, encryption:salsa20, fec:10/3
 goos: darwin
 goarch: amd64
 pkg: github.com/xtaci/kcp-go
-BenchmarkSM4-4                 	   50000	     34575 ns/op	  86.77 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES128-4              	  300000	      3990 ns/op	 751.88 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES192-4              	  300000	      4094 ns/op	 732.67 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES256-4              	  300000	      4384 ns/op	 684.24 MB/s	       0 B/op	       0 allocs/op
-BenchmarkTEA-4                 	  100000	     16178 ns/op	 185.43 MB/s	       0 B/op	       0 allocs/op
-BenchmarkXOR-4                 	20000000	        89.6 ns/op	33477.09 MB/s	       0 B/op	       0 allocs/op
-BenchmarkBlowfish-4            	   50000	     27717 ns/op	 108.23 MB/s	       0 B/op	       0 allocs/op
-BenchmarkNone-4                	30000000	        45.5 ns/op	65971.84 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCast5-4               	   50000	     35501 ns/op	  84.50 MB/s	       0 B/op	       0 allocs/op
-Benchmark3DES-4                	   10000	    119019 ns/op	  25.21 MB/s	       0 B/op	       0 allocs/op
-BenchmarkTwofish-4             	   30000	     40286 ns/op	  74.47 MB/s	       0 B/op	       0 allocs/op
-BenchmarkXTEA-4                	   30000	     47714 ns/op	  62.87 MB/s	       0 B/op	       0 allocs/op
-BenchmarkSalsa20-4             	  500000	      3263 ns/op	 919.15 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCRC32-4               	20000000	        66.1 ns/op	15497.83 MB/s
+BenchmarkSM4-4                 	   50000	     32180 ns/op	  93.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES128-4              	  500000	      3285 ns/op	 913.21 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES192-4              	  300000	      3623 ns/op	 827.85 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES256-4              	  300000	      3874 ns/op	 774.20 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTEA-4                 	  100000	     15384 ns/op	 195.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXOR-4                 	20000000	        89.9 ns/op	33372.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBlowfish-4            	   50000	     26927 ns/op	 111.41 MB/s	       0 B/op	       0 allocs/op
+BenchmarkNone-4                	30000000	        45.7 ns/op	65597.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCast5-4               	   50000	     34258 ns/op	  87.57 MB/s	       0 B/op	       0 allocs/op
+Benchmark3DES-4                	   10000	    117149 ns/op	  25.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTwofish-4             	   50000	     33538 ns/op	  89.45 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXTEA-4                	   30000	     45666 ns/op	  65.69 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSalsa20-4             	  500000	      3308 ns/op	 906.76 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCRC32-4               	20000000	        65.2 ns/op	15712.43 MB/s
 BenchmarkCsprngSystem-4        	 1000000	      1150 ns/op	  13.91 MB/s
-BenchmarkCsprngMD5-4           	10000000	       146 ns/op	 109.42 MB/s
-BenchmarkCsprngSHA1-4          	10000000	       161 ns/op	 123.92 MB/s
-BenchmarkCsprngNonceMD5-4      	10000000	       153 ns/op	 104.27 MB/s
-BenchmarkCsprngNonceAES128-4   	100000000	        18.9 ns/op	 847.36 MB/s
-BenchmarkFlush-4               	10000000	       237 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEchoSpeed4K-4         	    5000	    234518 ns/op	  17.47 MB/s	    5474 B/op	     149 allocs/op
-BenchmarkEchoSpeed64K-4        	    1000	   1594354 ns/op	  41.11 MB/s	   55551 B/op	    1611 allocs/op
-BenchmarkEchoSpeed512K-4       	     100	  12218965 ns/op	  42.91 MB/s	  490837 B/op	   12589 allocs/op
-BenchmarkEchoSpeed1M-4         	      50	  27100728 ns/op	  38.69 MB/s	  929398 B/op	   24573 allocs/op
-BenchmarkSinkSpeed4K-4         	   50000	     30076 ns/op	 136.19 MB/s	    1349 B/op	      29 allocs/op
-BenchmarkSinkSpeed64K-4        	    5000	    311182 ns/op	 210.60 MB/s	   21037 B/op	     453 allocs/op
-BenchmarkSinkSpeed256K-4       	    1000	   2518828 ns/op	 208.15 MB/s	  154623 B/op	    3511 allocs/op
-BenchmarkSinkSpeed1M-4         	     200	   6019194 ns/op	 174.21 MB/s	  289861 B/op	    6890 allocs/op
+BenchmarkCsprngMD5-4           	10000000	       145 ns/op	 110.26 MB/s
+BenchmarkCsprngSHA1-4          	10000000	       158 ns/op	 126.54 MB/s
+BenchmarkCsprngNonceMD5-4      	10000000	       153 ns/op	 104.22 MB/s
+BenchmarkCsprngNonceAES128-4   	100000000	        19.1 ns/op	 837.81 MB/s
+BenchmarkFECDecode-4           	 1000000	      1119 ns/op	1339.61 MB/s	    1606 B/op	       2 allocs/op
+BenchmarkFECEncode-4           	 2000000	       832 ns/op	1801.83 MB/s	      17 B/op	       0 allocs/op
+BenchmarkFlush-4               	 5000000	       272 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEchoSpeed4K-4         	    5000	    259617 ns/op	  15.78 MB/s	    5451 B/op	     149 allocs/op
+BenchmarkEchoSpeed64K-4        	    1000	   1706084 ns/op	  38.41 MB/s	   56002 B/op	    1604 allocs/op
+BenchmarkEchoSpeed512K-4       	     100	  14345505 ns/op	  36.55 MB/s	  482597 B/op	   13045 allocs/op
+BenchmarkEchoSpeed1M-4         	      30	  34859104 ns/op	  30.08 MB/s	 1143773 B/op	   27186 allocs/op
+BenchmarkSinkSpeed4K-4         	   50000	     31369 ns/op	 130.57 MB/s	    1566 B/op	      30 allocs/op
+BenchmarkSinkSpeed64K-4        	    5000	    329065 ns/op	 199.16 MB/s	   21529 B/op	     453 allocs/op
+BenchmarkSinkSpeed256K-4       	     500	   2373354 ns/op	 220.91 MB/s	  166332 B/op	    3554 allocs/op
+BenchmarkSinkSpeed1M-4         	     300	   5117927 ns/op	 204.88 MB/s	  310378 B/op	    6988 allocs/op
 PASS
-ok  	github.com/xtaci/kcp-go	49.441s
+ok  	github.com/xtaci/kcp-go	50.349s
 ```
 
 ## Key Design Considerations
