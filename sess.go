@@ -41,7 +41,7 @@ const (
 	acceptBacklog = 128
 
 	// prerouting(to session) queue
-	qlen = 128
+	qlen = 10000
 )
 
 const (
