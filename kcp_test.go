@@ -287,7 +287,7 @@ func TestNetwork(t *testing.T) {
 
 func BenchmarkFlush(b *testing.B) {
 	kcp := NewKCP(1, func(buf []byte, size int) {})
-	kcp.snd_buf = make([]segment, 32)
+	kcp.snd_buf = make([]segment, 1024)
 	for k := range kcp.snd_buf {
 		kcp.snd_buf[k].xmit = 1
 		kcp.snd_buf[k].resendts = currentMs() + 10000

@@ -738,8 +738,10 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	current := currentMs()
 	var change, lost, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
-	for k := range kcp.snd_buf {
-		segment := &kcp.snd_buf[k]
+
+	ref := kcp.snd_buf[:len(kcp.snd_buf)] // for bounds check elimination
+	for k := range ref {
+		segment := &ref[k]
 		needsend := false
 		if segment.xmit == 0 { // initial transmit
 			needsend = true
