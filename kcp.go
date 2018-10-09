@@ -1000,8 +1000,9 @@ func (kcp *KCP) WaitSnd() int {
 // remove front n elements from queue
 func (kcp *KCP) remove_front(q []segment, n int) []segment {
 	newn := copy(q, q[n:])
-	for i := newn; i < len(q); i++ {
-		q[i] = segment{} // manual set nil for GC
+	gc := q[newn:]
+	for k := range gc {
+		gc[k].data = nil // de-ref data
 	}
 	return q[:newn]
 }
