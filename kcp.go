@@ -798,7 +798,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		// get the nearest rto
-		if rto := _itimediff(segment.rto, current); rto > 0 && rto < minrto {
+		if rto := _itimediff(segment.resendts, current); rto > 0 && rto < minrto {
 			minrto = rto
 		}
 	}
