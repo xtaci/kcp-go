@@ -455,6 +455,11 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	}
 
 	if !repeat {
+		// replicate the content if it's new
+		dataCopy := xmitBuf.Get().([]byte)[:len(newseg.data)]
+		copy(dataCopy, newseg.data)
+		newseg.data = dataCopy
+
 		if insert_idx == n+1 {
 			kcp.rcv_buf = append(kcp.rcv_buf, newseg)
 		} else {
@@ -462,8 +467,6 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 			copy(kcp.rcv_buf[insert_idx+1:], kcp.rcv_buf[insert_idx:])
 			kcp.rcv_buf[insert_idx] = newseg
 		}
-	} else {
-		kcp.delSegment(newseg)
 	}
 
 	// move available data from rcv_buf -> rcv_queue
@@ -551,7 +554,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
-					seg := kcp.newSegment(int(length))
+					var seg segment
 					seg.conv = conv
 					seg.cmd = cmd
 					seg.frg = frg
@@ -559,7 +562,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					seg.ts = ts
 					seg.sn = sn
 					seg.una = una
-					copy(seg.data, data[:length])
+					seg.data = data[:length] // delayed data copying
 					repeat = kcp.parse_data(seg)
 				}
 			}
