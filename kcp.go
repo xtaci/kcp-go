@@ -430,7 +430,7 @@ func (kcp *KCP) ack_push(sn, ts uint32) {
 	kcp.acklist = append(kcp.acklist, ackItem{sn, ts})
 }
 
-func (kcp *KCP) parse_data(newseg segment) {
+func (kcp *KCP) parse_data(newseg segment, regular bool) {
 	sn := newseg.sn
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
@@ -445,7 +445,9 @@ func (kcp *KCP) parse_data(newseg segment) {
 		seg := &kcp.rcv_buf[i]
 		if seg.sn == sn {
 			repeat = true
-			atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+			if regular {
+				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+			}
 			break
 		}
 		if _itimediff(sn, seg.sn) > 0 {
@@ -557,12 +559,16 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					seg.sn = sn
 					seg.una = una
 					copy(seg.data, data[:length])
-					kcp.parse_data(seg)
+					kcp.parse_data(seg, regular)
 				} else {
-					atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+					if regular {
+						atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+					}
 				}
 			} else {
-				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+				if regular {
+					atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+				}
 			}
 		} else if cmd == IKCP_CMD_WASK {
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
