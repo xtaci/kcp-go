@@ -430,12 +430,13 @@ func (kcp *KCP) ack_push(sn, ts uint32) {
 	kcp.acklist = append(kcp.acklist, ackItem{sn, ts})
 }
 
-func (kcp *KCP) parse_data(newseg segment, regular bool) {
+// returns true if data has repeated
+func (kcp *KCP) parse_data(newseg segment) bool {
 	sn := newseg.sn
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
 		_itimediff(sn, kcp.rcv_nxt) < 0 {
 		kcp.delSegment(newseg)
-		return
+		return true
 	}
 
 	n := len(kcp.rcv_buf) - 1
@@ -445,9 +446,6 @@ func (kcp *KCP) parse_data(newseg segment, regular bool) {
 		seg := &kcp.rcv_buf[i]
 		if seg.sn == sn {
 			repeat = true
-			if regular {
-				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
-			}
 			break
 		}
 		if _itimediff(sn, seg.sn) > 0 {
@@ -483,6 +481,8 @@ func (kcp *KCP) parse_data(newseg segment, regular bool) {
 		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
 		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
 	}
+
+	return repeat
 }
 
 // Input when you received a low level packet (eg. UDP packet), call it
@@ -547,6 +547,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 				lastackts = ts
 			}
 		} else if cmd == IKCP_CMD_PUSH {
+			repeat := true
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
@@ -559,16 +560,11 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					seg.sn = sn
 					seg.una = una
 					copy(seg.data, data[:length])
-					kcp.parse_data(seg, regular)
-				} else {
-					if regular {
-						atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
-					}
+					repeat = kcp.parse_data(seg)
 				}
-			} else {
-				if regular {
-					atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
-				}
+			}
+			if regular && repeat {
+				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
 		} else if cmd == IKCP_CMD_WASK {
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
