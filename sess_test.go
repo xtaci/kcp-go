@@ -50,9 +50,9 @@ func dialEcho() (*UDPSession, error) {
 	sess.SetStreamMode(true)
 	sess.SetStreamMode(false)
 	sess.SetStreamMode(true)
-	sess.SetWindowSize(4096, 4096)
-	sess.SetReadBuffer(4 * 1024 * 1024)
-	sess.SetWriteBuffer(4 * 1024 * 1024)
+	sess.SetWindowSize(2048, 2048)
+	sess.SetReadBuffer(16 * 1024 * 1024)
+	sess.SetWriteBuffer(16 * 1024 * 1024)
 	sess.SetStreamMode(true)
 	sess.SetNoDelay(1, 10, 2, 1)
 	sess.SetMtu(1400)
@@ -70,13 +70,13 @@ func dialSink() (*UDPSession, error) {
 	}
 
 	sess.SetStreamMode(true)
-	sess.SetWindowSize(4096, 4096)
-	sess.SetReadBuffer(4 * 1024 * 1024)
-	sess.SetWriteBuffer(4 * 1024 * 1024)
+	sess.SetWindowSize(2048, 2048)
+	sess.SetReadBuffer(16 * 1024 * 1024)
+	sess.SetWriteBuffer(16 * 1024 * 1024)
 	sess.SetStreamMode(true)
 	sess.SetNoDelay(1, 10, 2, 1)
 	sess.SetMtu(1400)
-	sess.SetACKNoDelay(true)
+	sess.SetACKNoDelay(false)
 	sess.SetDeadline(time.Now().Add(time.Minute))
 	return sess, err
 }
