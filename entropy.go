@@ -8,6 +8,7 @@ import (
 	"io"
 )
 
+// Entropy defines a entropy source
 type Entropy interface {
 	Init()
 	Fill(nonce []byte)

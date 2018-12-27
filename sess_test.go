@@ -19,10 +19,8 @@ const portEcho = "127.0.0.1:9999"
 const portSink = "127.0.0.1:19999"
 const portTinyBufferEcho = "127.0.0.1:29999"
 const portListerner = "127.0.0.1:9998"
-const salt = "kcptest"
 
 var key = []byte("testkey")
-var fec = 4
 var pass = pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 
 func init() {

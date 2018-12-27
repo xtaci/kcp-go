@@ -33,7 +33,6 @@ func (p *DelayPacket) ts() int32      { return p._ts }
 func (p *DelayPacket) setts(ts int32) { p._ts = ts }
 
 type DelayTunnel struct{ *list.List }
-type Random *rand.Rand
 type LatencySimulator struct {
 	current                        int32
 	lostrate, rttmin, rttmax, nmax int

@@ -677,12 +677,6 @@ type (
 		rd              atomic.Value     // read deadline for Accept()
 		wd              atomic.Value
 	}
-
-	// a incoming packet definition
-	inPacket struct {
-		from net.Addr
-		data []byte
-	}
 )
 
 // monitor incoming data for all connections of server
