@@ -550,9 +550,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 				lastackts = ts
 			}
 		} else if cmd == IKCP_CMD_PUSH {
-			kcp.ack_push(sn, ts)
 			repeat := true
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
+				kcp.ack_push(sn, ts)
 				if _itimediff(sn, kcp.rcv_nxt) >= 0 {
 					var seg segment
 					seg.conv = conv
