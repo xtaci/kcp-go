@@ -2,7 +2,6 @@ package kcp
 
 import (
 	"container/heap"
-	"runtime"
 	"sync"
 	"time"
 )
@@ -77,7 +76,6 @@ func (h *updateHeap) wakeup() {
 }
 
 func (h *updateHeap) updateTask() {
-	runtime.LockOSThread()
 	var timer <-chan time.Time
 	for {
 		select {
