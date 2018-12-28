@@ -779,6 +779,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		if needsend {
+			current = currentMs() // time update for a blocking call
 			segment.xmit++
 			segment.ts = current
 			segment.wnd = seg.wnd
@@ -789,7 +790,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
-				current = currentMs() // time update for a blocking call
 				ptr = buffer
 			}
 
