@@ -394,7 +394,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	}
 }
 
-func (kcp *KCP) parse_fastack(sn uint32) {
+func (kcp *KCP) parse_fastack(sn, ts uint32) {
 	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
 		return
 	}
@@ -403,7 +403,7 @@ func (kcp *KCP) parse_fastack(sn uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(sn, seg.sn) < 0 {
 			break
-		} else if sn != seg.sn {
+		} else if sn != seg.sn && seg.ts <= ts {
 			seg.fastack++
 		}
 	}
@@ -585,7 +585,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	atomic.AddUint64(&DefaultSnmp.InSegs, inSegs)
 
 	if flag != 0 && regular {
-		kcp.parse_fastack(maxack)
+		kcp.parse_fastack(maxack, lastackts)
 		current := currentMs()
 		if _itimediff(current, lastackts) >= 0 {
 			kcp.update_ack(_itimediff(current, lastackts))
