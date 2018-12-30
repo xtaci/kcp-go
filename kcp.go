@@ -496,8 +496,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		return -1
 	}
 
-	var maxack uint32
-	var lastackts uint32
+	var latest uint32 // latest packet
 	var flag int
 	var inSegs uint64
 
@@ -541,13 +540,13 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		if cmd == IKCP_CMD_ACK {
 			kcp.parse_ack(sn)
 			kcp.shrink_buf()
+			// stricter check of fastack
+			kcp.parse_fastack(sn, ts)
 			if flag == 0 {
 				flag = 1
-				maxack = sn
-				lastackts = ts
-			} else if _itimediff(sn, maxack) > 0 {
-				maxack = sn
-				lastackts = ts
+				latest = ts
+			} else if _itimediff(ts, latest) > 0 {
+				latest = ts
 			}
 		} else if cmd == IKCP_CMD_PUSH {
 			repeat := true
@@ -584,11 +583,12 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	}
 	atomic.AddUint64(&DefaultSnmp.InSegs, inSegs)
 
+	// update rtt with the latest ts
+	// ignore the FEC packet
 	if flag != 0 && regular {
-		kcp.parse_fastack(maxack, lastackts)
 		current := currentMs()
-		if _itimediff(current, lastackts) >= 0 {
-			kcp.update_ack(_itimediff(current, lastackts))
+		if _itimediff(current, latest) >= 0 {
+			kcp.update_ack(_itimediff(current, latest))
 		}
 	}
 
