@@ -182,8 +182,11 @@ func (kcp *KCP) newSegment(size int) (seg segment) {
 }
 
 // delSegment recycles a KCP segment
-func (kcp *KCP) delSegment(seg segment) {
-	xmitBuf.Put(seg.data)
+func (kcp *KCP) delSegment(seg *segment) {
+	if seg.data != nil {
+		xmitBuf.Put(seg.data)
+		seg.data = nil
+	}
 }
 
 // PeekSize checks the size of next message in the recv queue
@@ -239,7 +242,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
 		count++
-		kcp.delSegment(*seg)
+		kcp.delSegment(seg)
 		if seg.frg == 0 {
 			break
 		}
@@ -412,7 +415,7 @@ func (kcp *KCP) parse_una(una uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
-			kcp.delSegment(*seg)
+			kcp.delSegment(seg)
 			count++
 		} else {
 			break
