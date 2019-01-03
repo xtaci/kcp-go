@@ -104,6 +104,7 @@ type segment struct {
 	xmit     uint32
 	resendts uint32
 	fastack  uint32
+	acked    uint32 // mark if the seg has acked
 	data     []byte
 }
 
@@ -382,10 +383,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if sn == seg.sn {
-			kcp.delSegment(*seg)
-			copy(kcp.snd_buf[k:], kcp.snd_buf[k+1:])
-			kcp.snd_buf[len(kcp.snd_buf)-1] = segment{}
-			kcp.snd_buf = kcp.snd_buf[:len(kcp.snd_buf)-1]
+			seg.acked = 1
 			break
 		}
 		if _itimediff(sn, seg.sn) < 0 {
@@ -539,7 +537,6 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 
 		if cmd == IKCP_CMD_ACK {
 			kcp.parse_ack(sn)
-			kcp.shrink_buf()
 			// stricter check of fastack
 			kcp.parse_fastack(sn, ts)
 			if flag == 0 {
@@ -748,6 +745,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	for k := range ref {
 		segment := &ref[k]
 		needsend := false
+		if segment.acked == 1 {
+			continue
+		}
 		if segment.xmit == 0 { // initial transmit
 			needsend = true
 			segment.rto = kcp.rx_rto
