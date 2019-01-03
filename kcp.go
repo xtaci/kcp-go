@@ -387,6 +387,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 		seg := &kcp.snd_buf[k]
 		if sn == seg.sn {
 			seg.acked = 1
+			kcp.delSegment(seg)
 			break
 		}
 		if _itimediff(sn, seg.sn) < 0 {
