@@ -727,7 +727,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		kcp.snd_buf = append(kcp.snd_buf, newseg)
 		kcp.snd_nxt++
 		newSegsCount++
-		kcp.snd_queue[k].data = nil
 	}
 	if newSegsCount > 0 {
 		kcp.snd_queue = kcp.remove_front(kcp.snd_queue, newSegsCount)
@@ -1008,9 +1007,5 @@ func (kcp *KCP) WaitSnd() int {
 // remove front n elements from queue
 func (kcp *KCP) remove_front(q []segment, n int) []segment {
 	newn := copy(q, q[n:])
-	gc := q[newn:]
-	for k := range gc {
-		gc[k].data = nil // de-ref data
-	}
 	return q[:newn]
 }
