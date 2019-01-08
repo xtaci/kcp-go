@@ -587,24 +587,27 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		}
 	}
 
-	if _itimediff(kcp.snd_una, snd_una) > 0 {
-		if kcp.cwnd < kcp.rmt_wnd {
-			mss := kcp.mss
-			if kcp.cwnd < kcp.ssthresh {
-				kcp.cwnd++
-				kcp.incr += mss
-			} else {
-				if kcp.incr < mss {
-					kcp.incr = mss
-				}
-				kcp.incr += (mss*mss)/kcp.incr + (mss / 16)
-				if (kcp.cwnd+1)*mss <= kcp.incr {
+	// cwnd update when packet arrived
+	if kcp.nocwnd == 0 {
+		if _itimediff(kcp.snd_una, snd_una) > 0 {
+			if kcp.cwnd < kcp.rmt_wnd {
+				mss := kcp.mss
+				if kcp.cwnd < kcp.ssthresh {
 					kcp.cwnd++
+					kcp.incr += mss
+				} else {
+					if kcp.incr < mss {
+						kcp.incr = mss
+					}
+					kcp.incr += (mss*mss)/kcp.incr + (mss / 16)
+					if (kcp.cwnd+1)*mss <= kcp.incr {
+						kcp.cwnd++
+					}
 				}
-			}
-			if kcp.cwnd > kcp.rmt_wnd {
-				kcp.cwnd = kcp.rmt_wnd
-				kcp.incr = kcp.rmt_wnd * mss
+				if kcp.cwnd > kcp.rmt_wnd {
+					kcp.cwnd = kcp.rmt_wnd
+					kcp.incr = kcp.rmt_wnd * mss
+				}
 			}
 		}
 	}
@@ -828,31 +831,34 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		atomic.AddUint64(&DefaultSnmp.RetransSegs, sum)
 	}
 
-	// update ssthresh
-	// rate halving, https://tools.ietf.org/html/rfc6937
-	if change > 0 {
-		inflight := kcp.snd_nxt - kcp.snd_una
-		kcp.ssthresh = inflight / 2
-		if kcp.ssthresh < IKCP_THRESH_MIN {
-			kcp.ssthresh = IKCP_THRESH_MIN
+	// cwnd update
+	if kcp.nocwnd == 0 {
+		// update ssthresh
+		// rate halving, https://tools.ietf.org/html/rfc6937
+		if change > 0 {
+			inflight := kcp.snd_nxt - kcp.snd_una
+			kcp.ssthresh = inflight / 2
+			if kcp.ssthresh < IKCP_THRESH_MIN {
+				kcp.ssthresh = IKCP_THRESH_MIN
+			}
+			kcp.cwnd = kcp.ssthresh + resent
+			kcp.incr = kcp.cwnd * kcp.mss
 		}
-		kcp.cwnd = kcp.ssthresh + resent
-		kcp.incr = kcp.cwnd * kcp.mss
-	}
 
-	// congestion control, https://tools.ietf.org/html/rfc5681
-	if lost > 0 {
-		kcp.ssthresh = cwnd / 2
-		if kcp.ssthresh < IKCP_THRESH_MIN {
-			kcp.ssthresh = IKCP_THRESH_MIN
+		// congestion control, https://tools.ietf.org/html/rfc5681
+		if lost > 0 {
+			kcp.ssthresh = cwnd / 2
+			if kcp.ssthresh < IKCP_THRESH_MIN {
+				kcp.ssthresh = IKCP_THRESH_MIN
+			}
+			kcp.cwnd = 1
+			kcp.incr = kcp.mss
 		}
-		kcp.cwnd = 1
-		kcp.incr = kcp.mss
-	}
 
-	if kcp.cwnd < 1 {
-		kcp.cwnd = 1
-		kcp.incr = kcp.mss
+		if kcp.cwnd < 1 {
+			kcp.cwnd = 1
+			kcp.incr = kcp.mss
+		}
 	}
 
 	return uint32(minrto)
