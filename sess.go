@@ -643,8 +643,15 @@ func (s *UDPSession) kcpInput(data []byte) {
 // the read loop for a client session
 func (s *UDPSession) readLoop() {
 	buf := make([]byte, mtuLimit)
+	rmt := s.remote.String()
 	for {
-		if n, _, err := s.conn.ReadFrom(buf); err == nil {
+		if n, addr, err := s.conn.ReadFrom(buf); err == nil {
+			// make sure the packet is from remote
+			if addr.String() != rmt {
+				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+				continue
+			}
+
 			if n >= s.headerSize+IKCP_OVERHEAD {
 				data := buf[:n]
 				dataValid := false
