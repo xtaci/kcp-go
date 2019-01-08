@@ -97,8 +97,9 @@ type (
 		// nonce generator
 		nonce Entropy
 
-		isClosed bool // flag the session has Closed
-		mu       sync.Mutex
+		isClosed    bool  // flag the session has Closed
+		closeReason error // the reason why connection has closed
+		mu          sync.Mutex
 	}
 
 	setReadBuffer interface {
@@ -119,6 +120,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chReadError = make(chan error, 1)
+	sess.chWriteError = make(chan error, 1)
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
