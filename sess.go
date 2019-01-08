@@ -91,7 +91,8 @@ type (
 		die          chan struct{} // notify current session has Closed
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
-		chErrorEvent chan error    // notify Read() have an error
+		chReadError  chan error    // notify PacketConn.Read() have an error
+		chWriteError chan error    // notify PacketConn.Write() have an error
 
 		// nonce generator
 		nonce Entropy
@@ -117,7 +118,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.nonce.Init()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
-	sess.chErrorEvent = make(chan error, 1)
+	sess.chReadError = make(chan error, 1)
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -229,7 +230,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		case <-s.chReadEvent:
 		case <-c:
 		case <-s.die:
-		case err = <-s.chErrorEvent:
+		case err = <-s.chReadError:
 			if timeout != nil {
 				timeout.Stop()
 			}
@@ -293,6 +294,11 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 		case <-s.chWriteEvent:
 		case <-c:
 		case <-s.die:
+		case err = <-s.chWriteError:
+			if timeout != nil {
+				timeout.Stop()
+			}
+			return n, err
 		}
 
 		if timeout != nil {
@@ -499,6 +505,8 @@ func (s *UDPSession) output(buf []byte) {
 		if n, err := s.conn.WriteTo(ext, s.remote); err == nil {
 			nbytes += n
 			npkts++
+		} else {
+			s.notifyWriteError(err)
 		}
 	}
 
@@ -506,6 +514,8 @@ func (s *UDPSession) output(buf []byte) {
 		if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
 			nbytes += n
 			npkts++
+		} else {
+			s.notifyWriteError(err)
 		}
 	}
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
@@ -537,6 +547,13 @@ func (s *UDPSession) notifyReadEvent() {
 func (s *UDPSession) notifyWriteEvent() {
 	select {
 	case s.chWriteEvent <- struct{}{}:
+	default:
+	}
+}
+
+func (s *UDPSession) notifyWriteError(err error) {
+	select {
+	case s.chWriteError <- err:
 	default:
 	}
 }
@@ -653,7 +670,7 @@ func (s *UDPSession) readLoop() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			s.chErrorEvent <- err
+			s.chReadError <- err
 			return
 		}
 	}
