@@ -497,7 +497,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		return -1
 	}
 
-	var latest uint32 // latest packet
+	var latest uint32 // the latest ack packet
 	var flag int
 	var inSegs uint64
 
@@ -540,14 +540,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 
 		if cmd == IKCP_CMD_ACK {
 			kcp.parse_ack(sn)
-			// stricter check of fastack
 			kcp.parse_fastack(sn, ts)
-			if flag == 0 {
-				flag = 1
-				latest = ts
-			} else if _itimediff(ts, latest) > 0 {
-				latest = ts
-			}
+			flag |= 1
+			latest = ts
 		} else if cmd == IKCP_CMD_PUSH {
 			repeat := true
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
