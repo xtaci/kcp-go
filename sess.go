@@ -97,9 +97,8 @@ type (
 		// nonce generator
 		nonce Entropy
 
-		isClosed    bool  // flag the session has Closed
-		closeReason error // the reason why connection has closed
-		mu          sync.Mutex
+		isClosed bool // flag the session has Closed
+		mu       sync.Mutex
 	}
 
 	setReadBuffer interface {
