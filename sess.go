@@ -917,7 +917,17 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	conn, err := net.ListenUDP("udp", nil)
+	// network type detection
+	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+	}
+	network := "udp4"
+	if udpaddr.IP.To4() == nil {
+		network = "udp"
+	}
+
+	conn, err := net.ListenUDP(network, nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
