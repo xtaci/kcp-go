@@ -11,6 +11,7 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 type errTimeout struct {
@@ -430,7 +431,10 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	defer s.mu.Unlock()
 	if s.l == nil {
 		if nc, ok := s.conn.(net.Conn); ok {
-			return ipv4.NewConn(nc).SetTOS(dscp << 2)
+			if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err != nil {
+				return ipv6.NewConn(nc).SetTrafficClass(dscp)
+			}
+			return nil
 		}
 	}
 	return errors.New(errInvalidOperation)
@@ -803,7 +807,10 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 // SetDSCP sets the 6bit DSCP field of IP header
 func (l *Listener) SetDSCP(dscp int) error {
 	if nc, ok := l.conn.(net.Conn); ok {
-		return ipv4.NewConn(nc).SetTOS(dscp << 2)
+		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err != nil {
+			return ipv6.NewConn(nc).SetTrafficClass(dscp)
+		}
+		return nil
 	}
 	return errors.New(errInvalidOperation)
 }
