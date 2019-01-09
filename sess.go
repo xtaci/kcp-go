@@ -643,11 +643,13 @@ func (s *UDPSession) kcpInput(data []byte) {
 // the read loop for a client session
 func (s *UDPSession) readLoop() {
 	buf := make([]byte, mtuLimit)
-	rmt := s.remote.String()
+	var src string
 	for {
 		if n, addr, err := s.conn.ReadFrom(buf); err == nil {
-			// make sure the packet is from remote
-			if addr.String() != rmt {
+			// make sure the packet is from the same source
+			if src == "" { // set source address
+				src = addr.String()
+			} else if addr.String() != src {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				continue
 			}
