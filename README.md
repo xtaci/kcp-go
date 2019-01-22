@@ -176,7 +176,6 @@ A: A standalone `agent` or `gate` server for running kcp-go is suggested, not on
 3. https://github.com/smallnest/rpcx -- A RPC service framework based on net/rpc like alibaba Dubbo and weibo Motan.
 4. https://github.com/gonet2/agent -- A gateway for games with stream multiplexing.
 5. https://github.com/syncthing/syncthing -- Open Source Continuous File Synchronization.
-6. https://play.google.com/store/apps/details?id=com.k17game.k3 -- Battle Zone - Earth 2048, a world-wide strategy game.
 
 ## Links
 
