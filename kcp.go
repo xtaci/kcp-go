@@ -165,7 +165,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.rmt_wnd = IKCP_WND_RCV
 	kcp.mtu = IKCP_MTU_DEF
 	kcp.mss = kcp.mtu - IKCP_OVERHEAD
-	kcp.buffer = make([]byte, (kcp.mtu+IKCP_OVERHEAD)*3)
+	kcp.buffer = make([]byte, kcp.mtu)
 	kcp.rx_rto = IKCP_RTO_DEF
 	kcp.rx_minrto = IKCP_RTO_MIN
 	kcp.interval = IKCP_INTERVAL
@@ -964,7 +964,7 @@ func (kcp *KCP) SetMtu(mtu int) int {
 		return -1
 	}
 
-	buffer := make([]byte, (mtu+IKCP_OVERHEAD)*3)
+	buffer := make([]byte, mtu)
 	if buffer == nil {
 		return -2
 	}

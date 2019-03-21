@@ -384,7 +384,7 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.kcp.SetMtu(mtu - s.headerSize)
+	s.kcp.SetMtu(mtu)
 	return true
 }
 
