@@ -192,8 +192,14 @@ func (kcp *KCP) delSegment(seg *segment) {
 
 // KeepHead keeps n bytes untouched from the beginning of the buffer
 // the output_callback function should be aware of this
-func (kcp *KCP) KeepHead(n int) {
+// return false if n >= mss
+func (kcp *KCP) KeepHead(n int) bool {
+	if n >= int(kcp.mtu-IKCP_OVERHEAD) || n < 0 {
+		return false
+	}
 	kcp.keep = n
+	kcp.mss = kcp.mtu - IKCP_OVERHEAD - uint32(n)
+	return true
 }
 
 // PeekSize checks the size of next message in the recv queue
