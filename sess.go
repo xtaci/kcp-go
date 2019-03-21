@@ -142,7 +142,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
-		if size >= IKCP_OVERHEAD {
+		if size >= IKCP_OVERHEAD+sess.headerSize {
 			sess.output(buf[:size])
 		}
 	})

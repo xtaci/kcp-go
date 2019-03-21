@@ -669,7 +669,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	if ackOnly { // flash remain ack segments
 		size := len(buffer) - len(ptr)
-		if size > 0 {
+		if size > kcp.keep {
 			kcp.output(buffer, size)
 		}
 		return kcp.interval
