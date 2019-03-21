@@ -146,6 +146,7 @@ type KCP struct {
 	acklist []ackItem
 
 	buffer []byte
+	keep   int
 	output output_callback
 }
 
@@ -187,6 +188,12 @@ func (kcp *KCP) delSegment(seg *segment) {
 		xmitBuf.Put(seg.data)
 		seg.data = nil
 	}
+}
+
+// KeepHead keeps n bytes untouched from the beginning of the buffer
+// the output_callback function should be aware of this
+func (kcp *KCP) KeepHead(n int) {
+	kcp.keep = n
 }
 
 // PeekSize checks the size of next message in the recv queue
@@ -635,12 +642,12 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	buffer := kcp.buffer
 	// flush acknowledges
-	ptr := buffer
+	ptr := buffer[kcp.keep:] // keep n bytes untouched
 	for i, ack := range kcp.acklist {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
-			ptr = buffer
+			ptr = buffer[kcp.keep:]
 		}
 		// filter jitters caused by bufferbloat
 		if ack.sn >= kcp.rcv_nxt || len(kcp.acklist)-1 == i {
@@ -688,7 +695,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
-			ptr = buffer
+			ptr = buffer[kcp.keep:]
 		}
 		ptr = seg.encode(ptr)
 	}
@@ -699,7 +706,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
-			ptr = buffer
+			ptr = buffer[kcp.keep:]
 		}
 		ptr = seg.encode(ptr)
 	}
@@ -790,7 +797,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
-				ptr = buffer
+				ptr = buffer[kcp.keep:]
 			}
 
 			ptr = segment.encode(ptr)
