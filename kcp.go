@@ -399,6 +399,10 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if sn == seg.sn {
+			// mark and free space, but leave the segment here,
+			// and wait until `una` to delete this, then we don't
+			// have to shift the segments behind forward,
+			// which is an expensive operation for large window
 			seg.acked = 1
 			kcp.delSegment(seg)
 			break
