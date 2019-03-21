@@ -960,12 +960,16 @@ func (kcp *KCP) SetMtu(mtu int) int {
 	if mtu < 50 || mtu < IKCP_OVERHEAD {
 		return -1
 	}
+	if kcp.keep >= int(kcp.mtu-IKCP_OVERHEAD) || kcp.keep < 0 {
+		return -1
+	}
+
 	buffer := make([]byte, (mtu+IKCP_OVERHEAD)*3)
 	if buffer == nil {
 		return -2
 	}
 	kcp.mtu = uint32(mtu)
-	kcp.mss = kcp.mtu - IKCP_OVERHEAD
+	kcp.mss = kcp.mtu - IKCP_OVERHEAD - uint32(kcp.keep)
 	kcp.buffer = buffer
 	return 0
 }
