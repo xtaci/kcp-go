@@ -145,9 +145,9 @@ type KCP struct {
 
 	acklist []ackItem
 
-	buffer []byte
-	keep   int
-	output output_callback
+	buffer   []byte
+	reserved int
+	output   output_callback
 }
 
 type ackItem struct {
@@ -197,7 +197,7 @@ func (kcp *KCP) KeepHead(n int) bool {
 	if n >= int(kcp.mtu-IKCP_OVERHEAD) || n < 0 {
 		return false
 	}
-	kcp.keep = n
+	kcp.reserved = n
 	kcp.mss = kcp.mtu - IKCP_OVERHEAD - uint32(n)
 	return true
 }
@@ -652,12 +652,12 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	buffer := kcp.buffer
 	// flush acknowledges
-	ptr := buffer[kcp.keep:] // keep n bytes untouched
+	ptr := buffer[kcp.reserved:] // keep n bytes untouched
 	for i, ack := range kcp.acklist {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
-			ptr = buffer[kcp.keep:]
+			ptr = buffer[kcp.reserved:]
 		}
 		// filter jitters caused by bufferbloat
 		if ack.sn >= kcp.rcv_nxt || len(kcp.acklist)-1 == i {
@@ -669,7 +669,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	if ackOnly { // flash remain ack segments
 		size := len(buffer) - len(ptr)
-		if size > kcp.keep {
+		if size > kcp.reserved {
 			kcp.output(buffer, size)
 		}
 		return kcp.interval
@@ -705,7 +705,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
-			ptr = buffer[kcp.keep:]
+			ptr = buffer[kcp.reserved:]
 		}
 		ptr = seg.encode(ptr)
 	}
@@ -716,7 +716,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		size := len(buffer) - len(ptr)
 		if size+IKCP_OVERHEAD > int(kcp.mtu) {
 			kcp.output(buffer, size)
-			ptr = buffer[kcp.keep:]
+			ptr = buffer[kcp.reserved:]
 		}
 		ptr = seg.encode(ptr)
 	}
@@ -807,7 +807,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 			if size+need > int(kcp.mtu) {
 				kcp.output(buffer, size)
-				ptr = buffer[kcp.keep:]
+				ptr = buffer[kcp.reserved:]
 			}
 
 			ptr = segment.encode(ptr)
@@ -827,7 +827,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// flash remain segments
 	size := len(buffer) - len(ptr)
-	if size > kcp.keep {
+	if size > kcp.reserved {
 		kcp.output(buffer, size)
 	}
 
@@ -964,7 +964,7 @@ func (kcp *KCP) SetMtu(mtu int) int {
 	if mtu < 50 || mtu < IKCP_OVERHEAD {
 		return -1
 	}
-	if kcp.keep >= int(kcp.mtu-IKCP_OVERHEAD) || kcp.keep < 0 {
+	if kcp.reserved >= int(kcp.mtu-IKCP_OVERHEAD) || kcp.reserved < 0 {
 		return -1
 	}
 
@@ -973,7 +973,7 @@ func (kcp *KCP) SetMtu(mtu int) int {
 		return -2
 	}
 	kcp.mtu = uint32(mtu)
-	kcp.mss = kcp.mtu - IKCP_OVERHEAD - uint32(kcp.keep)
+	kcp.mss = kcp.mtu - IKCP_OVERHEAD - uint32(kcp.reserved)
 	kcp.buffer = buffer
 	return 0
 }
