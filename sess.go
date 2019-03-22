@@ -146,7 +146,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 			sess.output(buf[:size])
 		}
 	})
-	sess.kcp.SetMtu(IKCP_MTU_DEF - sess.headerSize)
+	sess.kcp.SetMtu(IKCP_MTU_DEF)
 	sess.kcp.ReserveBytes(sess.headerSize)
 
 	// register current session to the global updater,
