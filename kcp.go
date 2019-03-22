@@ -190,10 +190,10 @@ func (kcp *KCP) delSegment(seg *segment) {
 	}
 }
 
-// KeepHead keeps n bytes untouched from the beginning of the buffer
+// ReserveBytes keeps n bytes untouched from the beginning of the buffer
 // the output_callback function should be aware of this
 // return false if n >= mss
-func (kcp *KCP) KeepHead(n int) bool {
+func (kcp *KCP) ReserveBytes(n int) bool {
 	if n >= int(kcp.mtu-IKCP_OVERHEAD) || n < 0 {
 		return false
 	}
