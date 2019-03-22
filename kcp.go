@@ -651,14 +651,28 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	seg.una = kcp.rcv_nxt
 
 	buffer := kcp.buffer
-	// flush acknowledges
 	ptr := buffer[kcp.reserved:] // keep n bytes untouched
-	for i, ack := range kcp.acklist {
+
+	// makeSpace makes room for writing
+	makeSpace := func(space int) {
 		size := len(buffer) - len(ptr)
-		if size+IKCP_OVERHEAD > int(kcp.mtu) {
+		if size+space > int(kcp.mtu) {
 			kcp.output(buffer, size)
 			ptr = buffer[kcp.reserved:]
 		}
+	}
+
+	// flush bytes in buffer if there is any
+	flushBuffer := func() {
+		size := len(buffer) - len(ptr)
+		if size > kcp.reserved {
+			kcp.output(buffer, size)
+		}
+	}
+
+	// flush acknowledges
+	for i, ack := range kcp.acklist {
+		makeSpace(IKCP_OVERHEAD)
 		// filter jitters caused by bufferbloat
 		if ack.sn >= kcp.rcv_nxt || len(kcp.acklist)-1 == i {
 			seg.sn, seg.ts = ack.sn, ack.ts
@@ -668,10 +682,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	kcp.acklist = kcp.acklist[0:0]
 
 	if ackOnly { // flash remain ack segments
-		size := len(buffer) - len(ptr)
-		if size > kcp.reserved {
-			kcp.output(buffer, size)
-		}
+		flushBuffer()
 		return kcp.interval
 	}
 
@@ -702,22 +713,14 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	// flush window probing commands
 	if (kcp.probe & IKCP_ASK_SEND) != 0 {
 		seg.cmd = IKCP_CMD_WASK
-		size := len(buffer) - len(ptr)
-		if size+IKCP_OVERHEAD > int(kcp.mtu) {
-			kcp.output(buffer, size)
-			ptr = buffer[kcp.reserved:]
-		}
+		makeSpace(IKCP_OVERHEAD)
 		ptr = seg.encode(ptr)
 	}
 
 	// flush window probing commands
 	if (kcp.probe & IKCP_ASK_TELL) != 0 {
 		seg.cmd = IKCP_CMD_WINS
-		size := len(buffer) - len(ptr)
-		if size+IKCP_OVERHEAD > int(kcp.mtu) {
-			kcp.output(buffer, size)
-			ptr = buffer[kcp.reserved:]
-		}
+		makeSpace(IKCP_OVERHEAD)
 		ptr = seg.encode(ptr)
 	}
 
@@ -802,14 +805,8 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			segment.wnd = seg.wnd
 			segment.una = seg.una
 
-			size := len(buffer) - len(ptr)
 			need := IKCP_OVERHEAD + len(segment.data)
-
-			if size+need > int(kcp.mtu) {
-				kcp.output(buffer, size)
-				ptr = buffer[kcp.reserved:]
-			}
-
+			makeSpace(need)
 			ptr = segment.encode(ptr)
 			copy(ptr, segment.data)
 			ptr = ptr[len(segment.data):]
@@ -826,10 +823,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	}
 
 	// flash remain segments
-	size := len(buffer) - len(ptr)
-	if size > kcp.reserved {
-		kcp.output(buffer, size)
-	}
+	flushBuffer()
 
 	// counter updates
 	sum := lostSegs
