@@ -1,6 +1,7 @@
 package kcp
 
 import (
+	"encoding/binary"
 	"math/rand"
 	"testing"
 )
@@ -16,14 +17,13 @@ func BenchmarkFECDecode(b *testing.B) {
 		if rand.Int()%(dataSize+paritySize) == 0 { // random loss
 			continue
 		}
-		var pkt fecPacket
-		pkt.seqid = uint32(i)
+		pkt := make([]byte, payLoad)
+		binary.LittleEndian.PutUint32(pkt, uint32(i))
 		if i%(dataSize+paritySize) >= dataSize {
-			pkt.flag = typeFEC
+			binary.LittleEndian.PutUint16(pkt[4:], typeFEC)
 		} else {
-			pkt.flag = typeData
+			binary.LittleEndian.PutUint16(pkt[4:], typeData)
 		}
-		pkt.data = make([]byte, payLoad)
 		decoder.decode(pkt)
 	}
 }

@@ -553,16 +553,16 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 	if s.fecDecoder != nil {
 		if len(data) > fecHeaderSize { // must be larger than fec header size
-			f := s.fecDecoder.decodeBytes(data)
-			if f.flag == typeData || f.flag == typeFEC { // header check
-				if f.flag == typeFEC {
+			f := fecPacket(data)
+			if f.flag() == typeData || f.flag() == typeFEC { // header check
+				if f.flag() == typeFEC {
 					fecParityShards++
 				}
 				recovers := s.fecDecoder.decode(f)
 
 				s.mu.Lock()
 				waitsnd := s.kcp.WaitSnd()
-				if f.flag == typeData {
+				if f.flag() == typeData {
 					if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
 						kcpInErrors++
 					}
