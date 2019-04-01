@@ -148,11 +148,14 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 					dlen := len(shards[k])
 					shards[k] = shards[k][:maxlen]
 					copy(shards[k][dlen:], dec.zeros)
+				} else {
+					shards[k] = xmitBuf.Get().([]byte)[:0]
 				}
 			}
 			if err := dec.codec.ReconstructData(shards); err == nil {
 				for k := range shards[:dec.dataShards] {
 					if !shardsflag[k] {
+						// recovered data should be recycled
 						recovered = append(recovered, shards[k])
 					}
 				}

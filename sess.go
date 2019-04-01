@@ -583,6 +583,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 					} else {
 						fecErrs++
 					}
+					xmitBuf.Put(r)
 				}
 
 				// to notify the readers to receive the data
