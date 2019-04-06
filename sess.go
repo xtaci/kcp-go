@@ -583,6 +583,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 					} else {
 						fecErrs++
 					}
+					// recycle the recovers
 					xmitBuf.Put(r)
 				}
 
