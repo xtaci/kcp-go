@@ -272,6 +272,31 @@ func TestSendRecv(t *testing.T) {
 	cli.Close()
 }
 
+func TestSendVector(t *testing.T) {
+	cli, err := dialEcho()
+	if err != nil {
+		panic(err)
+	}
+	cli.SetWriteDelay(false)
+	const N = 100
+	buf := make([]byte, 20)
+	v := make([][]byte, 2)
+	for i := 0; i < N; i++ {
+		v[0] = []byte(fmt.Sprintf("hello%v", i))
+		v[1] = []byte(fmt.Sprintf("world%v", i))
+		msg := fmt.Sprintf("hello%vworld%v", i, i)
+		cli.WriteBuffers(v)
+		if n, err := cli.Read(buf); err == nil {
+			if string(buf[:n]) != msg {
+				t.Error(string(buf[:n]), msg)
+			}
+		} else {
+			panic(err)
+		}
+	}
+	cli.Close()
+}
+
 func TestTinyBufferReceiver(t *testing.T) {
 	cli, err := dialTinyBufferEcho()
 	if err != nil {

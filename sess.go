@@ -304,6 +304,67 @@ func (s *UDPSession) Write(b []byte) (n int, err error) {
 	}
 }
 
+// WriteBuffers write a vector of byte slices to the underlying connection
+func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
+	for {
+		s.mu.Lock()
+		if s.isClosed {
+			s.mu.Unlock()
+			return 0, errors.New(errBrokenPipe)
+		}
+
+		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
+			for _, b := range v {
+				n += len(b)
+				for {
+					if len(b) <= int(s.kcp.mss) {
+						s.kcp.Send(b)
+						break
+					} else {
+						s.kcp.Send(b[:s.kcp.mss])
+						b = b[s.kcp.mss:]
+					}
+				}
+			}
+
+			if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
+				s.kcp.flush(false)
+			}
+			s.mu.Unlock()
+			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
+			return n, nil
+		}
+
+		var timeout *time.Timer
+		var c <-chan time.Time
+		if !s.wd.IsZero() {
+			if time.Now().After(s.wd) {
+				s.mu.Unlock()
+				return 0, errTimeout{}
+			}
+			delay := s.wd.Sub(time.Now())
+			timeout = time.NewTimer(delay)
+			c = timeout.C
+		}
+		s.mu.Unlock()
+
+		select {
+		case <-s.chWriteEvent:
+		case <-c:
+		case <-s.die:
+		case err = <-s.chWriteError:
+			if timeout != nil {
+				timeout.Stop()
+			}
+			return n, err
+		}
+
+		if timeout != nil {
+			timeout.Stop()
+		}
+	}
+}
+
 // Close closes the connection.
 func (s *UDPSession) Close() error {
 	// remove current session from updater & listener(if necessary)
