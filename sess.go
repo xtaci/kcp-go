@@ -241,68 +241,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 }
 
 // Write implements net.Conn
-func (s *UDPSession) Write(b []byte) (n int, err error) {
-	for {
-		s.mu.Lock()
-		if s.isClosed {
-			s.mu.Unlock()
-			return 0, errors.New(errBrokenPipe)
-		}
-
-		// controls how much data will be sent to kcp core
-		// to prevent the memory from exhuasting
-		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
-			n = len(b)
-			for {
-				if len(b) <= int(s.kcp.mss) {
-					s.kcp.Send(b)
-					break
-				} else {
-					s.kcp.Send(b[:s.kcp.mss])
-					b = b[s.kcp.mss:]
-				}
-			}
-
-			// flush immediately if the queue is full
-			if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
-				s.kcp.flush(false)
-			}
-			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
-			return n, nil
-		}
-
-		// deadline for current writing operation
-		var timeout *time.Timer
-		var c <-chan time.Time
-		if !s.wd.IsZero() {
-			if time.Now().After(s.wd) {
-				s.mu.Unlock()
-				return 0, errTimeout{}
-			}
-			delay := s.wd.Sub(time.Now())
-			timeout = time.NewTimer(delay)
-			c = timeout.C
-		}
-		s.mu.Unlock()
-
-		// wait for write event or timeout
-		select {
-		case <-s.chWriteEvent:
-		case <-c:
-		case <-s.die:
-		case err = <-s.chWriteError:
-			if timeout != nil {
-				timeout.Stop()
-			}
-			return n, err
-		}
-
-		if timeout != nil {
-			timeout.Stop()
-		}
-	}
-}
+func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers([][]byte{b}) }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
