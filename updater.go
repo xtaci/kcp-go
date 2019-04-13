@@ -76,10 +76,10 @@ func (h *updateHeap) wakeup() {
 }
 
 func (h *updateHeap) updateTask() {
-	var timer <-chan time.Time
+	timer := time.NewTimer(0)
 	for {
 		select {
-		case <-timer:
+		case <-timer.C:
 		case <-h.chWakeUp:
 		}
 
@@ -97,7 +97,7 @@ func (h *updateHeap) updateTask() {
 		}
 
 		if hlen > 0 {
-			timer = time.After(h.entries[0].ts.Sub(time.Now()))
+			timer.Reset(h.entries[0].ts.Sub(time.Now()))
 		}
 		h.mu.Unlock()
 	}
