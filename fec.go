@@ -241,13 +241,16 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 // encodes the packet, outputs parity shards if we have collected quorum datashards
 // notice: the contents of 'ps' will be re-written in successive calling
 func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
+	// The header format:
+	// | FEC SEQID(4B) | FEC TYPE(2B) | SIZE (2B) | PAYLOAD(SIZE-2) |
+	// |<-headerOffset                |<-payloadOffset
 	enc.markData(b[enc.headerOffset:])
 	binary.LittleEndian.PutUint16(b[enc.payloadOffset:], uint16(len(b[enc.payloadOffset:])))
 
-	// copy data to fec datashards
+	// copy data from payloadOffset to fec shard cache
 	sz := len(b)
 	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
-	copy(enc.shardCache[enc.shardCount], b)
+	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
 	enc.shardCount++
 
 	// track max datashard length
