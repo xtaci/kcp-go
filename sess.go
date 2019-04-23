@@ -857,7 +857,7 @@ func (l *Listener) monitorIPv4() {
 	for {
 		if count, err := conn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
-				msg := msgs[i]
+				msg := &msgs[i]
 				if msg.N >= l.headerSize+IKCP_OVERHEAD {
 					l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
 				} else {
@@ -887,7 +887,7 @@ func (l *Listener) monitorIPv6() {
 	for {
 		if count, err := conn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
-				msg := msgs[i]
+				msg := &msgs[i]
 				if msg.N >= l.headerSize+IKCP_OVERHEAD {
 					l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
 				} else {
