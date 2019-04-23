@@ -277,7 +277,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 		if err := enc.codec.Encode(cache); err == nil {
 			ps = enc.shardCache[enc.dataShards:]
 			for k := range ps {
-				enc.markFEC(ps[k][enc.headerOffset:])
+				enc.markParity(ps[k][enc.headerOffset:])
 				ps[k] = ps[k][:enc.maxSize]
 			}
 		}
@@ -296,8 +296,9 @@ func (enc *fecEncoder) markData(data []byte) {
 	enc.next++
 }
 
-func (enc *fecEncoder) markFEC(data []byte) {
+func (enc *fecEncoder) markParity(data []byte) {
 	binary.LittleEndian.PutUint32(data, enc.next)
 	binary.LittleEndian.PutUint16(data[4:], typeFEC)
+	// sequence wrap will only happen at parity shard
 	enc.next = (enc.next + 1) % enc.paws
 }
