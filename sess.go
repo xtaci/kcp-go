@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,9 @@ const (
 
 	// accept backlog
 	acceptBacklog = 128
+
+	// ReadBatch() message size
+	batchSize = 16
 )
 
 const (
@@ -426,10 +430,12 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	defer s.mu.Unlock()
 	if s.l == nil {
 		if nc, ok := s.conn.(net.Conn); ok {
-			if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err != nil {
+			addr, _ := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
+			if addr.IP.To4() != nil {
+				return ipv4.NewConn(nc).SetTOS(dscp << 2)
+			} else {
 				return ipv6.NewConn(nc).SetTrafficClass(dscp)
 			}
-			return nil
 		}
 	}
 	return errors.New(errInvalidOperation)
@@ -548,6 +554,28 @@ func (s *UDPSession) notifyWriteError(err error) {
 	}
 }
 
+// packet input stage
+func (s *UDPSession) packetInput(data []byte) {
+	dataValid := false
+	if s.block != nil {
+		s.block.Decrypt(data, data)
+		data = data[nonceSize:]
+		checksum := crc32.ChecksumIEEE(data[crcSize:])
+		if checksum == binary.LittleEndian.Uint32(data) {
+			data = data[crcSize:]
+			dataValid = true
+		} else {
+			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+		}
+	} else if s.block == nil {
+		dataValid = true
+	}
+
+	if dataValid {
+		s.kcpInput(data)
+	}
+}
+
 func (s *UDPSession) kcpInput(data []byte) {
 	var kcpInErrors, fecErrs, fecRecovered, fecParityShards uint64
 
@@ -635,40 +663,93 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 // the read loop for a client session
 func (s *UDPSession) readLoop() {
-	buf := make([]byte, mtuLimit)
+	addr, _ := net.ResolveUDPAddr("udp", s.conn.LocalAddr().String())
+	if addr.IP.To4() != nil {
+		s.readLoopIPv4()
+	} else {
+		s.readLoopIPv6()
+	}
+}
+
+func (s *UDPSession) readLoopIPv6() {
 	var src string
+	var msgs []ipv6.Message
+
+	switch runtime.GOOS {
+	case "linux":
+		msgs = make([]ipv6.Message, batchSize)
+	default:
+		msgs = make([]ipv6.Message, 1)
+	}
+
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+	}
+
+	conn := ipv6.NewPacketConn(s.conn)
+
 	for {
-		if n, addr, err := s.conn.ReadFrom(buf); err == nil {
-			// make sure the packet is from the same source
-			if src == "" { // set source address
-				src = addr.String()
-			} else if addr.String() != src {
-				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-				continue
+		if count, err := conn.ReadBatch(msgs, 0); err == nil {
+			for i := 0; i < count; i++ {
+				msg := &msgs[i]
+				// make sure the packet is from the same source
+				if src == "" { // set source address if nil
+					src = msg.Addr.String()
+				} else if msg.Addr.String() != src {
+					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+					continue
+				}
+
+				if msg.N < s.headerSize+IKCP_OVERHEAD {
+					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+					continue
+				}
+
+				// source and size has validated
+				s.packetInput(msg.Buffers[0][:msg.N])
 			}
+		} else {
+			s.chReadError <- err
+			return
+		}
+	}
+}
 
-			if n >= s.headerSize+IKCP_OVERHEAD {
-				data := buf[:n]
-				dataValid := false
-				if s.block != nil {
-					s.block.Decrypt(data, data)
-					data = data[nonceSize:]
-					checksum := crc32.ChecksumIEEE(data[crcSize:])
-					if checksum == binary.LittleEndian.Uint32(data) {
-						data = data[crcSize:]
-						dataValid = true
-					} else {
-						atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
-					}
-				} else if s.block == nil {
-					dataValid = true
+func (s *UDPSession) readLoopIPv4() {
+	var src string
+	var msgs []ipv4.Message
+
+	switch runtime.GOOS {
+	case "linux":
+		msgs = make([]ipv4.Message, batchSize)
+	default:
+		msgs = make([]ipv4.Message, 1)
+	}
+
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+	}
+
+	conn := ipv4.NewPacketConn(s.conn)
+	for {
+		if count, err := conn.ReadBatch(msgs, 0); err == nil {
+			for i := 0; i < count; i++ {
+				msg := &msgs[i]
+				// make sure the packet is from the same source
+				if src == "" { // set source address if nil
+					src = msg.Addr.String()
+				} else if msg.Addr.String() != src {
+					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+					continue
 				}
 
-				if dataValid {
-					s.kcpInput(data)
+				if msg.N < s.headerSize+IKCP_OVERHEAD {
+					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+					continue
 				}
-			} else {
-				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+
+				// source and size has validated
+				s.packetInput(msg.Buffers[0][:msg.N])
 			}
 		} else {
 			s.chReadError <- err
@@ -699,77 +780,119 @@ type (
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	// a cache for session object last used
-	var lastAddr string
-	var lastSession *UDPSession
-	buf := make([]byte, mtuLimit)
+	addr, _ := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
+	if addr.IP.To4() != nil {
+		l.monitorIPv4()
+	} else {
+		l.monitorIPv6()
+	}
+}
+
+// packet input stage
+func (l *Listener) packetInput(data []byte, addr net.Addr) {
+	dataValid := false
+	if l.block != nil {
+		l.block.Decrypt(data, data)
+		data = data[nonceSize:]
+		checksum := crc32.ChecksumIEEE(data[crcSize:])
+		if checksum == binary.LittleEndian.Uint32(data) {
+			data = data[crcSize:]
+			dataValid = true
+		} else {
+			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+		}
+	} else if l.block == nil {
+		dataValid = true
+	}
+
+	if dataValid {
+		l.sessionLock.Lock()
+		s, ok := l.sessions[addr.String()]
+		l.sessionLock.Unlock()
+
+		if !ok { // new address:port
+			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
+				var conv uint32
+				convValid := false
+				if l.fecDecoder != nil {
+					isfec := binary.LittleEndian.Uint16(data[4:])
+					if isfec == typeData {
+						conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+						convValid = true
+					}
+				} else {
+					conv = binary.LittleEndian.Uint32(data)
+					convValid = true
+				}
+
+				if convValid { // creates a new session only if the 'conv' field in kcp is accessible
+					s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, addr, l.block)
+					s.kcpInput(data)
+					l.sessionLock.Lock()
+					l.sessions[addr.String()] = s
+					l.sessionLock.Unlock()
+					l.chAccepts <- s
+				}
+			}
+		} else {
+			s.kcpInput(data)
+		}
+	}
+}
+
+func (l *Listener) monitorIPv4() {
+	var msgs []ipv4.Message
+	switch runtime.GOOS {
+	case "linux":
+		msgs = make([]ipv4.Message, batchSize)
+	default:
+		msgs = make([]ipv4.Message, 1)
+	}
+
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+	}
+
+	conn := ipv4.NewPacketConn(l.conn)
 	for {
-		if n, from, err := l.conn.ReadFrom(buf); err == nil {
-			if n >= l.headerSize+IKCP_OVERHEAD {
-				data := buf[:n]
-				dataValid := false
-				if l.block != nil {
-					l.block.Decrypt(data, data)
-					data = data[nonceSize:]
-					checksum := crc32.ChecksumIEEE(data[crcSize:])
-					if checksum == binary.LittleEndian.Uint32(data) {
-						data = data[crcSize:]
-						dataValid = true
-					} else {
-						atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
-					}
-				} else if l.block == nil {
-					dataValid = true
+		if count, err := conn.ReadBatch(msgs, 0); err == nil {
+			for i := 0; i < count; i++ {
+				msg := msgs[i]
+				if msg.N >= l.headerSize+IKCP_OVERHEAD {
+					l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
+				} else {
+					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				}
+			}
+		} else {
+			return
+		}
+	}
+}
 
-				if dataValid {
-					addr := from.String()
-					var s *UDPSession
-					var ok bool
+func (l *Listener) monitorIPv6() {
+	var msgs []ipv6.Message
+	switch runtime.GOOS {
+	case "linux":
+		msgs = make([]ipv6.Message, batchSize)
+	default:
+		msgs = make([]ipv6.Message, 1)
+	}
 
-					// the packets received from an address always come in batch,
-					// cache the session for next packet, without querying map.
-					if addr == lastAddr {
-						s, ok = lastSession, true
-					} else {
-						l.sessionLock.Lock()
-						if s, ok = l.sessions[addr]; ok {
-							lastSession = s
-							lastAddr = addr
-						}
-						l.sessionLock.Unlock()
-					}
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+	}
 
-					if !ok { // new session
-						if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
-							var conv uint32
-							convValid := false
-							if l.fecDecoder != nil {
-								isfec := binary.LittleEndian.Uint16(data[4:])
-								if isfec == typeData {
-									conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
-									convValid = true
-								}
-							} else {
-								conv = binary.LittleEndian.Uint32(data)
-								convValid = true
-							}
-
-							if convValid { // creates a new session only if the 'conv' field in kcp is accessible
-								s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, from, l.block)
-								s.kcpInput(data)
-								l.sessionLock.Lock()
-								l.sessions[addr] = s
-								l.sessionLock.Unlock()
-								l.chAccepts <- s
-							}
-						}
-					} else {
-						s.kcpInput(data)
-					}
+	conn := ipv4.NewPacketConn(l.conn)
+	for {
+		if count, err := conn.ReadBatch(msgs, 0); err == nil {
+			for i := 0; i < count; i++ {
+				msg := msgs[i]
+				if msg.N >= l.headerSize+IKCP_OVERHEAD {
+					l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
+				} else {
+					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				}
-			} else {
-				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
 			return
@@ -796,10 +919,12 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 // SetDSCP sets the 6bit DSCP field of IP header
 func (l *Listener) SetDSCP(dscp int) error {
 	if nc, ok := l.conn.(net.Conn); ok {
-		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err != nil {
+		addr, _ := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
+		if addr.IP.To4() != nil {
+			return ipv4.NewConn(nc).SetTOS(dscp << 2)
+		} else {
 			return ipv6.NewConn(nc).SetTrafficClass(dscp)
 		}
-		return nil
 	}
 	return errors.New(errInvalidOperation)
 }
@@ -913,17 +1038,7 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
-	// network type detection
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
-	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
-	}
-	network := "udp4"
-	if udpaddr.IP.To4() == nil {
-		network = "udp"
-	}
-
-	conn, err := net.ListenUDP(network, nil)
+	conn, err := net.ListenUDP("udp", nil)
 	if err != nil {
 		return nil, errors.Wrap(err, "net.DialUDP")
 	}
