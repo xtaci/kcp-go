@@ -20,7 +20,7 @@ func BenchmarkFECDecode(b *testing.B) {
 		pkt := make([]byte, payLoad)
 		binary.LittleEndian.PutUint32(pkt, uint32(i))
 		if i%(dataSize+paritySize) >= dataSize {
-			binary.LittleEndian.PutUint16(pkt[4:], typeFEC)
+			binary.LittleEndian.PutUint16(pkt[4:], typeParity)
 		} else {
 			binary.LittleEndian.PutUint16(pkt[4:], typeData)
 		}
