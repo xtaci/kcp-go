@@ -40,9 +40,6 @@ const (
 
 	// accept backlog
 	acceptBacklog = 128
-
-	// ReadBatch() message size
-	batchSize = 16
 )
 
 const (
