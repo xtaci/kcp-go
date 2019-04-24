@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 	"net"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -661,103 +660,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 	}
 }
 
-// the read loop for a client session
-func (s *UDPSession) readLoop() {
-	addr, _ := net.ResolveUDPAddr("udp", s.conn.LocalAddr().String())
-	if addr.IP.To4() != nil {
-		s.readLoopIPv4()
-	} else {
-		s.readLoopIPv6()
-	}
-}
-
-func (s *UDPSession) readLoopIPv6() {
-	var src string
-	var msgs []ipv6.Message
-
-	switch runtime.GOOS {
-	case "linux":
-		msgs = make([]ipv6.Message, batchSize)
-	default:
-		msgs = make([]ipv6.Message, 1)
-	}
-
-	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
-	}
-
-	conn := ipv6.NewPacketConn(s.conn)
-
-	for {
-		if count, err := conn.ReadBatch(msgs, 0); err == nil {
-			for i := 0; i < count; i++ {
-				msg := &msgs[i]
-				// make sure the packet is from the same source
-				if src == "" { // set source address if nil
-					src = msg.Addr.String()
-				} else if msg.Addr.String() != src {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-					continue
-				}
-
-				if msg.N < s.headerSize+IKCP_OVERHEAD {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-					continue
-				}
-
-				// source and size has validated
-				s.packetInput(msg.Buffers[0][:msg.N])
-			}
-		} else {
-			s.chReadError <- err
-			return
-		}
-	}
-}
-
-func (s *UDPSession) readLoopIPv4() {
-	var src string
-	var msgs []ipv4.Message
-
-	switch runtime.GOOS {
-	case "linux":
-		msgs = make([]ipv4.Message, batchSize)
-	default:
-		msgs = make([]ipv4.Message, 1)
-	}
-
-	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
-	}
-
-	conn := ipv4.NewPacketConn(s.conn)
-	for {
-		if count, err := conn.ReadBatch(msgs, 0); err == nil {
-			for i := 0; i < count; i++ {
-				msg := &msgs[i]
-				// make sure the packet is from the same source
-				if src == "" { // set source address if nil
-					src = msg.Addr.String()
-				} else if msg.Addr.String() != src {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-					continue
-				}
-
-				if msg.N < s.headerSize+IKCP_OVERHEAD {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-					continue
-				}
-
-				// source and size has validated
-				s.packetInput(msg.Buffers[0][:msg.N])
-			}
-		} else {
-			s.chReadError <- err
-			return
-		}
-	}
-}
-
 type (
 	// Listener defines a server which will be waiting to accept incoming connections
 	Listener struct {
@@ -777,16 +679,6 @@ type (
 		wd              atomic.Value
 	}
 )
-
-// monitor incoming data for all connections of server
-func (l *Listener) monitor() {
-	addr, _ := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
-	if addr.IP.To4() != nil {
-		l.monitorIPv4()
-	} else {
-		l.monitorIPv6()
-	}
-}
 
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
@@ -836,66 +728,6 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 			}
 		} else {
 			s.kcpInput(data)
-		}
-	}
-}
-
-func (l *Listener) monitorIPv4() {
-	var msgs []ipv4.Message
-	switch runtime.GOOS {
-	case "linux":
-		msgs = make([]ipv4.Message, batchSize)
-	default:
-		msgs = make([]ipv4.Message, 1)
-	}
-
-	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
-	}
-
-	conn := ipv4.NewPacketConn(l.conn)
-	for {
-		if count, err := conn.ReadBatch(msgs, 0); err == nil {
-			for i := 0; i < count; i++ {
-				msg := &msgs[i]
-				if msg.N >= l.headerSize+IKCP_OVERHEAD {
-					l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
-				} else {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-				}
-			}
-		} else {
-			return
-		}
-	}
-}
-
-func (l *Listener) monitorIPv6() {
-	var msgs []ipv6.Message
-	switch runtime.GOOS {
-	case "linux":
-		msgs = make([]ipv6.Message, batchSize)
-	default:
-		msgs = make([]ipv6.Message, 1)
-	}
-
-	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
-	}
-
-	conn := ipv4.NewPacketConn(l.conn)
-	for {
-		if count, err := conn.ReadBatch(msgs, 0); err == nil {
-			for i := 0; i < count; i++ {
-				msg := &msgs[i]
-				if msg.N >= l.headerSize+IKCP_OVERHEAD {
-					l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
-				} else {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-				}
-			}
-		} else {
-			return
 		}
 	}
 }
