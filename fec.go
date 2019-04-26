@@ -169,7 +169,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		if dec.rx[0].flag() == typeData { // track the unrecoverable data
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
-		dec.rx = dec.freeRange(0, 1, dec.rx)
+		dec.rx = dec.rx[1:]
 	}
 	return
 }
