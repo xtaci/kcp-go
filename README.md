@@ -128,6 +128,10 @@ PASS
 ok  	github.com/xtaci/kcp-go	50.349s
 ```
 
+
+## Typical Flame Graph
+![Flame Graph in kcptun](flame.png)
+
 ## Key Design Considerations
 
 1. slice vs. container/list
