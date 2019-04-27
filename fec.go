@@ -169,7 +169,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		if dec.rx[0].flag() == typeData { // track the unrecoverable data
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 		}
-		dec.rx = dec.rx[1:]
+		dec.rx = dec.freeRange(0, 1, dec.rx)
 	}
 	return
 }
@@ -178,6 +178,10 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 func (dec *fecDecoder) freeRange(first, n int, q []fecPacket) []fecPacket {
 	for i := first; i < first+n; i++ { // recycle buffer
 		xmitBuf.Put([]byte(q[i]))
+	}
+
+	if first == 0 && n < len(q)/2 {
+		return q[n:]
 	}
 	copy(q[first:], q[first+n:])
 	return q[:len(q)-n]
