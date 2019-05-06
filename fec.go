@@ -180,7 +180,7 @@ func (dec *fecDecoder) freeRange(first, n int, q []fecPacket) []fecPacket {
 		xmitBuf.Put([]byte(q[i]))
 	}
 
-	if first == 0 && n < len(q)/2 {
+	if first == 0 && n < cap(q)/2 {
 		return q[n:]
 	}
 	copy(q[first:], q[first+n:])

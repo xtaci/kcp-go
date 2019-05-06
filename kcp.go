@@ -1025,7 +1025,7 @@ func (kcp *KCP) WaitSnd() int {
 // just shift the rear elements to front, otherwise just reslice q to q[n:]
 // then the cost of runtime.growslice can always be less than n/2
 func (kcp *KCP) remove_front(q []segment, n int) []segment {
-	if n > len(q)/2 {
+	if n > cap(q)/2 {
 		newn := copy(q, q[n:])
 		return q[:newn]
 	}
