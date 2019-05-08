@@ -96,6 +96,10 @@ type (
 		// nonce generator
 		nonce Entropy
 
+		// packets waiting to be sent on wire
+		txqueue   [][]byte
+		chTxQueue chan [][]byte
+
 		isClosed bool // flag the session has Closed
 		mu       sync.Mutex
 	}
@@ -158,6 +162,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	} else {
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
 	}
+
+	// a corked txLoop
+	sess.chTxQueue = make(chan [][]byte)
+	go sess.txLoop()
+
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
 	if currestab > maxconn {
@@ -270,6 +279,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 				s.kcp.flush(false)
 			}
 			s.mu.Unlock()
+			s.uncork()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 			return n, nil
 		}
@@ -302,6 +312,16 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			timeout.Stop()
 		}
 	}
+}
+
+// uncork sends data in txqueue if there is any
+func (s *UDPSession) uncork() {
+	s.mu.Lock()
+	if len(s.txqueue) > 0 {
+		s.chTxQueue <- s.txqueue
+		s.txqueue = nil
+	}
+	s.mu.Unlock()
 }
 
 // Close closes the connection.
@@ -466,7 +486,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 // 1. FEC packet generation
 // 2. CRC32 integrity
 // 3. Encryption
-// 4. WriteTo kernel
+// 4. TxQueue
 func (s *UDPSession) output(buf []byte) {
 	var ecc [][]byte
 
@@ -490,28 +510,18 @@ func (s *UDPSession) output(buf []byte) {
 		}
 	}
 
-	// 4. WriteTo kernel
-	nbytes := 0
-	npkts := 0
+	// 4. TxQueue
 	for i := 0; i < s.dup+1; i++ {
-		if n, err := s.conn.WriteTo(buf, s.remote); err == nil {
-			nbytes += n
-			npkts++
-		} else {
-			s.notifyWriteError(err)
-		}
+		bts := xmitBuf.Get().([]byte)[:len(buf)]
+		copy(bts, buf)
+		s.txqueue = append(s.txqueue, bts)
 	}
 
 	for k := range ecc {
-		if n, err := s.conn.WriteTo(ecc[k], s.remote); err == nil {
-			nbytes += n
-			npkts++
-		} else {
-			s.notifyWriteError(err)
-		}
+		bts := xmitBuf.Get().([]byte)[:len(ecc[k])]
+		copy(bts, ecc[k])
+		s.txqueue = append(s.txqueue, bts)
 	}
-	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
-	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
 
 // kcp update, returns interval for next calling
@@ -523,6 +533,7 @@ func (s *UDPSession) update() (interval time.Duration) {
 		s.notifyWriteEvent()
 	}
 	s.mu.Unlock()
+	s.uncork()
 	return
 }
 
@@ -655,6 +666,8 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if fecRecovered > 0 {
 		atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 	}
+
+	s.uncork()
 }
 
 type (
