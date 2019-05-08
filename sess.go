@@ -128,6 +128,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.l = l
 	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
+	sess.chTxQueue = make(chan []ipv4.Message)
 
 	// FEC codec initialization
 	sess.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
@@ -158,14 +159,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
+		go sess.txLoop()
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
 	} else {
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
 	}
-
-	// a corked txLoop
-	sess.chTxQueue = make(chan []ipv4.Message)
-	go sess.txLoop()
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -323,9 +321,16 @@ func (s *UDPSession) uncork() {
 	s.mu.Unlock()
 
 	if len(txqueue) > 0 {
-		select {
-		case s.chTxQueue <- txqueue:
-		case <-s.die:
+		if s.l != nil {
+			select {
+			case s.l.chTxQueue <- txqueue:
+			case <-s.die:
+			}
+		} else {
+			select {
+			case s.chTxQueue <- txqueue:
+			case <-s.die:
+			}
 		}
 	}
 }
@@ -698,6 +703,7 @@ type (
 		die             chan struct{}    // notify the listener has closed
 		rd              atomic.Value     // read deadline for Accept()
 		wd              atomic.Value
+		chTxQueue       chan []ipv4.Message
 	}
 )
 
@@ -873,6 +879,7 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
+	l.chTxQueue = make(chan []ipv4.Message)
 
 	// calculate header size
 	if l.block != nil {
@@ -883,6 +890,7 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	}
 
 	go l.monitor()
+	go l.txLoop()
 	return l, nil
 }
 

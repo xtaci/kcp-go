@@ -27,3 +27,22 @@ func (s *UDPSession) txLoop() {
 		}
 	}
 }
+
+func (l *Listener) txLoop() {
+	for {
+		select {
+		case txqueue := <-l.chTxQueue:
+			nbytes := 0
+			for k := range txqueue {
+				if n, err := l.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr); err == nil {
+					nbytes += n
+				}
+				xmitBuf.Put(txqueue[k].Buffers[0])
+			}
+			atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
+			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
+		case <-l.die:
+			return
+		}
+	}
+}
