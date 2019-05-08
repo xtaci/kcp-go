@@ -31,7 +31,7 @@ func (s *UDPSession) txLoop() {
 						vec = vec[n:]
 					} else {
 						s.notifyWriteError(err)
-						break
+						return
 					}
 				}
 

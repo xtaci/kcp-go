@@ -16,9 +16,8 @@ func (s *UDPSession) txLoop() {
 					nbytes += n
 				} else {
 					s.notifyWriteError(err)
+					return
 				}
-
-				xmitBuf.Put(txqueue[k].Buffers[0])
 			}
 			atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
 			atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))

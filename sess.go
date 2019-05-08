@@ -570,6 +570,13 @@ func (s *UDPSession) notifyWriteEvent() {
 	}
 }
 
+func (s *UDPSession) notifyReadError(err error) {
+	select {
+	case s.chReadError <- err:
+	default:
+	}
+}
+
 func (s *UDPSession) notifyWriteError(err error) {
 	select {
 	case s.chWriteError <- err:

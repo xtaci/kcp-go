@@ -52,7 +52,7 @@ func (s *UDPSession) readLoop() {
 				s.packetInput(msg.Buffers[0][:msg.N])
 			}
 		} else {
-			s.chReadError <- err
+			s.notifyReadError(err)
 			return
 		}
 	}

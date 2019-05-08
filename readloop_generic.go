@@ -25,7 +25,7 @@ func (s *UDPSession) readLoop() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			s.chReadError <- err
+			s.notifyReadError(err)
 			return
 		}
 	}
