@@ -27,15 +27,13 @@ func (s *UDPSession) txLoopIPv4() {
 		select {
 		case txqueue := <-s.chTxQueue:
 			if len(txqueue) > 0 {
-				var nbytes uint64
-				var npkts uint64
+				nbytes := 0
 
 				for k := range txqueue {
 					idx := k % batchSize
 					msgs[idx].Addr = s.remote
 					msgs[idx].Buffers = [][]byte{txqueue[k]}
-					nbytes += uint64(len(txqueue[k]))
-					npkts++
+					nbytes += len(txqueue[k])
 
 					if (k+1)%batchSize == 0 {
 						if _, err := conn.WriteBatch(msgs, 0); err != nil {
@@ -54,8 +52,8 @@ func (s *UDPSession) txLoopIPv4() {
 					xmitBuf.Put(txqueue[k])
 				}
 
-				atomic.AddUint64(&DefaultSnmp.OutPkts, npkts)
-				atomic.AddUint64(&DefaultSnmp.OutBytes, nbytes)
+				atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
+				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 			}
 		case <-s.die:
 			return
@@ -71,15 +69,13 @@ func (s *UDPSession) txLoopIPv6() {
 		select {
 		case txqueue := <-s.chTxQueue:
 			if len(txqueue) > 0 {
-				var nbytes uint64
-				var npkts uint64
+				nbytes := 0
 
 				for k := range txqueue {
 					idx := k % batchSize
 					msgs[idx].Addr = s.remote
 					msgs[idx].Buffers = [][]byte{txqueue[k]}
-					nbytes += uint64(len(txqueue[k]))
-					npkts++
+					nbytes += len(txqueue[k])
 
 					if (k+1)%batchSize == 0 {
 						if _, err := conn.WriteBatch(msgs, 0); err != nil {
@@ -98,8 +94,8 @@ func (s *UDPSession) txLoopIPv6() {
 					xmitBuf.Put(txqueue[k])
 				}
 
-				atomic.AddUint64(&DefaultSnmp.OutPkts, npkts)
-				atomic.AddUint64(&DefaultSnmp.OutBytes, nbytes)
+				atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
+				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 			}
 		case <-s.die:
 			return
