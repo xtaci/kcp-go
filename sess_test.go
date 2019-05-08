@@ -25,13 +25,10 @@ var pass = pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
 
 func init() {
 	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
 	}()
 
-	go echoServer()
-	go sinkServer()
-	go tinyBufferEchoServer()
-	println("beginning tests, encryption:salsa20, fec:10/3")
+	log.Println("beginning tests, encryption:salsa20, fec:10/3")
 }
 
 func dialEcho() (*UDPSession, error) {
@@ -115,7 +112,7 @@ func listenSink() (net.Listener, error) {
 	return ListenWithOptions(portSink, nil, 0, 0)
 }
 
-func echoServer() {
+func echoServer() net.Listener {
 	l, err := listenEcho()
 	if err != nil {
 		panic(err)
@@ -138,9 +135,11 @@ func echoServer() {
 			go handleEcho(s.(*UDPSession))
 		}
 	}()
+
+	return l
 }
 
-func sinkServer() {
+func sinkServer() net.Listener {
 	l, err := listenSink()
 	if err != nil {
 		panic(err)
@@ -160,9 +159,11 @@ func sinkServer() {
 			go handleSink(s.(*UDPSession))
 		}
 	}()
+
+	return l
 }
 
-func tinyBufferEchoServer() {
+func tinyBufferEchoServer() net.Listener {
 	l, err := listenTinyBufferEcho()
 	if err != nil {
 		panic(err)
@@ -177,6 +178,7 @@ func tinyBufferEchoServer() {
 			go handleTinyBufferEcho(s.(*UDPSession))
 		}
 	}()
+	return l
 }
 
 ///////////////////////////
@@ -233,6 +235,9 @@ func handleTinyBufferEcho(conn *UDPSession) {
 ///////////////////////////
 
 func TestTimeout(t *testing.T) {
+	l := echoServer()
+	defer l.Close()
+
 	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
@@ -250,6 +255,9 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestSendRecv(t *testing.T) {
+	l := echoServer()
+	defer l.Close()
+
 	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
@@ -273,6 +281,9 @@ func TestSendRecv(t *testing.T) {
 }
 
 func TestSendVector(t *testing.T) {
+	l := echoServer()
+	defer l.Close()
+
 	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
@@ -298,6 +309,9 @@ func TestSendVector(t *testing.T) {
 }
 
 func TestTinyBufferReceiver(t *testing.T) {
+	l := tinyBufferEchoServer()
+	defer l.Close()
+
 	cli, err := dialTinyBufferEcho()
 	if err != nil {
 		panic(err)
@@ -338,6 +352,9 @@ func TestTinyBufferReceiver(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	l := echoServer()
+	defer l.Close()
+
 	cli, err := dialEcho()
 	if err != nil {
 		panic(err)
@@ -360,6 +377,9 @@ func TestClose(t *testing.T) {
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
+	l := echoServer()
+	defer l.Close()
+
 	var wg sync.WaitGroup
 	wg.Add(1024)
 	for i := 0; i < 1024; i++ {
@@ -396,6 +416,9 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 }
 
 func speedclient(b *testing.B, nbytes int) {
+	l := echoServer()
+	defer l.Close()
+
 	b.ReportAllocs()
 	cli, err := dialEcho()
 	if err != nil {
@@ -425,6 +448,9 @@ func BenchmarkSinkSpeed1M(b *testing.B) {
 }
 
 func sinkclient(b *testing.B, nbytes int) {
+	l := sinkServer()
+	defer l.Close()
+
 	b.ReportAllocs()
 	cli, err := dialSink()
 	if err != nil {

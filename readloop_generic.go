@@ -41,6 +41,7 @@ func (l *Listener) monitor() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
+			l.Close()
 			return
 		}
 	}

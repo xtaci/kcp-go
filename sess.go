@@ -324,7 +324,7 @@ func (s *UDPSession) uncork() {
 		if s.l != nil {
 			select {
 			case s.l.chTxQueue <- txqueue:
-			case <-s.die:
+			case <-s.l.die:
 			}
 		} else {
 			select {
@@ -700,10 +700,13 @@ type (
 		chAccepts       chan *UDPSession // Listen() backlog
 		chSessionClosed chan net.Addr    // session close queue
 		headerSize      int              // the additional header to a KCP frame
-		die             chan struct{}    // notify the listener has closed
-		rd              atomic.Value     // read deadline for Accept()
-		wd              atomic.Value
-		chTxQueue       chan []ipv4.Message
+
+		die     chan struct{} // notify the listener has closed
+		dieOnce sync.Once
+
+		rd        atomic.Value // read deadline for Accept()
+		wd        atomic.Value
+		chTxQueue chan []ipv4.Message
 	}
 )
 
@@ -830,9 +833,12 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 }
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
-func (l *Listener) Close() error {
-	close(l.die)
-	return l.conn.Close()
+func (l *Listener) Close() (err error) {
+	l.dieOnce.Do(func() {
+		close(l.die)
+		err = l.conn.Close()
+	})
+	return
 }
 
 // closeSession notify the listener that a session has closed

@@ -84,6 +84,7 @@ func (l *Listener) monitor() {
 				}
 			}
 		} else {
+			l.Close()
 			return
 		}
 	}
