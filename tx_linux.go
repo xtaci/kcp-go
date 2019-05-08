@@ -36,15 +36,27 @@ func (s *UDPSession) txLoopIPv4() {
 					nbytes += len(txqueue[k])
 
 					if (k+1)%batchSize == 0 {
-						if _, err := conn.WriteBatch(msgs, 0); err != nil {
-							s.notifyWriteError(err)
+						vec := msgs
+						for len(vec) > 0 {
+							if n, err := conn.WriteBatch(vec, 0); err == nil {
+								vec = vec[n:]
+							} else {
+								s.notifyWriteError(err)
+								break
+							}
 						}
 					}
 				}
 
 				if remain := len(txqueue) % batchSize; remain > 0 {
-					if _, err := conn.WriteBatch(msgs[:remain], 0); err != nil {
-						s.notifyWriteError(err)
+					vec := msgs[:remain]
+					for len(vec) > 0 {
+						if n, err := conn.WriteBatch(vec, 0); err == nil {
+							vec = vec[n:]
+						} else {
+							s.notifyWriteError(err)
+							break
+						}
 					}
 				}
 
@@ -78,15 +90,27 @@ func (s *UDPSession) txLoopIPv6() {
 					nbytes += len(txqueue[k])
 
 					if (k+1)%batchSize == 0 {
-						if _, err := conn.WriteBatch(msgs, 0); err != nil {
-							s.notifyWriteError(err)
+						vec := msgs
+						for len(vec) > 0 {
+							if n, err := conn.WriteBatch(vec, 0); err == nil {
+								vec = vec[n:]
+							} else {
+								s.notifyWriteError(err)
+								break
+							}
 						}
 					}
 				}
 
 				if remain := len(txqueue) % batchSize; remain > 0 {
-					if _, err := conn.WriteBatch(msgs[:remain], 0); err != nil {
-						s.notifyWriteError(err)
+					vec := msgs[:remain]
+					for len(vec) > 0 {
+						if n, err := conn.WriteBatch(vec, 0); err == nil {
+							vec = vec[n:]
+						} else {
+							s.notifyWriteError(err)
+							break
+						}
 					}
 				}
 
@@ -97,6 +121,7 @@ func (s *UDPSession) txLoopIPv6() {
 				atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
 				atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 			}
+
 		case <-s.die:
 			return
 		}
