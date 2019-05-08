@@ -10,10 +10,6 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-type batchConn interface {
-	WriteBatch(ms []ipv4.Message, flags int) (int, error)
-}
-
 func (s *UDPSession) txLoop() {
 	addr, _ := net.ResolveUDPAddr("udp", s.conn.LocalAddr().String())
 	var conn batchConn
