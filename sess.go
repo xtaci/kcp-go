@@ -97,8 +97,8 @@ type (
 		nonce Entropy
 
 		// packets waiting to be sent on wire
-		txqueue   [][]byte
-		chTxQueue chan [][]byte
+		txqueue   []ipv4.Message
+		chTxQueue chan []ipv4.Message
 
 		isClosed bool // flag the session has Closed
 		mu       sync.Mutex
@@ -164,7 +164,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	// a corked txLoop
-	sess.chTxQueue = make(chan [][]byte)
+	sess.chTxQueue = make(chan []ipv4.Message)
 	go sess.txLoop()
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
@@ -316,7 +316,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 // uncork sends data in txqueue if there is any
 func (s *UDPSession) uncork() {
-	var txqueue [][]byte
+	var txqueue []ipv4.Message
 	s.mu.Lock()
 	txqueue = s.txqueue
 	s.txqueue = nil
@@ -517,16 +517,21 @@ func (s *UDPSession) output(buf []byte) {
 	}
 
 	// 4. TxQueue
+	var msg ipv4.Message
 	for i := 0; i < s.dup+1; i++ {
 		bts := xmitBuf.Get().([]byte)[:len(buf)]
 		copy(bts, buf)
-		s.txqueue = append(s.txqueue, bts)
+		msg.Buffers = [][]byte{bts}
+		msg.Addr = s.remote
+		s.txqueue = append(s.txqueue, msg)
 	}
 
 	for k := range ecc {
 		bts := xmitBuf.Get().([]byte)[:len(ecc[k])]
 		copy(bts, ecc[k])
-		s.txqueue = append(s.txqueue, bts)
+		msg.Buffers = [][]byte{bts}
+		msg.Addr = s.remote
+		s.txqueue = append(s.txqueue, msg)
 	}
 }
 
