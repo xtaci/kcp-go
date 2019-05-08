@@ -316,15 +316,18 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 // uncork sends data in txqueue if there is any
 func (s *UDPSession) uncork() {
+	var txqueue [][]byte
 	s.mu.Lock()
-	if len(s.txqueue) > 0 {
+	txqueue = s.txqueue
+	s.txqueue = nil
+	s.mu.Unlock()
+
+	if len(txqueue) > 0 {
 		select {
-		case s.chTxQueue <- s.txqueue:
-			s.txqueue = nil
+		case s.chTxQueue <- txqueue:
 		case <-s.die:
 		}
 	}
-	s.mu.Unlock()
 }
 
 // Close closes the connection.
