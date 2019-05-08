@@ -318,8 +318,11 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 func (s *UDPSession) uncork() {
 	s.mu.Lock()
 	if len(s.txqueue) > 0 {
-		s.chTxQueue <- s.txqueue
-		s.txqueue = nil
+		select {
+		case s.chTxQueue <- s.txqueue:
+			s.txqueue = nil
+		case <-s.die:
+		}
 	}
 	s.mu.Unlock()
 }
