@@ -398,6 +398,7 @@ func parallel_client(wg *sync.WaitGroup, port int) (err error) {
 	}
 
 	err = echo_tester(cli, 64, 64)
+	cli.Close()
 	wg.Done()
 	return
 }
@@ -433,6 +434,7 @@ func speedclient(b *testing.B, nbytes int) {
 		b.Fail()
 	}
 	b.SetBytes(int64(nbytes))
+	cli.Close()
 }
 
 func BenchmarkSinkSpeed4K(b *testing.B) {
@@ -464,6 +466,7 @@ func sinkclient(b *testing.B, nbytes int) {
 
 	sink_tester(cli, nbytes, b.N)
 	b.SetBytes(int64(nbytes))
+	cli.Close()
 }
 
 func echo_tester(cli net.Conn, msglen, msgcount int) error {
