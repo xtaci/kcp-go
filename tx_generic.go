@@ -14,6 +14,7 @@ func (s *UDPSession) txLoop() {
 			for k := range txqueue {
 				if n, err := s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr); err == nil {
 					nbytes += n
+					xmitBuf.Put(txqueue[k].Buffers[0])
 				} else {
 					s.notifyWriteError(err)
 					return
