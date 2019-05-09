@@ -351,12 +351,12 @@ func (s *UDPSession) Close() error {
 		once = true
 	})
 
-	if !once {
-		return errors.New(errClosed)
-	}
-
 	if e := s.socketError.Load(); e != nil {
 		return e.(error)
+	}
+
+	if !once {
+		return errors.New(errClosed)
 	}
 
 	return nil
@@ -843,12 +843,12 @@ func (l *Listener) Close() (err error) {
 		once = true
 	})
 
-	if !once {
-		return errors.New(errClosed)
-	}
-
 	if err := l.socketError.Load(); err != nil {
 		return err.(error)
+	}
+
+	if !once {
+		return errors.New(errClosed)
 	}
 	return nil
 }
