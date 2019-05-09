@@ -710,12 +710,12 @@ type (
 		chSessionClosed chan net.Addr    // session close queue
 		headerSize      int              // the additional header to a KCP frame
 
-		die      chan struct{} // notify the listener has closed
-		dieOnce  sync.Once
-		dieError error
+		die         chan struct{} // notify the listener has closed
+		dieOnce     sync.Once
+		socketError atomic.Value
 
-		rd        atomic.Value // read deadline for Accept()
-		wd        atomic.Value
+		rd atomic.Value // read deadline for Accept()
+
 		chTxQueue chan []ipv4.Message
 	}
 )
@@ -819,7 +819,10 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
-		return nil, l.dieError
+		if err := l.socketError.Load().(error); err != nil {
+			return nil, err
+		}
+		return nil, errors.New(errClosed)
 	}
 }
 
@@ -837,18 +840,13 @@ func (l *Listener) SetReadDeadline(t time.Time) error {
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
-func (l *Listener) SetWriteDeadline(t time.Time) error {
-	l.wd.Store(t)
-	return nil
-}
+func (l *Listener) SetWriteDeadline(t time.Time) error { return errors.New(errInvalidOperation) }
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() (err error) {
 	l.dieOnce.Do(func() {
-		if err := l.conn.Close(); err == nil {
-			l.dieError = errors.New(errClosed)
-		} else {
-			l.dieError = err
+		if err := l.conn.Close(); err != nil {
+			l.socketError.Store(err)
 		}
 		close(l.die)
 	})

@@ -84,6 +84,7 @@ func (l *Listener) monitor() {
 				}
 			}
 		} else {
+			l.socketError.Store(err)
 			l.Close()
 			return
 		}

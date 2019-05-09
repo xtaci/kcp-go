@@ -38,6 +38,7 @@ func (l *Listener) txLoop() {
 					nbytes += n
 					xmitBuf.Put(txqueue[k].Buffers[0])
 				} else {
+					l.socketError.Store(err)
 					l.Close()
 					return
 				}
