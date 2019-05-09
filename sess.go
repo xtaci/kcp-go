@@ -43,7 +43,6 @@ const (
 )
 
 const (
-	errBrokenPipe       = "broken pipe"
 	errClosed           = "connection closed"
 	errInvalidOperation = "invalid operation"
 )
@@ -89,10 +88,10 @@ type (
 
 		// notifications
 		die          chan struct{} // notify current session has Closed
+		dieOnce      sync.Once
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
-		chReadError  chan error    // notify PacketConn.Read() have an error
-		chWriteError chan error    // notify PacketConn.Write() have an error
+		socketError  atomic.Value
 
 		// nonce generator
 		nonce Entropy
@@ -101,8 +100,7 @@ type (
 		txqueue   []ipv4.Message
 		chTxQueue chan []ipv4.Message
 
-		isClosed bool // flag the session has Closed
-		mu       sync.Mutex
+		mu sync.Mutex
 	}
 
 	setReadBuffer interface {
@@ -122,8 +120,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.nonce.Init()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
-	sess.chReadError = make(chan error, 1)
-	sess.chWriteError = make(chan error, 1)
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -187,11 +183,6 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return n, nil
 		}
 
-		if s.isClosed {
-			s.mu.Unlock()
-			return 0, errors.New(errBrokenPipe)
-		}
-
 		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
 			if len(b) >= size { // receive data into 'b' directly
 				s.kcp.Recv(b)
@@ -235,11 +226,11 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		case <-s.chReadEvent:
 		case <-c:
 		case <-s.die:
-		case err = <-s.chReadError:
-			if timeout != nil {
-				timeout.Stop()
+			if e := s.socketError.Load(); e != nil {
+				return 0, e.(error)
+			} else {
+				return 0, errors.New(errClosed)
 			}
-			return n, err
 		}
 
 		if timeout != nil {
@@ -254,12 +245,17 @@ func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers(
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	for {
-		s.mu.Lock()
-		if s.isClosed {
-			s.mu.Unlock()
-			return 0, errors.New(errBrokenPipe)
+		select {
+		case <-s.die:
+			if e := s.socketError.Load(); e != nil {
+				return 0, e.(error)
+			} else {
+				return 0, errors.New(errClosed)
+			}
+		default:
 		}
 
+		s.mu.Lock()
 		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
 			for _, b := range v {
 				n += len(b)
@@ -300,11 +296,11 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		case <-s.chWriteEvent:
 		case <-c:
 		case <-s.die:
-		case err = <-s.chWriteError:
-			if timeout != nil {
-				timeout.Stop()
+			if e := s.socketError.Load(); e != nil {
+				return 0, e.(error)
+			} else {
+				return 0, errors.New(errClosed)
 			}
-			return n, err
 		}
 
 		if timeout != nil {
@@ -338,23 +334,25 @@ func (s *UDPSession) uncork() {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
-	// remove current session from updater & listener(if necessary)
-	updater.removeSession(s)
-	if s.l != nil { // notify listener
-		s.l.closeSession(s.remote)
+	s.dieOnce.Do(func() {
+		// remove from updater
+		updater.removeSession(s)
+		atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+
+		if s.l != nil { // belongs to listener
+			s.l.closeSession(s.remote)
+		} else { // client socket close
+			if err := s.conn.Close(); err != nil {
+				s.socketError.Store(err)
+			}
+		}
+		close(s.die)
+	})
+
+	if e := s.socketError.Load(); e != nil {
+		return e.(error)
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.isClosed {
-		return errors.New(errBrokenPipe)
-	}
-	close(s.die)
-	s.isClosed = true
-	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
-	if s.l == nil { // client socket close
-		return s.conn.Close()
-	}
 	return nil
 }
 
@@ -567,20 +565,6 @@ func (s *UDPSession) notifyReadEvent() {
 func (s *UDPSession) notifyWriteEvent() {
 	select {
 	case s.chWriteEvent <- struct{}{}:
-	default:
-	}
-}
-
-func (s *UDPSession) notifyReadError(err error) {
-	select {
-	case s.chReadError <- err:
-	default:
-	}
-}
-
-func (s *UDPSession) notifyWriteError(err error) {
-	select {
-	case s.chWriteError <- err:
 	default:
 	}
 }
@@ -850,7 +834,11 @@ func (l *Listener) Close() (err error) {
 		}
 		close(l.die)
 	})
-	return
+
+	if err := l.socketError.Load(); err != nil {
+		return err.(error)
+	}
+	return nil
 }
 
 // closeSession notify the listener that a session has closed

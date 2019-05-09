@@ -30,7 +30,8 @@ func (s *UDPSession) txLoop() {
 					if n, err := conn.WriteBatch(vec, 0); err == nil {
 						vec = vec[n:]
 					} else {
-						s.notifyWriteError(err)
+						s.socketError.Store(err)
+						s.Close()
 						return
 					}
 				}

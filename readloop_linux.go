@@ -52,7 +52,8 @@ func (s *UDPSession) readLoop() {
 				s.packetInput(msg.Buffers[0][:msg.N])
 			}
 		} else {
-			s.notifyReadError(err)
+			s.socketError.Store(err)
+			s.Close()
 			return
 		}
 	}

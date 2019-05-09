@@ -16,7 +16,8 @@ func (s *UDPSession) txLoop() {
 					nbytes += n
 					xmitBuf.Put(txqueue[k].Buffers[0])
 				} else {
-					s.notifyWriteError(err)
+					s.socketError.Store(err)
+					s.Close()
 					return
 				}
 			}

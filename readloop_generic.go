@@ -25,7 +25,8 @@ func (s *UDPSession) readLoop() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			s.notifyReadError(err)
+			s.socketError.Store(err)
+			s.Close()
 			return
 		}
 	}
