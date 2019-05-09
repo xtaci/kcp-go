@@ -44,6 +44,7 @@ const (
 
 const (
 	errBrokenPipe       = "broken pipe"
+	errClosed           = "connection closed"
 	errInvalidOperation = "invalid operation"
 )
 
@@ -317,7 +318,7 @@ func (s *UDPSession) uncork() {
 	var txqueue []ipv4.Message
 	s.mu.Lock()
 	txqueue = s.txqueue
-	s.txqueue = s.txqueue[:0]
+	s.txqueue = nil
 	s.mu.Unlock()
 
 	if len(txqueue) > 0 {
@@ -709,8 +710,9 @@ type (
 		chSessionClosed chan net.Addr    // session close queue
 		headerSize      int              // the additional header to a KCP frame
 
-		die     chan struct{} // notify the listener has closed
-		dieOnce sync.Once
+		die      chan struct{} // notify the listener has closed
+		dieOnce  sync.Once
+		dieError error
 
 		rd        atomic.Value // read deadline for Accept()
 		wd        atomic.Value
@@ -817,7 +819,7 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
-		return nil, errors.New(errBrokenPipe)
+		return nil, l.dieError
 	}
 }
 
@@ -843,8 +845,12 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() (err error) {
 	l.dieOnce.Do(func() {
+		if err := l.conn.Close(); err == nil {
+			l.dieError = errors.New(errClosed)
+		} else {
+			l.dieError = err
+		}
 		close(l.die)
-		err = l.conn.Close()
 	})
 	return
 }
