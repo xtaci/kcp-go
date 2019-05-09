@@ -690,6 +690,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 	}
 
+	// input may trigger fast-resend and acks
 	s.uncork()
 }
 
