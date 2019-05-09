@@ -317,7 +317,7 @@ func (s *UDPSession) uncork() {
 	var txqueue []ipv4.Message
 	s.mu.Lock()
 	txqueue = s.txqueue
-	s.txqueue = nil
+	s.txqueue = s.txqueue[:0]
 	s.mu.Unlock()
 
 	if len(txqueue) > 0 {
