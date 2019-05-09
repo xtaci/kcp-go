@@ -353,6 +353,9 @@ func TestTinyBufferReceiver(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	var n int
+	var err error
+
 	port := int(atomic.AddUint32(&baseport, 1))
 	l := echoServer(port)
 	defer l.Close()
@@ -361,23 +364,42 @@ func TestClose(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	buf := make([]byte, 10)
 
+	// double close
 	cli.Close()
 	if cli.Close() == nil {
-		t.Fail()
+		t.Fatal("double close misbehavior")
 	}
-	n, err := cli.Write(buf)
+
+	// write after close
+	buf := make([]byte, 10)
+	n, err = cli.Write(buf)
 	if n != 0 || err == nil {
-		t.Fail()
+		t.Fatal("write after close misbehavior")
 	}
 
-	// drain
-	io.ReadFull(cli, buf)
+	// write, close, read, read
+	cli, err = dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+	if n, err = cli.Write(buf); err != nil {
+		t.Fatal("write misbehavior")
+	}
 
+	// wait until data arrival
+	time.Sleep(2 * time.Second)
+	// drain
+	cli.Close()
+	n, err = io.ReadFull(cli, buf)
+	if err != nil {
+		t.Fatal("closed conn drain bytes failed", err, n)
+	}
+
+	// after drain, read should return error
 	n, err = cli.Read(buf)
 	if n != 0 || err == nil {
-		t.Fail()
+		t.Fatal("write->close->drain->read misbehavior", err, n)
 	}
 	cli.Close()
 }
