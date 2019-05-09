@@ -371,6 +371,10 @@ func TestClose(t *testing.T) {
 	if n != 0 || err == nil {
 		t.Fail()
 	}
+
+	// drain
+	io.ReadFull(cli, buf)
+
 	n, err = cli.Read(buf)
 	if n != 0 || err == nil {
 		t.Fail()

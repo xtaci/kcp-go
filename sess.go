@@ -334,6 +334,7 @@ func (s *UDPSession) uncork() {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
+	var once bool
 	s.dieOnce.Do(func() {
 		// remove from updater
 		updater.removeSession(s)
@@ -347,7 +348,12 @@ func (s *UDPSession) Close() error {
 			}
 		}
 		close(s.die)
+		once = true
 	})
+
+	if !once {
+		return errors.New(errClosed)
+	}
 
 	if e := s.socketError.Load(); e != nil {
 		return e.(error)
@@ -803,8 +809,8 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
-		if err := l.socketError.Load().(error); err != nil {
-			return nil, err
+		if err := l.socketError.Load(); err != nil {
+			return nil, err.(error)
 		}
 		return nil, errors.New(errClosed)
 	}
@@ -828,12 +834,18 @@ func (l *Listener) SetWriteDeadline(t time.Time) error { return errors.New(errIn
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() (err error) {
+	var once bool
 	l.dieOnce.Do(func() {
 		if err := l.conn.Close(); err != nil {
 			l.socketError.Store(err)
 		}
 		close(l.die)
+		once = true
 	})
+
+	if !once {
+		return errors.New(errClosed)
+	}
 
 	if err := l.socketError.Load(); err != nil {
 		return err.(error)
