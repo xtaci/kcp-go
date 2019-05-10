@@ -4,6 +4,8 @@ package kcp
 
 import (
 	"sync/atomic"
+
+	"github.com/pkg/errors"
 )
 
 func (s *UDPSession) readLoop() {
@@ -25,7 +27,7 @@ func (s *UDPSession) readLoop() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			s.socketError.Store(err)
+			s.socketError.Store(errors.WithStack(err))
 			s.Close()
 			return
 		}
@@ -42,7 +44,7 @@ func (l *Listener) monitor() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			l.socketError.Store(err)
+			l.socketError.Store(errors.WithStack(err))
 			l.Close()
 			return
 		}

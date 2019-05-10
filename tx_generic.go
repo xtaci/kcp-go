@@ -4,6 +4,8 @@ package kcp
 
 import (
 	"sync/atomic"
+
+	"github.com/pkg/errors"
 )
 
 func (s *UDPSession) txLoop() {
@@ -16,7 +18,7 @@ func (s *UDPSession) txLoop() {
 					nbytes += n
 					xmitBuf.Put(txqueue[k].Buffers[0])
 				} else {
-					s.socketError.Store(err)
+					s.socketError.Store(errors.WithStack(err))
 					s.Close()
 					return
 				}
@@ -39,7 +41,7 @@ func (l *Listener) txLoop() {
 					nbytes += n
 					xmitBuf.Put(txqueue[k].Buffers[0])
 				} else {
-					l.socketError.Store(err)
+					l.socketError.Store(errors.WithStack(err))
 					l.Close()
 					return
 				}

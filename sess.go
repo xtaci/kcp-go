@@ -337,7 +337,7 @@ func (s *UDPSession) Close() error {
 			s.l.closeSession(s.remote)
 		} else { // client socket close
 			if err := s.conn.Close(); err != nil {
-				s.socketError.Store(err)
+				s.socketError.Store(errors.WithStack(err))
 			}
 		}
 		close(s.die)
@@ -828,7 +828,7 @@ func (l *Listener) Close() (err error) {
 	var once bool
 	l.dieOnce.Do(func() {
 		if err := l.conn.Close(); err != nil {
-			l.socketError.Store(err)
+			l.socketError.Store(errors.WithStack(err))
 		}
 		close(l.die)
 		once = true

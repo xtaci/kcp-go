@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync/atomic"
 
+	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 )
@@ -30,7 +31,7 @@ func (s *UDPSession) txLoop() {
 					if n, err := conn.WriteBatch(vec, 0); err == nil {
 						vec = vec[n:]
 					} else {
-						s.socketError.Store(err)
+						s.socketError.Store(errors.WithStack(err))
 						s.Close()
 						return
 					}
@@ -70,7 +71,7 @@ func (l *Listener) txLoop() {
 					if n, err := conn.WriteBatch(vec, 0); err == nil {
 						vec = vec[n:]
 					} else {
-						l.socketError.Store(err)
+						s.socketError.Store(errors.WithStack(err))
 						l.Close()
 						return
 					}
