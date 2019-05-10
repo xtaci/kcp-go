@@ -205,7 +205,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) {
 				s.mu.Unlock()
-				return 0, errors.Wrap(errTimeout, "Read()")
+				return 0, errors.WithStack(errTimeout)
 			}
 
 			delay := s.rd.Sub(time.Now())
@@ -222,7 +222,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, errors.Wrap(io.ErrClosedPipe, "Read()")
+				return 0, errors.WithStack(io.ErrClosedPipe)
 			}
 		}
 
@@ -243,7 +243,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, errors.Wrap(io.ErrClosedPipe, "Write()")
+				return 0, errors.WithStack(io.ErrClosedPipe)
 			}
 		default:
 		}
@@ -277,7 +277,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) {
 				s.mu.Unlock()
-				return 0, errors.Wrap(errTimeout, "Write()")
+				return 0, errors.WithStack(errTimeout)
 			}
 			delay := s.wd.Sub(time.Now())
 			timeout = time.NewTimer(delay)
@@ -292,7 +292,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, errors.Wrap(io.ErrClosedPipe, "Write()")
+				return 0, errors.WithStack(io.ErrClosedPipe)
 			}
 		}
 
@@ -347,7 +347,7 @@ func (s *UDPSession) Close() error {
 	if e := s.socketError.Load(); e != nil {
 		return e.(error)
 	} else if !once {
-		return errors.Wrap(io.ErrClosedPipe, "Close()")
+		return errors.WithStack(io.ErrClosedPipe)
 	}
 	return nil
 }
@@ -795,14 +795,14 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 
 	select {
 	case <-timeout:
-		return nil, errors.Wrap(errTimeout, "Accept()")
+		return nil, errors.WithStack(errTimeout)
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
 		if err := l.socketError.Load(); err != nil {
 			return nil, err.(error)
 		} else {
-			return nil, errors.Wrap(io.ErrClosedPipe, "Accept()")
+			return nil, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
 }
@@ -837,7 +837,7 @@ func (l *Listener) Close() (err error) {
 	if err := l.socketError.Load(); err != nil {
 		return err.(error)
 	} else if !once {
-		return errors.Wrap(io.ErrClosedPipe, "Close()")
+		return errors.WithStack(io.ErrClosedPipe)
 	}
 	return nil
 }
@@ -864,11 +864,11 @@ func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.WithStack(err)
 	}
 	conn, err := net.ListenUDP("udp", udpaddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ListenUDP")
+		return nil, errors.WithStack(err)
 	}
 
 	return ServeConn(block, dataShards, parityShards, conn)
@@ -909,7 +909,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	// network type detection
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.WithStack(err)
 	}
 	network := "udp4"
 	if udpaddr.IP.To4() == nil {
@@ -918,7 +918,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 
 	conn, err := net.ListenUDP(network, nil)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.DialUDP")
+		return nil, errors.WithStack(err)
 	}
 
 	return NewConn(raddr, block, dataShards, parityShards, conn)
@@ -928,7 +928,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
-		return nil, errors.Wrap(err, "net.ResolveUDPAddr")
+		return nil, errors.WithStack(err)
 	}
 
 	var convid uint32
