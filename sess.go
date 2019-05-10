@@ -35,8 +35,9 @@ const (
 	acceptBacklog = 128
 )
 
-const (
-	errInvalidOperation = "invalid operation"
+var (
+	errInvalidOperation = errors.New("invalid operation")
+	errTimeout          = errors.New("timeout")
 )
 
 var (
@@ -204,7 +205,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) {
 				s.mu.Unlock()
-				return 0, errors.New("kcp-go Read() deadline timeout")
+				return 0, errors.Wrap(errTimeout, "Read()")
 			}
 
 			delay := s.rd.Sub(time.Now())
@@ -221,7 +222,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, io.ErrClosedPipe
+				return 0, errors.Wrap(io.ErrClosedPipe, "Read()")
 			}
 		}
 
@@ -242,7 +243,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, io.ErrClosedPipe
+				return 0, errors.Wrap(io.ErrClosedPipe, "Write()")
 			}
 		default:
 		}
@@ -276,7 +277,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) {
 				s.mu.Unlock()
-				return 0, errors.New("kcp-go Write() deadline timeout")
+				return 0, errors.Wrap(errTimeout, "Write()")
 			}
 			delay := s.wd.Sub(time.Now())
 			timeout = time.NewTimer(delay)
@@ -291,7 +292,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, io.ErrClosedPipe
+				return 0, errors.Wrap(io.ErrClosedPipe, "Write()")
 			}
 		}
 
@@ -346,7 +347,7 @@ func (s *UDPSession) Close() error {
 	if e := s.socketError.Load(); e != nil {
 		return e.(error)
 	} else if !once {
-		return io.ErrClosedPipe
+		return errors.Wrap(io.ErrClosedPipe, "Close()")
 	}
 	return nil
 }
@@ -459,7 +460,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 			}
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetReadBuffer sets the socket read buffer, no effect if it's accepted from Listener
@@ -471,7 +472,7 @@ func (s *UDPSession) SetReadBuffer(bytes int) error {
 			return nc.SetReadBuffer(bytes)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetWriteBuffer sets the socket write buffer, no effect if it's accepted from Listener
@@ -483,7 +484,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 			return nc.SetWriteBuffer(bytes)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // post-processing for sending a packet from kcp core
@@ -756,7 +757,7 @@ func (l *Listener) SetReadBuffer(bytes int) error {
 	if nc, ok := l.conn.(setReadBuffer); ok {
 		return nc.SetReadBuffer(bytes)
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetWriteBuffer sets the socket write buffer for the Listener
@@ -764,7 +765,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	if nc, ok := l.conn.(setWriteBuffer); ok {
 		return nc.SetWriteBuffer(bytes)
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // SetDSCP sets the 6bit DSCP field of IP header
@@ -777,7 +778,7 @@ func (l *Listener) SetDSCP(dscp int) error {
 			return ipv6.NewConn(nc).SetTrafficClass(dscp)
 		}
 	}
-	return errors.New(errInvalidOperation)
+	return errInvalidOperation
 }
 
 // Accept implements the Accept method in the Listener interface; it waits for the next call and returns a generic Conn.
@@ -794,14 +795,14 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 
 	select {
 	case <-timeout:
-		return nil, errors.New("kcp-go Accept() deadline timeout")
+		return nil, errors.Wrap(errTimeout, "Accept()")
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
 		if err := l.socketError.Load(); err != nil {
 			return nil, err.(error)
 		} else {
-			return nil, io.ErrClosedPipe
+			return nil, errors.Wrap(io.ErrClosedPipe, "Accept()")
 		}
 	}
 }
@@ -820,7 +821,7 @@ func (l *Listener) SetReadDeadline(t time.Time) error {
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
-func (l *Listener) SetWriteDeadline(t time.Time) error { return errors.New(errInvalidOperation) }
+func (l *Listener) SetWriteDeadline(t time.Time) error { return errInvalidOperation }
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() (err error) {
@@ -836,7 +837,7 @@ func (l *Listener) Close() (err error) {
 	if err := l.socketError.Load(); err != nil {
 		return err.(error)
 	} else if !once {
-		return io.ErrClosedPipe
+		return errors.Wrap(io.ErrClosedPipe, "Close()")
 	}
 	return nil
 }
