@@ -15,14 +15,6 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-type errTimeout struct {
-	error
-}
-
-func (errTimeout) Timeout() bool   { return true }
-func (errTimeout) Temporary() bool { return true }
-func (errTimeout) Error() string   { return "i/o timeout" }
-
 const (
 	// 16-bytes nonce for each packet
 	nonceSize = 16
@@ -212,7 +204,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) {
 				s.mu.Unlock()
-				return 0, errTimeout{}
+				return 0, errors.New("kcp-go Read() deadline timeout")
 			}
 
 			delay := s.rd.Sub(time.Now())
@@ -284,7 +276,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) {
 				s.mu.Unlock()
-				return 0, errTimeout{}
+				return 0, errors.New("kcp-go Write() deadline timeout")
 			}
 			delay := s.wd.Sub(time.Now())
 			timeout = time.NewTimer(delay)
@@ -353,12 +345,9 @@ func (s *UDPSession) Close() error {
 
 	if e := s.socketError.Load(); e != nil {
 		return e.(error)
-	}
-
-	if !once {
+	} else if !once {
 		return io.ErrClosedPipe
 	}
-
 	return nil
 }
 
@@ -805,7 +794,7 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 
 	select {
 	case <-timeout:
-		return nil, &errTimeout{}
+		return nil, errors.New("kcp-go Accept() deadline timeout")
 	case c := <-l.chAccepts:
 		return c, nil
 	case <-l.die:
@@ -846,9 +835,7 @@ func (l *Listener) Close() (err error) {
 
 	if err := l.socketError.Load(); err != nil {
 		return err.(error)
-	}
-
-	if !once {
+	} else if !once {
 		return io.ErrClosedPipe
 	}
 	return nil
