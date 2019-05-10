@@ -71,7 +71,7 @@ func (l *Listener) txLoop() {
 					if n, err := conn.WriteBatch(vec, 0); err == nil {
 						vec = vec[n:]
 					} else {
-						s.socketError.Store(errors.WithStack(err))
+						l.socketError.Store(errors.WithStack(err))
 						l.Close()
 						return
 					}

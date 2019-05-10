@@ -86,7 +86,7 @@ func (l *Listener) monitor() {
 				}
 			}
 		} else {
-			s.socketError.Store(errors.WithStack(err))
+			l.socketError.Store(errors.WithStack(err))
 			l.Close()
 			return
 		}
