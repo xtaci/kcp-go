@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
+	"io"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -43,7 +44,6 @@ const (
 )
 
 const (
-	errClosed           = "connection closed"
 	errInvalidOperation = "invalid operation"
 )
 
@@ -229,7 +229,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, errors.New(errClosed)
+				return 0, io.ErrClosedPipe
 			}
 		}
 
@@ -250,7 +250,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, errors.New(errClosed)
+				return 0, io.ErrClosedPipe
 			}
 		default:
 		}
@@ -299,7 +299,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if e := s.socketError.Load(); e != nil {
 				return 0, e.(error)
 			} else {
-				return 0, errors.New(errClosed)
+				return 0, io.ErrClosedPipe
 			}
 		}
 
@@ -356,7 +356,7 @@ func (s *UDPSession) Close() error {
 	}
 
 	if !once {
-		return errors.New(errClosed)
+		return io.ErrClosedPipe
 	}
 
 	return nil
@@ -811,8 +811,9 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	case <-l.die:
 		if err := l.socketError.Load(); err != nil {
 			return nil, err.(error)
+		} else {
+			return nil, io.ErrClosedPipe
 		}
-		return nil, errors.New(errClosed)
 	}
 }
 
@@ -848,7 +849,7 @@ func (l *Listener) Close() (err error) {
 	}
 
 	if !once {
-		return errors.New(errClosed)
+		return io.ErrClosedPipe
 	}
 	return nil
 }
