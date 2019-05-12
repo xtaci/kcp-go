@@ -13,14 +13,6 @@ import (
 
 // the read loop for a client session
 func (s *UDPSession) readLoop() {
-	addr, _ := net.ResolveUDPAddr("udp", s.conn.LocalAddr().String())
-	var conn batchConn
-	if addr.IP.To4() != nil {
-		conn = ipv4.NewPacketConn(s.conn)
-	} else {
-		conn = ipv6.NewPacketConn(s.conn)
-	}
-
 	var src string
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
@@ -28,7 +20,7 @@ func (s *UDPSession) readLoop() {
 	}
 
 	for {
-		if count, err := conn.ReadBatch(msgs, 0); err == nil {
+		if count, err := s.bconn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				// make sure the packet is from the same source
