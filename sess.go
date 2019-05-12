@@ -314,7 +314,6 @@ func (s *UDPSession) uncork() {
 		s.tx(s.txqueue)
 		s.txqueue = s.txqueue[:0]
 	}
-	s.txqueue = nil
 }
 
 // Close closes the connection.
