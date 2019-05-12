@@ -17,8 +17,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			vec = vec[n:]
 		} else {
 			s.socketError.Store(errors.WithStack(err))
-			s.Close()
-			return
+			break
 		}
 	}
 
@@ -26,7 +25,6 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 		nbytes += len(txqueue[k].Buffers[0])
 		xmitBuf.Put(txqueue[k].Buffers[0])
 	}
-
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
