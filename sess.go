@@ -90,8 +90,8 @@ type (
 		nonce Entropy
 
 		// packets waiting to be sent on wire
-		txqueue   []ipv4.Message
-		chTxQueue chan []ipv4.Message
+		txqueue []ipv4.Message
+		bconn   batchConn // for casting of batchConn
 
 		mu sync.Mutex
 	}
@@ -118,7 +118,14 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.l = l
 	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
-	sess.chTxQueue = make(chan []ipv4.Message)
+
+	// cast to writebatch conn
+	addr, _ := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
+	if addr.IP.To4() != nil {
+		sess.bconn = ipv4.NewPacketConn(conn)
+	} else {
+		sess.bconn = ipv6.NewPacketConn(conn)
+	}
 
 	// FEC codec initialization
 	sess.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
@@ -149,7 +156,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
-		go sess.txLoop()
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
 	} else {
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
@@ -266,8 +272,8 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
 				s.kcp.flush(false)
 			}
-			s.mu.Unlock()
 			s.uncork()
+			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 			return n, nil
 		}
@@ -304,25 +310,9 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 // uncork sends data in txqueue if there is any
 func (s *UDPSession) uncork() {
-	s.mu.Lock()
-	s.uncorkInternal()
-	s.mu.Unlock()
-}
-
-// uncork sends data in txqueue if there is any
-func (s *UDPSession) uncorkInternal() {
 	if len(s.txqueue) > 0 {
-		if s.l != nil {
-			select {
-			case s.l.chTxQueue <- s.txqueue:
-			case <-s.l.die:
-			}
-		} else {
-			select {
-			case s.chTxQueue <- s.txqueue:
-			case <-s.die:
-			}
-		}
+		s.tx(s.txqueue)
+		s.txqueue = nil
 	}
 	s.txqueue = nil
 }
@@ -526,9 +516,6 @@ func (s *UDPSession) output(buf []byte) {
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remote
 		s.txqueue = append(s.txqueue, msg)
-		if len(s.txqueue) >= batchSize {
-			s.uncorkInternal()
-		}
 	}
 
 	for k := range ecc {
@@ -537,9 +524,6 @@ func (s *UDPSession) output(buf []byte) {
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remote
 		s.txqueue = append(s.txqueue, msg)
-		if len(s.txqueue) >= batchSize {
-			s.uncorkInternal()
-		}
 	}
 }
 
@@ -551,8 +535,8 @@ func (s *UDPSession) update() (interval time.Duration) {
 	if s.kcp.WaitSnd() < waitsnd {
 		s.notifyWriteEvent()
 	}
-	s.mu.Unlock()
 	s.uncork()
+	s.mu.Unlock()
 	return
 }
 
@@ -642,6 +626,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 				if s.kcp.WaitSnd() < waitsnd {
 					s.notifyWriteEvent()
 				}
+				s.uncork()
 				s.mu.Unlock()
 			} else {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
@@ -661,6 +646,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if s.kcp.WaitSnd() < waitsnd {
 			s.notifyWriteEvent()
 		}
+		s.uncork()
 		s.mu.Unlock()
 	}
 
@@ -679,8 +665,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 		atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 	}
 
-	// input may trigger fast-resend and acks
-	s.uncork()
 }
 
 type (
@@ -703,8 +687,6 @@ type (
 		socketError atomic.Value
 
 		rd atomic.Value // read deadline for Accept()
-
-		chTxQueue chan []ipv4.Message
 	}
 )
 
@@ -894,7 +876,6 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
-	l.chTxQueue = make(chan []ipv4.Message)
 
 	// calculate header size
 	if l.block != nil {
@@ -905,7 +886,6 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	}
 
 	go l.monitor()
-	go l.txLoop()
 	return l, nil
 }
 
