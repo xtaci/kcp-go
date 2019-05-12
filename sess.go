@@ -304,25 +304,27 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 // uncork sends data in txqueue if there is any
 func (s *UDPSession) uncork() {
-	var txqueue []ipv4.Message
 	s.mu.Lock()
-	txqueue = s.txqueue
-	s.txqueue = nil
+	s.uncorkInternal()
 	s.mu.Unlock()
+}
 
-	if len(txqueue) > 0 {
+// uncork sends data in txqueue if there is any
+func (s *UDPSession) uncorkInternal() {
+	if len(s.txqueue) > 0 {
 		if s.l != nil {
 			select {
-			case s.l.chTxQueue <- txqueue:
+			case s.l.chTxQueue <- s.txqueue:
 			case <-s.l.die:
 			}
 		} else {
 			select {
-			case s.chTxQueue <- txqueue:
+			case s.chTxQueue <- s.txqueue:
 			case <-s.die:
 			}
 		}
 	}
+	s.txqueue = nil
 }
 
 // Close closes the connection.
@@ -524,6 +526,9 @@ func (s *UDPSession) output(buf []byte) {
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remote
 		s.txqueue = append(s.txqueue, msg)
+		if len(s.txqueue) >= batchSize {
+			s.uncorkInternal()
+		}
 	}
 
 	for k := range ecc {
@@ -532,6 +537,9 @@ func (s *UDPSession) output(buf []byte) {
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remote
 		s.txqueue = append(s.txqueue, msg)
+		if len(s.txqueue) >= batchSize {
+			s.uncorkInternal()
+		}
 	}
 }
 

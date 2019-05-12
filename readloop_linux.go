@@ -11,11 +11,6 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-const (
-	// ReadBatch() message size
-	batchSize = 16
-)
-
 // the read loop for a client session
 func (s *UDPSession) readLoop() {
 	addr, _ := net.ResolveUDPAddr("udp", s.conn.LocalAddr().String())

@@ -799,6 +799,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		if needsend {
+			current = currentMs()
 			segment.xmit++
 			segment.ts = current
 			segment.wnd = seg.wnd
