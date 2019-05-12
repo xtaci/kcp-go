@@ -11,20 +11,21 @@ import (
 
 func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	nbytes := 0
-	vec := txqueue
-	for len(vec) > 0 {
-		if n, err := s.bconn.WriteBatch(vec, 0); err == nil {
-			vec = vec[n:]
+	npkts := 0
+	for len(txqueue) > 0 {
+		if n, err := s.bconn.WriteBatch(txqueue, 0); err == nil {
+			for k := range txqueue[:n] {
+				nbytes += len(txqueue[k].Buffers[0])
+				xmitBuf.Put(txqueue[k].Buffers[0])
+			}
+			npkts += n
+			txqueue = txqueue[n:]
 		} else {
 			s.socketError.Store(errors.WithStack(err))
 			break
 		}
 	}
 
-	for k := range txqueue {
-		nbytes += len(txqueue[k].Buffers[0])
-		xmitBuf.Put(txqueue[k].Buffers[0])
-	}
-	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(len(txqueue)))
+	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
