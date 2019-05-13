@@ -20,7 +20,7 @@ func (s *UDPSession) readLoop() {
 	}
 
 	for {
-		if count, err := s.bconn.ReadBatch(msgs, 0); err == nil {
+		if count, err := s.xconn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				// make sure the packet is from the same source
@@ -49,11 +49,11 @@ func (s *UDPSession) readLoop() {
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
 	addr, _ := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
-	var conn batchConn
+	var xconn batchConn
 	if addr.IP.To4() != nil {
-		conn = ipv4.NewPacketConn(l.conn)
+		xconn = ipv4.NewPacketConn(l.conn)
 	} else {
-		conn = ipv6.NewPacketConn(l.conn)
+		xconn = ipv6.NewPacketConn(l.conn)
 	}
 
 	msgs := make([]ipv4.Message, batchSize)
@@ -62,7 +62,7 @@ func (l *Listener) monitor() {
 	}
 
 	for {
-		if count, err := conn.ReadBatch(msgs, 0); err == nil {
+		if count, err := xconn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				if msg.N >= l.headerSize+IKCP_OVERHEAD {

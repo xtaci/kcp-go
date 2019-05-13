@@ -13,7 +13,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for len(txqueue) > 0 {
-		if n, err := s.bconn.WriteBatch(txqueue, 0); err == nil {
+		if n, err := s.xconn.WriteBatch(txqueue, 0); err == nil {
 			for k := range txqueue[:n] {
 				nbytes += len(txqueue[k].Buffers[0])
 				xmitBuf.Put(txqueue[k].Buffers[0])

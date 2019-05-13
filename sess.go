@@ -98,7 +98,7 @@ type (
 
 		// packets waiting to be sent on wire
 		txqueue []ipv4.Message
-		bconn   batchConn // for casting of batchConn
+		xconn   batchConn // for x/net
 
 		mu sync.Mutex
 	}
@@ -131,9 +131,9 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	// cast to writebatch conn
 	addr, _ := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
 	if addr.IP.To4() != nil {
-		sess.bconn = ipv4.NewPacketConn(conn)
+		sess.xconn = ipv4.NewPacketConn(conn)
 	} else {
-		sess.bconn = ipv6.NewPacketConn(conn)
+		sess.xconn = ipv6.NewPacketConn(conn)
 	}
 
 	// FEC codec initialization
