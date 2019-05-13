@@ -18,7 +18,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			npkts++
 			xmitBuf.Put(txqueue[k].Buffers[0])
 		} else {
-			s.socketError.Store(errors.WithStack(err))
+			s.notifyWriteError(errors.WithStack(err))
 			break
 		}
 	}

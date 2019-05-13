@@ -193,7 +193,7 @@ func handleEcho(conn *UDPSession) {
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			return
 		}
 		conn.Write(buf[:n])
 	}
@@ -212,7 +212,7 @@ func handleSink(conn *UDPSession) {
 	for {
 		_, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			return
 		}
 	}
 }
@@ -223,7 +223,7 @@ func handleTinyBufferEcho(conn *UDPSession) {
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			return
 		}
 		conn.Write(buf[:n])
 	}

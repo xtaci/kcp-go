@@ -21,7 +21,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			npkts += n
 			txqueue = txqueue[n:]
 		} else {
-			s.socketError.Store(errors.WithStack(err))
+			s.notifyWriteError(errors.WithStack(err))
 			break
 		}
 	}

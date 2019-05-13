@@ -86,9 +86,10 @@ type (
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
 
 		// socket error handling
-		socketError          atomic.Value
-		socketReadError      chan struct{}
-		socketWriteError     chan struct{}
+		socketReadError      atomic.Value
+		socketWriteError     atomic.Value
+		chSocketReadError    chan struct{}
+		chSocketWriteError   chan struct{}
 		socketReadErrorOnce  sync.Once
 		socketWriteErrorOnce sync.Once
 
@@ -119,8 +120,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.nonce.Init()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
-	sess.socketReadError = make(chan struct{})
-	sess.socketWriteError = make(chan struct{})
+	sess.chSocketReadError = make(chan struct{})
+	sess.chSocketWriteError = make(chan struct{})
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -232,8 +233,8 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		select {
 		case <-s.chReadEvent:
 		case <-c:
-		case <-s.socketReadError:
-			return 0, s.socketError.Load().(error)
+		case <-s.chSocketReadError:
+			return 0, s.socketReadError.Load().(error)
 		case <-s.die:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
@@ -251,12 +252,10 @@ func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers(
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	for {
 		select {
+		case <-s.chSocketWriteError:
+			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
-			if e := s.socketError.Load(); e != nil {
-				return 0, e.(error)
-			} else {
-				return 0, errors.WithStack(io.ErrClosedPipe)
-			}
+			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
 		}
 
@@ -300,8 +299,8 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		select {
 		case <-s.chWriteEvent:
 		case <-c:
-		case <-s.socketWriteError:
-			return 0, s.socketError.Load().(error)
+		case <-s.chSocketWriteError:
+			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
@@ -324,6 +323,7 @@ func (s *UDPSession) uncork() {
 // Close closes the connection.
 func (s *UDPSession) Close() error {
 	var once bool
+	var err error
 	s.dieOnce.Do(func() {
 		// remove from updater
 		updater.removeSession(s)
@@ -332,20 +332,17 @@ func (s *UDPSession) Close() error {
 		if s.l != nil { // belongs to listener
 			s.l.closeSession(s.remote)
 		} else { // client socket close
-			if err := s.conn.Close(); err != nil {
-				s.socketError.Store(errors.WithStack(err))
-			}
+			err = s.conn.Close()
 		}
 		close(s.die)
 		once = true
 	})
 
-	if e := s.socketError.Load(); e != nil {
-		return e.(error)
-	} else if !once {
+	if once {
+		return err
+	} else {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-	return nil
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
@@ -561,6 +558,20 @@ func (s *UDPSession) notifyWriteEvent() {
 	}
 }
 
+func (s *UDPSession) notifyReadError(err error) {
+	s.socketReadErrorOnce.Do(func() {
+		s.socketReadError.Store(err)
+		close(s.chSocketReadError)
+	})
+}
+
+func (s *UDPSession) notifyWriteError(err error) {
+	s.socketWriteErrorOnce.Do(func() {
+		s.socketWriteError.Store(err)
+		close(s.chSocketWriteError)
+	})
+}
+
 // packet input stage
 func (s *UDPSession) packetInput(data []byte) {
 	dataValid := false
@@ -686,9 +697,13 @@ type (
 		chSessionClosed chan net.Addr    // session close queue
 		headerSize      int              // the additional header to a KCP frame
 
-		die         chan struct{} // notify the listener has closed
-		dieOnce     sync.Once
-		socketError atomic.Value
+		die     chan struct{} // notify the listener has closed
+		dieOnce sync.Once
+
+		// socket error handling
+		socketReadError     atomic.Value
+		chSocketReadError   chan struct{}
+		socketReadErrorOnce sync.Once
 
 		rd atomic.Value // read deadline for Accept()
 	}
@@ -746,6 +761,20 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	}
 }
 
+func (l *Listener) notifyReadError(err error) {
+	l.socketReadErrorOnce.Do(func() {
+		l.socketReadError.Store(err)
+		close(l.chSocketReadError)
+
+		// propagate read error to all sessions
+		l.sessionLock.Lock()
+		for _, s := range l.sessions {
+			s.notifyReadError(err)
+		}
+		l.sessionLock.Unlock()
+	})
+}
+
 // SetReadBuffer sets the socket read buffer for the Listener
 func (l *Listener) SetReadBuffer(bytes int) error {
 	if nc, ok := l.conn.(setReadBuffer); ok {
@@ -792,12 +821,10 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 		return nil, errors.WithStack(errTimeout)
 	case c := <-l.chAccepts:
 		return c, nil
+	case <-l.chSocketReadError:
+		return nil, l.socketReadError.Load().(error)
 	case <-l.die:
-		if err := l.socketError.Load(); err != nil {
-			return nil, err.(error)
-		} else {
-			return nil, errors.WithStack(io.ErrClosedPipe)
-		}
+		return nil, errors.WithStack(io.ErrClosedPipe)
 	}
 }
 
@@ -818,22 +845,20 @@ func (l *Listener) SetReadDeadline(t time.Time) error {
 func (l *Listener) SetWriteDeadline(t time.Time) error { return errInvalidOperation }
 
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
-func (l *Listener) Close() (err error) {
+func (l *Listener) Close() error {
 	var once bool
+	var err error
 	l.dieOnce.Do(func() {
-		if err := l.conn.Close(); err != nil {
-			l.socketError.Store(errors.WithStack(err))
-		}
+		err = l.conn.Close()
 		close(l.die)
 		once = true
 	})
 
-	if err := l.socketError.Load(); err != nil {
-		return err.(error)
-	} else if !once {
+	if once {
+		return err
+	} else {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-	return nil
 }
 
 // closeSession notify the listener that a session has closed
@@ -880,6 +905,7 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
+	l.chSocketReadError = make(chan struct{})
 
 	// calculate header size
 	if l.block != nil {

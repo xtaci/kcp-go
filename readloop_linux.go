@@ -40,8 +40,7 @@ func (s *UDPSession) readLoop() {
 				s.packetInput(msg.Buffers[0][:msg.N])
 			}
 		} else {
-			s.socketError.Store(errors.WithStack(err))
-			s.Close()
+			s.notifyReadError(errors.WithStack(err))
 			return
 		}
 	}
@@ -73,8 +72,7 @@ func (l *Listener) monitor() {
 				}
 			}
 		} else {
-			l.socketError.Store(errors.WithStack(err))
-			l.Close()
+			l.notifyReadError(errors.WithStack(err))
 			return
 		}
 	}
