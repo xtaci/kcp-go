@@ -323,23 +323,22 @@ func (s *UDPSession) uncork() {
 // Close closes the connection.
 func (s *UDPSession) Close() error {
 	var once bool
-	var err error
 	s.dieOnce.Do(func() {
+		close(s.die)
+		once = true
+	})
+
+	if once {
 		// remove from updater
 		updater.removeSession(s)
 		atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 
 		if s.l != nil { // belongs to listener
 			s.l.closeSession(s.remote)
+			return nil
 		} else { // client socket close
-			err = s.conn.Close()
+			return s.conn.Close()
 		}
-		close(s.die)
-		once = true
-	})
-
-	if once {
-		return err
 	} else {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
@@ -847,15 +846,13 @@ func (l *Listener) SetWriteDeadline(t time.Time) error { return errInvalidOperat
 // Close stops listening on the UDP address. Already Accepted connections are not closed.
 func (l *Listener) Close() error {
 	var once bool
-	var err error
 	l.dieOnce.Do(func() {
-		err = l.conn.Close()
 		close(l.die)
 		once = true
 	})
 
 	if once {
-		return err
+		return l.conn.Close()
 	} else {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
