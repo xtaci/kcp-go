@@ -232,15 +232,15 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		// wait for read event or timeout or error
 		select {
 		case <-s.chReadEvent:
+			if timeout != nil {
+				timeout.Stop()
+			}
 		case <-c:
+			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketReadError:
 			return 0, s.socketReadError.Load().(error)
 		case <-s.die:
 			return 0, errors.WithStack(io.ErrClosedPipe)
-		}
-
-		if timeout != nil {
-			timeout.Stop()
 		}
 	}
 }
@@ -298,15 +298,15 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 		select {
 		case <-s.chWriteEvent:
+			if timeout != nil {
+				timeout.Stop()
+			}
 		case <-c:
+			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
 			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
 			return 0, errors.WithStack(io.ErrClosedPipe)
-		}
-
-		if timeout != nil {
-			timeout.Stop()
 		}
 	}
 }
