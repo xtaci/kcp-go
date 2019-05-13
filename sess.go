@@ -84,7 +84,13 @@ type (
 		dieOnce      sync.Once
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
-		socketError  atomic.Value
+
+		// socket error handling
+		socketError          atomic.Value
+		socketReadError      chan struct{}
+		socketWriteError     chan struct{}
+		socketReadErrorOnce  sync.Once
+		socketWriteErrorOnce sync.Once
 
 		// nonce generator
 		nonce Entropy
@@ -113,6 +119,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.nonce.Init()
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
+	sess.socketReadError = make(chan struct{})
+	sess.socketWriteError = make(chan struct{})
 	sess.remote = remote
 	sess.conn = conn
 	sess.l = l
@@ -220,16 +228,14 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		}
 		s.mu.Unlock()
 
-		// wait for read event or timeout
+		// wait for read event or timeout or error
 		select {
 		case <-s.chReadEvent:
 		case <-c:
+		case <-s.socketReadError:
+			return 0, s.socketError.Load().(error)
 		case <-s.die:
-			if e := s.socketError.Load(); e != nil {
-				return 0, e.(error)
-			} else {
-				return 0, errors.WithStack(io.ErrClosedPipe)
-			}
+			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 
 		if timeout != nil {
@@ -271,8 +277,8 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 			if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
 				s.kcp.flush(false)
+				s.uncork()
 			}
-			s.uncork()
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 			return n, nil
@@ -294,12 +300,10 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		select {
 		case <-s.chWriteEvent:
 		case <-c:
+		case <-s.socketWriteError:
+			return 0, s.socketError.Load().(error)
 		case <-s.die:
-			if e := s.socketError.Load(); e != nil {
-				return 0, e.(error)
-			} else {
-				return 0, errors.WithStack(io.ErrClosedPipe)
-			}
+			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 
 		if timeout != nil {
@@ -314,6 +318,7 @@ func (s *UDPSession) uncork() {
 		s.tx(s.txqueue)
 		s.txqueue = s.txqueue[:0]
 	}
+	return
 }
 
 // Close closes the connection.
