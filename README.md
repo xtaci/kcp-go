@@ -66,16 +66,11 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 ```
 
 
-## Usage
+## Examples
 
-Client:   [full demo](https://github.com/xtaci/kcptun/blob/master/client/main.go)
-```go
-kcpconn, err := kcp.DialWithOptions("192.168.0.1:10000", nil, 10, 3)
-```
-Server:   [full demo](https://github.com/xtaci/kcptun/blob/master/server/main.go)
-```go
-lis, err := kcp.ListenWithOptions(":10000", nil, 10, 3)
-```
+1. [simple examples](https://github.com/xtaci/kcp-go/tree/master/examples)
+2. [kcptun client](https://github.com/xtaci/kcptun/blob/master/client/main.go)
+3. [kcptun server](https://github.com/xtaci/kcptun/blob/master/server/main.go)
 
 ## Benchmark
 ```
@@ -177,6 +172,10 @@ Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP, you nee
 Q: I'm handling >5K connections on my server, the CPU utilization is so high.
 
 A: A standalone `agent` or `gate` server for running kcp-go is suggested, not only for CPU utilization, but also important to the **precision** of RTT measurements(timing) which indirectly affects retransmission. By increasing update `interval` with `SetNoDelay` like `conn.SetNoDelay(1, 40, 1, 1)` will dramatically reduce system load, but lower the performance.
+
+Q: When should I enable FEC?
+
+  A: Forward error correction is critical for long-distance transmission, because a packet loss will leads to a huge penalty in time. And for the complicated packet routing network in modern world, round-trip time based loss check will not always be efficient, the big deviation of rtt samples in the long way usually leads to a larger RTO value in typical rtt estimator, which in other words, slows down the transmission.
 
 ## Who is using this?
 
