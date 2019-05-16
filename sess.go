@@ -1,4 +1,4 @@
-// Package kcp-go is a reliable-udp library for golang.
+// Package kcp-go is a Reliable-UDP library for golang.
 //
 // This library intents to provide a smooth, resilient, ordered,
 // error-checked and anonymous delivery of streams over UDP packets.
@@ -430,7 +430,9 @@ func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 	s.ackNoDelay = nodelay
 }
 
-// SetDUP duplicates udp packets for kcp output, for testing purpose only
+// (deprecated)
+//
+// SetDUP duplicates udp packets for kcp output.
 func (s *UDPSession) SetDUP(dup int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -930,10 +932,16 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	return l, nil
 }
 
-// Dial connects to the remote address "raddr" on the network "udp"
+// Dial connects to the remote address "raddr" on the network "udp" without encryption and FEC
 func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0, 0) }
 
 // DialWithOptions connects to the remote address "raddr" on the network "udp" with packet encryption
+//
+// 'block' is the block encryption algorithm to encrypt packets.
+//
+// 'dataShards', 'parityShards' specifiy how many parity packets will be generated following the data packets.
+//
+// Check https://github.com/klauspost/reedsolomon for details
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
 	// network type detection
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)

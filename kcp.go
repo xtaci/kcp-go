@@ -230,19 +230,21 @@ func (kcp *KCP) PeekSize() (length int) {
 	return
 }
 
-// Recv is user/upper level recv: returns size, returns below zero for EAGAIN
+// Receive data from kcp state machine
+//
+// Return number of bytes read.
+//
+// Return -1 when there is no readable data.
+//
+// Return -2 if len(buffer) is smaller than kcp.PeekSize().
 func (kcp *KCP) Recv(buffer []byte) (n int) {
-	if len(kcp.rcv_queue) == 0 {
+	peeksize := kcp.PeekSize()
+	if peeksize < 0 {
 		return -1
 	}
 
-	peeksize := kcp.PeekSize()
-	if peeksize < 0 {
-		return -2
-	}
-
 	if peeksize > len(buffer) {
-		return -3
+		return -2
 	}
 
 	var fast_recover bool
