@@ -1,4 +1,3 @@
-// Package kcp - A Fast and Reliable ARQ Protocol
 package kcp
 
 import (
