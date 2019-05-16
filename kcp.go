@@ -155,8 +155,9 @@ type ackItem struct {
 	ts uint32
 }
 
-// NewKCP create a new kcp control object, 'conv' must equal in two endpoint
-// from the same connection.
+// NewKCP create a new kcp state machine, 'conv' must be equal in the connection
+// peers, or else data will be silently rejected, and output function will be
+// called whenever these is data to be sent on wire.
 func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp := new(KCP)
 	kcp.conv = conv
@@ -506,8 +507,9 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	return repeat
 }
 
-// Input when you received a low level packet (eg. UDP packet), call it
-// regular indicates a regular packet has received(not from FEC)
+// Input a packet into kcp state machine, 'regular' indicates it's a real data
+// packet from remote, and it means it's not generated from ReedSolomon
+// codecs.
 func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	snd_una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
@@ -875,6 +877,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	return uint32(minrto)
 }
 
+// (deprecated)
 // Update updates state (call it repeatedly, every 10ms-100ms), or you can ask
 // ikcp_check when to call it again (without ikcp_input/_send calling).
 // 'current' - current timestamp in millisec.
@@ -903,6 +906,7 @@ func (kcp *KCP) Update() {
 	}
 }
 
+// (deprecated)
 // Check determines when should you invoke ikcp_update:
 // returns when you should invoke ikcp_update in millisec, if there
 // is no ikcp_input/_send calling. you can call ikcp_update in that
