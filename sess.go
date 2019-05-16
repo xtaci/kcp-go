@@ -438,7 +438,9 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
 }
 
-// SetDSCP sets the 6bit DSCP field of IP header, no effect if it's accepted from Listener
+// SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
+//
+// It has no effect if it's accepted from Listener.
 func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -790,7 +792,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	return errInvalidOperation
 }
 
-// SetDSCP sets the 6bit DSCP field of IP header
+// SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
 func (l *Listener) SetDSCP(dscp int) error {
 	if nc, ok := l.conn.(net.Conn); ok {
 		addr, _ := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
@@ -875,8 +877,13 @@ func (l *Listener) Addr() net.Addr { return l.conn.LocalAddr() }
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
 func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr, nil, 0, 0) }
 
-// ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption,
-// dataShards, parityShards defines Reed-Solomon Erasure Coding parameters
+// ListenWithOptions listens for incoming KCP packets addressed to the local address laddr on the network "udp" with packet encryption.
+//
+// 'block' is the block encryption algorithm to encrypt packets.
+//
+// 'dataShards', 'parityShards' specifiy how many parity packets will be generated following the data packets.
+//
+// Check https://github.com/klauspost/reedsolomon for details
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
