@@ -852,7 +852,7 @@ func (l *Listener) SetReadDeadline(t time.Time) error {
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
 func (l *Listener) SetWriteDeadline(t time.Time) error { return errInvalidOperation }
 
-// Close stops listening on the UDP address. Already Accepted connections are not closed.
+// Close stops listening on the UDP address, and closes the socket
 func (l *Listener) Close() error {
 	var once bool
 	l.dieOnce.Do(func() {
