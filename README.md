@@ -163,6 +163,14 @@ In kcp-go, after each `kcp.output()` function call, current clock time will be u
 
 Primary memory allocation are done from a global buffer pool xmit.Buf, in kcp-go, when we need to allocate some bytes, we can get from that pool, and a fixed-capacity 1500 bytes(mtuLimit) will be returned, the rx queue, tx queue and fec queue all receive bytes from there, and they will return the bytes to the pool after using to prevent unnecessary zer0ing of bytes. The pool mechanism maintained a high watermark for slice objects, these in-flight objects from the pool will survive from the perodical garbage collection, meanwhile the pool kept the ability to return the memory to runtime if in idle.
 
+4. Crytoanalysis
+
+kcp-go is shipped with builtin packet encryption powered by various block encryption algorithms and works in Cipher Feedback Mode, for each packet to be sent, the encryption process will start from encrypting a nonce from the system entropy, so encryption to same plaintexts never leads to a same ciphertexts thereafter.
+
+The contents of the packets are completely anonymous with encryption, including the headers(FEC,KCP), checksums and contents. Note that, no matter which encryption method you choose on you upper layer, if you disable encryption by specifying -crypt none to kcp-go, the transmit will be insecure somehow, since the header is PLAINTEXT to everyone it would be susceptible to header tampering, such as jamming the sliding window size, round-trip time, FEC property and checksums. aes-128 is suggested for minimal encryption since modern CPUs are shipped with AES-NI instructions and performs even better than salsa20.
+
+Other possible attacks to kcp-go includes: a) traffic analysis, dataflow on specific websites may have pattern while interchanging data, but this type of eavesdropping has been mitigated by adapting smux to mix data streams so as to introduce noises, perfect solution to this has not appeared yet, theroretically by shuffling/mixing messages on larger scale network may mitigate this problem. b) replay attack, since the asymmetrical encryption has not been introduced into kcp-go for some reason, capturing the packets and replay them on a different machine is possible, (notice: hijacking the session and decrypting the contents is still impossible), so upper layers should contain a asymmetrical encryption system to guarantee the authenticity of each message(to process message exactly once), such as HTTPS/OpenSSL/LibreSSL, only by signing the requests with private keys can eliminate this type of attack.
+
 ## Connection Termination
 
 Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP, you need some **keepalive/heartbeat mechanism** in the application-level. A real world example is to use some **multiplexing** protocol over session, such as [smux](https://github.com/xtaci/smux)(with embedded keepalive mechanism), see [kcptun](https://github.com/xtaci/kcptun) for example.
