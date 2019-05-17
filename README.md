@@ -163,7 +163,7 @@ In kcp-go, after each `kcp.output()` function call, current clock time will be u
 
 Primary memory allocation are done from a global buffer pool xmit.Buf, in kcp-go, when we need to allocate some bytes, we can get from that pool, and a fixed-capacity 1500 bytes(mtuLimit) will be returned, the rx queue, tx queue and fec queue all receive bytes from there, and they will return the bytes to the pool after using to prevent unnecessary zer0ing of bytes. The pool mechanism maintained a high watermark for slice objects, these in-flight objects from the pool will survive from the perodical garbage collection, meanwhile the pool kept the ability to return the memory to runtime if in idle.
 
-4. Crytoanalysis
+4. Information security
 
 kcp-go is shipped with builtin packet encryption powered by various block encryption algorithms and works in Cipher Feedback Mode, for each packet to be sent, the encryption process will start from encrypting a nonce from the system entropy, so encryption to same plaintexts never leads to a same ciphertexts thereafter.
 
