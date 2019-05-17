@@ -183,7 +183,11 @@ A: A standalone `agent` or `gate` server for running kcp-go is suggested, not on
 
 Q: When should I enable FEC?
 
-  A: Forward error correction is critical for long-distance transmission, because a packet loss will leads to a huge penalty in time. And for the complicated packet routing network in modern world, round-trip time based loss check will not always be efficient, the big deviation of rtt samples in the long way usually leads to a larger RTO value in typical rtt estimator, which in other words, slows down the transmission.
+A: Forward error correction is critical for long-distance transmission, because a packet loss will leads to a huge penalty in time. And for the complicated packet routing network in modern world, round-trip time based loss check will not always be efficient, the big deviation of rtt samples in the long way usually leads to a larger RTO value in typical rtt estimator, which in other words, slows down the transmission.
+  
+Q: Should I enable encryption?
+
+A: Yes, for the safety of protocol.
 
 ## Who is using this?
 
