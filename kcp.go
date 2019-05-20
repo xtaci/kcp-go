@@ -273,7 +273,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	count = 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
-		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
+		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
 			kcp.rcv_nxt++
 			count++
 		} else {
@@ -496,7 +496,7 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	count := 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
-		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
+		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
 			kcp.rcv_nxt++
 			count++
 		} else {
