@@ -45,6 +45,24 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 <img src="frame.png" alt="Frame Format" height="109px" />
 
 ```
+NONCE:
+  16bytes cryptographically secure random number, nonce changes for every packet.
+  
+CRC32:
+  CRC-32 checksum of data using the IEEE polynomial
+ 
+FEC TYPE:
+  typeData = 0xF1
+  typeParity = 0xF2
+  
+FEC SEQID:
+  monotonically increasing in range: [0, (0xffffffff/shardSize) * shardSize - 1]
+  
+SIZE:
+  The size of KCP frame plus 2
+```
+
+```
 +-----------------+
 | SESSION         |
 +-----------------+
