@@ -222,7 +222,7 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 	enc.dataShards = dataShards
 	enc.parityShards = parityShards
 	enc.shardSize = dataShards + parityShards
-	enc.paws = (0xffffffff/uint32(enc.shardSize) - 1) * uint32(enc.shardSize)
+	enc.paws = 0xffffffff / uint32(enc.shardSize) * uint32(enc.shardSize)
 	enc.headerOffset = offset
 	enc.payloadOffset = enc.headerOffset + fecHeaderSize
 
