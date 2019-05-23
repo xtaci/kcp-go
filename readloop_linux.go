@@ -55,13 +55,6 @@ func (s *UDPSession) readLoop() {
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	// default version
-	if s.xconn == nil {
-		l.defaultMonitor()
-		return
-	}
-
-	// x/net version
 	var xconn batchConn
 	if _, ok := l.conn.(*net.UDPConn); ok {
 		addr, err := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
@@ -74,6 +67,13 @@ func (l *Listener) monitor() {
 		}
 	}
 
+	// default version
+	if xconn == nil {
+		l.defaultMonitor()
+		return
+	}
+
+	// x/net version
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
