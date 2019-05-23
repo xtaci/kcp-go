@@ -10,6 +10,13 @@ import (
 )
 
 func (s *UDPSession) tx(txqueue []ipv4.Message) {
+	// default version
+	if s.xconn == nil {
+		s.defaultTx(txqueue)
+		return
+	}
+
+	// x/net version
 	nbytes := 0
 	npkts := 0
 	for len(txqueue) > 0 {
