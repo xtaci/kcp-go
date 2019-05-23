@@ -48,9 +48,11 @@ func (s *UDPSession) readLoop() {
 
 // monitor incoming data for all connections of server
 func (l *Listener) monitor() {
-	addr, _ := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
+	addr, err := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
 	var xconn batchConn
-	if addr.IP.To4() != nil {
+	if err != nil {
+		xconn = ipv4.NewPacketConn(l.conn)
+	} else if addr.IP.To4() != nil {
 		xconn = ipv4.NewPacketConn(l.conn)
 	} else {
 		xconn = ipv6.NewPacketConn(l.conn)
