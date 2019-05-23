@@ -136,8 +136,10 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.recvbuf = make([]byte, mtuLimit)
 
 	// cast to writebatch conn
-	addr, _ := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
-	if addr.IP.To4() != nil {
+	addr, err := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
+	if err != nil {
+		sess.xconn = ipv4.NewPacketConn(conn)
+	} else if addr.IP.To4() != nil {
 		sess.xconn = ipv4.NewPacketConn(conn)
 	} else {
 		sess.xconn = ipv6.NewPacketConn(conn)
@@ -455,11 +457,13 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	defer s.mu.Unlock()
 	if s.l == nil {
 		if nc, ok := s.conn.(net.Conn); ok {
-			addr, _ := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
-			if addr.IP.To4() != nil {
-				return ipv4.NewConn(nc).SetTOS(dscp << 2)
-			} else {
-				return ipv6.NewConn(nc).SetTrafficClass(dscp)
+			addr, err := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
+			if err == nil {
+				if addr.IP.To4() != nil {
+					return ipv4.NewConn(nc).SetTOS(dscp << 2)
+				} else {
+					return ipv6.NewConn(nc).SetTrafficClass(dscp)
+				}
 			}
 		}
 	}
@@ -804,11 +808,13 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 // SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
 func (l *Listener) SetDSCP(dscp int) error {
 	if nc, ok := l.conn.(net.Conn); ok {
-		addr, _ := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
-		if addr.IP.To4() != nil {
-			return ipv4.NewConn(nc).SetTOS(dscp << 2)
-		} else {
-			return ipv6.NewConn(nc).SetTrafficClass(dscp)
+		addr, err := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
+		if err == nil {
+			if addr.IP.To4() != nil {
+				return ipv4.NewConn(nc).SetTOS(dscp << 2)
+			} else {
+				return ipv6.NewConn(nc).SetTrafficClass(dscp)
+			}
 		}
 	}
 	return errInvalidOperation
@@ -962,15 +968,19 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 }
 
 // NewConn establishes a session and talks KCP protocol over a packet connection.
+func NewConn2(raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
+	var convid uint32
+	binary.Read(rand.Reader, binary.LittleEndian, &convid)
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, raddr, block), nil
+}
+
+// NewConn establishes a session and talks KCP protocol over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-
-	var convid uint32
-	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, udpaddr, block), nil
+	return NewConn2(udpaddr, block, dataShards, parityShards, conn)
 }
 
 // monotonic reference time point
