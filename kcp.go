@@ -3,6 +3,7 @@ package kcp
 import (
 	"encoding/binary"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -28,6 +29,12 @@ const (
 	IKCP_PROBE_INIT  = 7000   // 7 secs to probe window size
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 )
+
+// monotonic reference time point
+var refTime time.Time = time.Now()
+
+// currentMs returns current elasped monotonic milliseconds since program startup
+func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
 
 // output_callback is a prototype which ought capture conn and call conn.Write
 type output_callback func(buf []byte, size int)

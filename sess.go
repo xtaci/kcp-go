@@ -984,9 +984,3 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 	}
 	return NewConn2(udpaddr, block, dataShards, parityShards, conn)
 }
-
-// monotonic reference time point
-var refTime time.Time = time.Now()
-
-// currentMs returns current elasped monotonic milliseconds since program startup
-func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
