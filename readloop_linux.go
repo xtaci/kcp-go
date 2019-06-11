@@ -4,6 +4,7 @@ package kcp
 
 import (
 	"net"
+	"os"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -47,6 +48,17 @@ func (s *UDPSession) readLoop() {
 				s.packetInput(msg.Buffers[0][:msg.N])
 			}
 		} else {
+			// compatibility issue:
+			// for linux kernel<=2.6.32, support for sendmmsg is not available
+			// an error of type os.SyscallError will be returned
+			if operr, ok := err.(*net.OpError); ok {
+				if se, ok := operr.Err.(*os.SyscallError); ok {
+					if se.Syscall == "recvmmsg" {
+						s.defaultReadLoop()
+						return
+					}
+				}
+			}
 			s.notifyReadError(errors.WithStack(err))
 			return
 		}
@@ -90,6 +102,17 @@ func (l *Listener) monitor() {
 				}
 			}
 		} else {
+			// compatibility issue:
+			// for linux kernel<=2.6.32, support for sendmmsg is not available
+			// an error of type os.SyscallError will be returned
+			if operr, ok := err.(*net.OpError); ok {
+				if se, ok := operr.Err.(*os.SyscallError); ok {
+					if se.Syscall == "recvmmsg" {
+						l.defaultMonitor()
+						return
+					}
+				}
+			}
 			l.notifyReadError(errors.WithStack(err))
 			return
 		}

@@ -3,6 +3,8 @@
 package kcp
 
 import (
+	"net"
+	"os"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -28,6 +30,18 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			npkts += n
 			txqueue = txqueue[n:]
 		} else {
+			// compatibility issue:
+			// for linux kernel<=2.6.32, support for sendmmsg is not available
+			// an error of type os.SyscallError will be returned
+			if operr, ok := err.(*net.OpError); ok {
+				if se, ok := operr.Err.(*os.SyscallError); ok {
+					if se.Syscall == "sendmmsg" {
+						s.xconn = nil // set s.xconn to nil permanently
+						s.defaultTx(txqueue)
+						return
+					}
+				}
+			}
 			s.notifyWriteError(errors.WithStack(err))
 			break
 		}
