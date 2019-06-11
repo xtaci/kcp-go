@@ -104,8 +104,9 @@ type (
 		nonce Entropy
 
 		// packets waiting to be sent on wire
-		txqueue []ipv4.Message
-		xconn   batchConn // for x/net
+		txqueue         []ipv4.Message
+		xconn           batchConn // for x/net
+		xconnWriteError error
 
 		mu sync.Mutex
 	}

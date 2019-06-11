@@ -13,7 +13,7 @@ import (
 
 func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	// default version
-	if s.xconn == nil {
+	if s.xconn == nil || s.xconnWriteError != nil {
 		s.defaultTx(txqueue)
 		return
 	}
@@ -36,7 +36,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			if operr, ok := err.(*net.OpError); ok {
 				if se, ok := operr.Err.(*os.SyscallError); ok {
 					if se.Syscall == "sendmmsg" {
-						s.xconn = nil // set s.xconn to nil permanently
+						s.xconnWriteError = se
 						s.defaultTx(txqueue)
 						return
 					}
