@@ -6,11 +6,11 @@ import (
 	"time"
 )
 
-var updater updateHeap
-
-func init() {
+func newUpdater() *updateHeap {
+	updater := new(updateHeap)
 	updater.init()
 	go updater.updateTask()
+	return updater
 }
 
 // entry contains a session update info
