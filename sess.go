@@ -50,9 +50,8 @@ var (
 var (
 	// a system-wide packet buffer shared among sending, receiving and FEC
 	// to mitigate high-frequency memory allocation for packets
-	xmitBuf       sync.Pool
-	updaterLocker sync.Mutex
-	updater       *updateHeap
+	xmitBuf sync.Pool
+	updater = newUpdater()
 )
 
 func init() {
@@ -177,11 +176,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	// which call sess.update() periodically.
 
 	if sess.l == nil { // it's a client connection
-		updaterLocker.Lock()
-		if updater == nil {
-			updater = newUpdater()
-		}
-		updaterLocker.Unlock()
 		updater.addSession(sess)
 		go sess.readLoop()
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
