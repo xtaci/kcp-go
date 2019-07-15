@@ -15,6 +15,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -458,16 +459,32 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.l == nil {
-		if nc, ok := s.conn.(net.Conn); ok {
-			addr, err := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
-			if err == nil {
-				if addr.IP.To4() != nil {
-					return ipv4.NewConn(nc).SetTOS(dscp << 2)
-				} else {
-					return ipv6.NewConn(nc).SetTrafficClass(dscp)
-				}
+	if s.l != nil {
+		return errInvalidOperation
+	}
+	if nc, ok := s.conn.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	}); ok {
+		raw, err := nc.SyscallConn()
+		if err != nil {
+			return err
+		}
+
+		var succeed bool
+		raw.Control(func(fd uintptr) {
+			if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TOS, dscp<<2); err == nil {
+				succeed = true
 			}
+		})
+
+		raw.Control(func(fd uintptr) {
+			if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_TCLASS, dscp); err == nil {
+				succeed = true
+			}
+		})
+
+		if succeed {
+			return nil
 		}
 	}
 	return errInvalidOperation
@@ -810,16 +827,33 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 
 // SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
 func (l *Listener) SetDSCP(dscp int) error {
-	if nc, ok := l.conn.(net.Conn); ok {
-		addr, err := net.ResolveUDPAddr("udp", nc.LocalAddr().String())
-		if err == nil {
-			if addr.IP.To4() != nil {
-				return ipv4.NewConn(nc).SetTOS(dscp << 2)
-			} else {
-				return ipv6.NewConn(nc).SetTrafficClass(dscp)
+	if nc, ok := l.conn.(interface {
+		SyscallConn() (syscall.RawConn, error)
+	}); ok {
+		raw, err := nc.SyscallConn()
+		if err != nil {
+			return err
+		}
+
+		var succeed bool
+		// try setting both IPv4 and IPv6 for dualstack socket
+		raw.Control(func(fd uintptr) {
+			if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IP, syscall.IP_TOS, dscp<<2); err == nil {
+				succeed = true
 			}
+		})
+
+		raw.Control(func(fd uintptr) {
+			if err := syscall.SetsockoptInt(int(fd), syscall.IPPROTO_IPV6, syscall.IPV6_TCLASS, dscp); err == nil {
+				succeed = true
+			}
+		})
+
+		if succeed {
+			return nil
 		}
 	}
+
 	return errInvalidOperation
 }
 
