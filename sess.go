@@ -454,6 +454,9 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 
 // SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
 //
+// if the underlying connection has implemented `func SetDSCP(int) error`, SetDSCP() will invoke
+// this function instead.
+//
 // It has no effect if it's accepted from Listener.
 func (s *UDPSession) SetDSCP(dscp int) error {
 	s.mu.Lock()
@@ -461,6 +464,14 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	if s.l != nil {
 		return errInvalidOperation
 	}
+
+	// interface enabled
+	if ts, ok := s.conn.(interface {
+		SetDSCP(int) error
+	}); ok {
+		return ts.SetDSCP(dscp)
+	}
+
 	if nc, ok := s.conn.(net.Conn); ok {
 		var succeed bool
 		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
@@ -813,7 +824,17 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 }
 
 // SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
+//
+// if the underlying connection has implemented `func SetDSCP(int) error`, SetDSCP() will invoke
+// this function instead.
 func (l *Listener) SetDSCP(dscp int) error {
+	// interface enabled
+	if ts, ok := l.conn.(interface {
+		SetDSCP(int) error
+	}); ok {
+		return ts.SetDSCP(dscp)
+	}
+
 	if nc, ok := l.conn.(net.Conn); ok {
 		var succeed bool
 		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
