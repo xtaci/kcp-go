@@ -118,6 +118,10 @@ type (
 	setWriteBuffer interface {
 		SetWriteBuffer(bytes int) error
 	}
+
+	setDSCP interface {
+		SetDSCP(int) error
+	}
 )
 
 // newUDPSession create a new udp session for client or server
@@ -466,9 +470,7 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	}
 
 	// interface enabled
-	if ts, ok := s.conn.(interface {
-		SetDSCP(int) error
-	}); ok {
+	if ts, ok := s.conn.(setDSCP); ok {
 		return ts.SetDSCP(dscp)
 	}
 
@@ -829,9 +831,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 // this function instead.
 func (l *Listener) SetDSCP(dscp int) error {
 	// interface enabled
-	if ts, ok := l.conn.(interface {
-		SetDSCP(int) error
-	}); ok {
+	if ts, ok := l.conn.(setDSCP); ok {
 		return ts.SetDSCP(dscp)
 	}
 
