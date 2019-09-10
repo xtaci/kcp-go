@@ -276,7 +276,10 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		}
 
 		s.mu.Lock()
-		if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
+
+		// make sure write do not overflow the max sliding window on both side
+		waitsnd := s.kcp.WaitSnd()
+		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
 			for _, b := range v {
 				n += len(b)
 				for {
@@ -290,7 +293,8 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 				}
 			}
 
-			if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
+			waitsnd = s.kcp.WaitSnd()
+			if waitsnd >= int(s.kcp.snd_wnd) || waitsnd >= int(s.kcp.rmt_wnd) || !s.writeDelay {
 				s.kcp.flush(false)
 				s.uncork()
 			}
