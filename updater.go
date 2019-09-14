@@ -2,15 +2,49 @@ package kcp
 
 import (
 	"container/heap"
+	"hash/fnv"
+	"runtime"
 	"sync"
 	"time"
 )
 
-var updater updateHeap
-
 func init() {
 	updater.init()
-	go updater.updateTask()
+}
+
+var updater updaterMgr
+
+type updaterMgr struct {
+	updaters     []*updateHeap
+	updaterCount uint32
+}
+
+func (mgr *updaterMgr) init() {
+	num := runtime.NumCPU()
+	mgr.updaters = make([]*updateHeap, num)
+	mgr.updaterCount = uint32(num)
+	for i := 0; i < num; i++ {
+		heap := new(updateHeap)
+		heap.init()
+		go heap.updateTask()
+		mgr.updaters[i] = heap
+	}
+}
+
+func hash(s string) uint32 {
+	h := fnv.New32a()
+	h.Write([]byte(s))
+	return h.Sum32()
+}
+
+func (mgr *updaterMgr) addSession(s *UDPSession) {
+	index := hash(s.remote.String()) % mgr.updaterCount
+	mgr.updaters[index].addSession(s)
+}
+
+func (mgr *updaterMgr) removeSession(s *UDPSession) {
+	index := hash(s.remote.String()) % mgr.updaterCount
+	mgr.updaters[index].removeSession(s)
 }
 
 // entry contains a session update info
