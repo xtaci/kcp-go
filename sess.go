@@ -569,9 +569,9 @@ func (s *UDPSession) output(buf []byte) {
 // kcp update, returns interval for next calling
 func (s *UDPSession) update() (interval time.Duration) {
 	s.mu.Lock()
-	waitsnd := s.kcp.WaitSnd()
 	interval = time.Duration(s.kcp.flush(false)) * time.Millisecond
-	if s.kcp.WaitSnd() < waitsnd {
+	waitsnd := s.kcp.WaitSnd()
+	if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
 		s.notifyWriteEvent()
 	}
 	s.uncork()
@@ -645,7 +645,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 				recovers := s.fecDecoder.decode(f)
 
 				s.mu.Lock()
-				waitsnd := s.kcp.WaitSnd()
 				if f.flag() == typeData {
 					if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
 						kcpInErrors++
@@ -675,10 +674,12 @@ func (s *UDPSession) kcpInput(data []byte) {
 				if n := s.kcp.PeekSize(); n > 0 {
 					s.notifyReadEvent()
 				}
-				// to notify the writers when queue is shorter(e.g. ACKed)
-				if s.kcp.WaitSnd() < waitsnd {
+				// to notify the writers
+				waitsnd := s.kcp.WaitSnd()
+				if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
 					s.notifyWriteEvent()
 				}
+
 				s.uncork()
 				s.mu.Unlock()
 			} else {
@@ -689,14 +690,14 @@ func (s *UDPSession) kcpInput(data []byte) {
 		}
 	} else {
 		s.mu.Lock()
-		waitsnd := s.kcp.WaitSnd()
 		if ret := s.kcp.Input(data, true, s.ackNoDelay); ret != 0 {
 			kcpInErrors++
 		}
 		if n := s.kcp.PeekSize(); n > 0 {
 			s.notifyReadEvent()
 		}
-		if s.kcp.WaitSnd() < waitsnd {
+		waitsnd := s.kcp.WaitSnd()
+		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
 			s.notifyWriteEvent()
 		}
 		s.uncork()
