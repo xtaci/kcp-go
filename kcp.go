@@ -809,6 +809,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			} else {
 				segment.rto += kcp.rx_rto / 2
 			}
+			segment.fastack = 0
 			segment.resendts = current + segment.rto
 			lost++
 			lostSegs++
