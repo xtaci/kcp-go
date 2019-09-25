@@ -10,7 +10,7 @@ type auxdata struct {
 
 type auxHeap struct {
 	s       []auxdata
-	indices map[uint32]int
+	indices map[uint32]int // sn -> idx of sn
 }
 
 func newAuxHeap() *auxHeap {

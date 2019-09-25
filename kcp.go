@@ -800,19 +800,21 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		ptr = segment.encode(ptr)
 		copy(ptr, segment.data)
 		ptr = ptr[len(segment.data):]
-		// rto heap
-		heap.Push(kcp.rto_heap, auxdata{segment.sn, segment.resendts})
+		kcp.rto_heap.Set(auxdata{segment.sn, segment.resendts})
 	}
 
-	// phase 2. check and resend fastacks
+	// phase 2. fastacks
 	for sn := range kcp.fastacks {
 		needsend := false
 		if _itimediff(sn, kcp.snd_una) < 0 { // purge
 			delete(kcp.fastacks, sn)
+			continue
 		}
 
 		segment := &kcp.snd_buf[sn-kcp.snd_una]
 		if segment.fastack == 0 {
+			delete(kcp.fastacks, sn)
+		} else if segment.data == nil {
 			delete(kcp.fastacks, sn)
 		} else if segment.fastack >= resent { // fast retransmit
 			needsend = true
@@ -846,14 +848,13 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			ptr = segment.encode(ptr)
 			copy(ptr, segment.data)
 			ptr = ptr[len(segment.data):]
-
-			// rto heap
-			heap.Push(kcp.rto_heap, auxdata{segment.sn, segment.resendts})
+			kcp.rto_heap.Set(auxdata{segment.sn, segment.resendts})
 		}
 	}
 
-	// phase 3. check and resend RTO segments
+	// phase 3. RTO
 	for kcp.rto_heap.Len() > 0 {
+		needsend := false
 		aux := heap.Pop(kcp.rto_heap).(auxdata)
 		if _itimediff(aux.sn, kcp.snd_una) < 0 { // purge
 			continue
@@ -861,8 +862,8 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 		segment := &kcp.snd_buf[aux.sn-kcp.snd_una]
 		if segment.data == nil {
-			continue
 		} else if _itimediff(current, segment.resendts) >= 0 {
+			needsend = true
 			if kcp.nodelay == 0 {
 				segment.rto += kcp.rx_rto
 			} else {
@@ -872,8 +873,12 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			segment.fastack = 0
 			lost++
 			lostSegs++
+		} else { // push back the data then break
+			kcp.rto_heap.Set(auxdata{segment.sn, segment.resendts})
+			break
+		}
 
-			// send
+		if needsend {
 			segment.xmit++
 			segment.ts = current
 			segment.wnd = seg.wnd
@@ -884,11 +889,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			ptr = segment.encode(ptr)
 			copy(ptr, segment.data)
 			ptr = ptr[len(segment.data):]
-			// rto heap
-			heap.Push(kcp.rto_heap, auxdata{segment.sn, segment.resendts})
-		} else { // push back the data then break
-			heap.Push(kcp.rto_heap, auxdata{segment.sn, segment.resendts})
-			break
+			kcp.rto_heap.Set(auxdata{segment.sn, segment.resendts})
 		}
 	}
 
