@@ -774,7 +774,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// check for retransmissions
 	current := currentMs()
-	var change, lost, lostSegs, fastRetransSegs, earlyRetransSegs uint64
+	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
 	ref := kcp.snd_buf[:len(kcp.snd_buf)] // for bounds check elimination
@@ -811,7 +811,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			}
 			segment.fastack = 0
 			segment.resendts = current + segment.rto
-			lost++
 			lostSegs++
 		}
 
@@ -874,7 +873,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		// congestion control, https://tools.ietf.org/html/rfc5681
-		if lost > 0 {
+		if lostSegs > 0 {
 			kcp.ssthresh = cwnd / 2
 			if kcp.ssthresh < IKCP_THRESH_MIN {
 				kcp.ssthresh = IKCP_THRESH_MIN
