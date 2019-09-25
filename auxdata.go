@@ -20,7 +20,7 @@ func newAuxHeap() *auxHeap {
 }
 
 func (h auxHeap) Len() int           { return len(h.s) }
-func (h auxHeap) Less(i, j int) bool { return h.s[i].v < h.s[j].v }
+func (h auxHeap) Less(i, j int) bool { return _itimediff(h.s[i].v, h.s[j].v) < 0 }
 func (h auxHeap) Swap(i, j int) {
 	h.s[i], h.s[j] = h.s[j], h.s[i]
 	h.indices[h.s[i].sn] = i
