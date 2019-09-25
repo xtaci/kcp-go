@@ -441,9 +441,7 @@ func (kcp *KCP) parse_fastack(sn, ts uint32) {
 			break
 		} else if sn != seg.sn && _itimediff(seg.ts, ts) <= 0 {
 			seg.fastack++
-			if seg.fastack >= uint32(kcp.fastresend) {
-				kcp.fastacks[seg.sn] = true
-			}
+			kcp.fastacks[seg.sn] = true
 		}
 	}
 }
@@ -808,42 +806,60 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// phase 2. check and resend fastacks
 	for sn := range kcp.fastacks {
-		delete(kcp.fastacks, sn)
-		if _itimediff(sn, kcp.snd_una) < 0 {
-			continue
+		needsend := false
+		if _itimediff(sn, kcp.snd_una) < 0 { // purge
+			delete(kcp.fastacks, sn)
 		}
 
 		segment := &kcp.snd_buf[sn-kcp.snd_una]
-		segment.fastack = 0
-		segment.rto = kcp.rx_rto
-		segment.resendts = current + segment.rto
-		change++
-		fastRetransSegs++
+		if segment.fastack == 0 {
+			delete(kcp.fastacks, sn)
+		} else if segment.fastack >= resent { // fast retransmit
+			needsend = true
+			segment.fastack = 0
+			segment.rto = kcp.rx_rto
+			segment.resendts = current + segment.rto
+			change++
+			fastRetransSegs++
+			delete(kcp.fastacks, sn)
+		} else if segment.fastack > 0 && newSegsCount == 0 { // early retransmit
+			needsend = true
+			segment.fastack = 0
+			segment.rto = kcp.rx_rto
+			segment.resendts = current + segment.rto
+			change++
+			earlyRetransSegs++
+			delete(kcp.fastacks, sn)
+		} else {
+			continue
+		}
 
 		// xmit
-		segment.xmit++
-		segment.ts = current
-		segment.wnd = seg.wnd
-		segment.una = seg.una
+		if needsend {
+			segment.xmit++
+			segment.ts = current
+			segment.wnd = seg.wnd
+			segment.una = seg.una
 
-		need := IKCP_OVERHEAD + len(segment.data)
-		makeSpace(need)
-		ptr = segment.encode(ptr)
-		copy(ptr, segment.data)
-		ptr = ptr[len(segment.data):]
+			need := IKCP_OVERHEAD + len(segment.data)
+			makeSpace(need)
+			ptr = segment.encode(ptr)
+			copy(ptr, segment.data)
+			ptr = ptr[len(segment.data):]
 
-		// rto heap
-		heap.Push(kcp.rto_heap, auxdata{segment.sn, segment.resendts})
+			// rto heap
+			heap.Push(kcp.rto_heap, auxdata{segment.sn, segment.resendts})
+		}
 	}
 
 	// phase 3. check and resend RTO segments
 	for kcp.rto_heap.Len() > 0 {
 		aux := heap.Pop(kcp.rto_heap).(auxdata)
-		if _itimediff(aux.sn, kcp.snd_una) < 0 {
+		if _itimediff(aux.sn, kcp.snd_una) < 0 { // purge
 			continue
 		}
-		segment := &kcp.snd_buf[aux.sn-kcp.snd_una]
 
+		segment := &kcp.snd_buf[aux.sn-kcp.snd_una]
 		if segment.data == nil {
 			continue
 		} else if _itimediff(current, segment.resendts) >= 0 {
@@ -853,6 +869,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 				segment.rto += kcp.rx_rto / 2
 			}
 			segment.resendts = current + segment.rto
+			segment.fastack = 0
 			lost++
 			lostSegs++
 
