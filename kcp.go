@@ -99,6 +99,8 @@ func _itimediff(later, earlier uint32) int32 {
 }
 
 // segment defines a KCP segment
+// a segment is bound to 64Bytes to fill in
+// a cache line
 type segment struct {
 	conv     uint32
 	cmd      uint8
@@ -780,7 +782,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// check for retransmissions
 	current := currentMs()
-	var change, lost, lostSegs, fastRetransSegs, earlyRetransSegs uint64
+	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 
 	// phase 1. send new queued data
 	ref := kcp.snd_buf[len(kcp.snd_buf)-newSegsCount : len(kcp.snd_buf)]
@@ -806,7 +808,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	// phase 2. fastacks
 	for sn := range kcp.fastacks {
 		needsend := false
-		if _itimediff(sn, kcp.snd_una) < 0 { // purge
+		if _itimediff(sn, kcp.snd_una) < 0 {
 			delete(kcp.fastacks, sn)
 			continue
 		}
@@ -856,7 +858,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	for kcp.rto_heap.Len() > 0 {
 		needsend := false
 		aux := heap.Pop(kcp.rto_heap).(auxdata)
-		if _itimediff(aux.sn, kcp.snd_una) < 0 { // purge
+		if _itimediff(aux.sn, kcp.snd_una) < 0 {
 			continue
 		}
 
@@ -871,9 +873,8 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			}
 			segment.resendts = current + segment.rto
 			segment.fastack = 0
-			lost++
 			lostSegs++
-		} else { // push back the data then break
+		} else {
 			kcp.rto_heap.Set(auxdata{segment.sn, segment.resendts})
 			break
 		}
@@ -928,7 +929,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 
 		// congestion control, https://tools.ietf.org/html/rfc5681
-		if lost > 0 {
+		if lostSegs > 0 {
 			kcp.ssthresh = cwnd / 2
 			if kcp.ssthresh < IKCP_THRESH_MIN {
 				kcp.ssthresh = IKCP_THRESH_MIN

@@ -2,7 +2,8 @@ package kcp
 
 import "container/heap"
 
-// a heap struct to assist send queue management
+// a heap struct to assist snd_buf management
+// eg: RTO
 type auxdata struct {
 	sn uint32
 	v  uint32 // value for heap comparsion
