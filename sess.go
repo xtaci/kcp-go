@@ -62,11 +62,10 @@ func init() {
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
-		updaterIdx int            // record slice index in updater
-		conn       net.PacketConn // the underlying packet connection
-		kcp        *KCP           // KCP ARQ protocol
-		l          *Listener      // pointing to the Listener object if it's been accepted by a Listener
-		block      BlockCrypt     // block encryption object
+		conn  net.PacketConn // the underlying packet connection
+		kcp   *KCP           // KCP ARQ protocol
+		l     *Listener      // pointing to the Listener object if it's been accepted by a Listener
+		block BlockCrypt     // block encryption object
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -175,16 +174,15 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	})
 	sess.kcp.ReserveBytes(sess.headerSize)
 
-	// register current session to the global updater,
-	// which call sess.update() periodically.
-	updater.addSession(sess)
-
 	if sess.l == nil { // it's a client connection
 		go sess.readLoop()
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
 	} else {
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
 	}
+
+	// start per-session updater
+	go sess.updater()
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -349,8 +347,6 @@ func (s *UDPSession) Close() error {
 	})
 
 	if once {
-		// remove from updater
-		updater.removeSession(s)
 		atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 
 		if s.l != nil { // belongs to listener
@@ -566,17 +562,26 @@ func (s *UDPSession) output(buf []byte) {
 	}
 }
 
-// kcp update, returns interval for next calling
-func (s *UDPSession) update() (interval time.Duration) {
-	s.mu.Lock()
-	interval = time.Duration(s.kcp.flush(false)) * time.Millisecond
-	waitsnd := s.kcp.WaitSnd()
-	if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-		s.notifyWriteEvent()
+// sess updater to trigger protocol
+func (s *UDPSession) updater() {
+	timer := time.NewTimer(0)
+	for {
+		select {
+		case <-timer.C:
+			s.mu.Lock()
+			interval := time.Duration(s.kcp.flush(false)) * time.Millisecond
+			waitsnd := s.kcp.WaitSnd()
+			if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
+				s.notifyWriteEvent()
+			}
+			s.uncork()
+			s.mu.Unlock()
+			timer.Reset(interval)
+		case <-s.die:
+			timer.Stop()
+			return
+		}
 	}
-	s.uncork()
-	s.mu.Unlock()
-	return
 }
 
 // GetConv gets conversation id of a session
