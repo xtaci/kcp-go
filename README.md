@@ -217,6 +217,7 @@ A: Yes, for the safety of protocol, even if the upper layer has encrypted.
 
 ## Links
 
+1. https://github.com/xtaci/smux/ -- A Stream Multiplexing Library for golang with least memory
 1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
-2. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
-3. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
+1. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
+1. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
