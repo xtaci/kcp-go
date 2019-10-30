@@ -182,16 +182,16 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 	// timeout policy
 	current := currentMs()
-	expiredIdx := -1
+	numExpired := 0
 	for k := range dec.rx {
 		if _itimediff(current, dec.rx[k].ts) > fecExpire {
-			expiredIdx = k
+			numExpired++
 			continue
 		}
 		break
 	}
-	if expiredIdx >= 0 {
-		dec.rx = dec.freeRange(0, expiredIdx, dec.rx)
+	if numExpired > 0 {
+		dec.rx = dec.freeRange(0, numExpired, dec.rx)
 	}
 	return
 }
