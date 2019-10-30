@@ -184,7 +184,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	current := currentMs()
 	expiredIdx := -1
 	for k := range dec.rx {
-		if _itimediff(current, dec.rx[k].ts) > 10 { //fecExpire {
+		if _itimediff(current, dec.rx[k].ts) > fecExpire {
 			expiredIdx = k
 			continue
 		}
