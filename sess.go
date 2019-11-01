@@ -353,6 +353,8 @@ func (s *UDPSession) Close() error {
 		s.mu.Lock()
 		s.kcp.flush(false)
 		s.uncork()
+		// release pending segments
+		s.kcp.ReleaseTX()
 		s.mu.Unlock()
 
 		if s.l != nil { // belongs to listener
