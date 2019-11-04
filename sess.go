@@ -336,8 +336,9 @@ func (s *UDPSession) uncork() {
 		// recycle
 		for k := range s.txqueue {
 			xmitBuf.Put(s.txqueue[k].Buffers[0])
+			s.txqueue[k].Buffers = nil
 		}
-		s.txqueue = nil
+		s.txqueue = s.txqueue[:0]
 	}
 	return
 }
