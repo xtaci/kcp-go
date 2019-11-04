@@ -25,7 +25,6 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 		if n, err := s.xconn.WriteBatch(txqueue, 0); err == nil {
 			for k := range txqueue[:n] {
 				nbytes += len(txqueue[k].Buffers[0])
-				xmitBuf.Put(txqueue[k].Buffers[0])
 			}
 			npkts += n
 			txqueue = txqueue[n:]

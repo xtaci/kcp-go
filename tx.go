@@ -14,7 +14,6 @@ func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
 		if n, err := s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr); err == nil {
 			nbytes += n
 			npkts++
-			xmitBuf.Put(txqueue[k].Buffers[0])
 		} else {
 			s.notifyWriteError(errors.WithStack(err))
 			break

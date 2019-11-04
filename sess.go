@@ -333,6 +333,10 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 func (s *UDPSession) uncork() {
 	if len(s.txqueue) > 0 {
 		s.tx(s.txqueue)
+		// recycle
+		for k := range s.txqueue {
+			xmitBuf.Put(s.txqueue[k].Buffers[0])
+		}
 		s.txqueue = nil
 	}
 	return
