@@ -333,7 +333,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 func (s *UDPSession) uncork() {
 	if len(s.txqueue) > 0 {
 		s.tx(s.txqueue)
-		s.txqueue = s.txqueue[:0]
+		s.txqueue = nil
 	}
 	return
 }
