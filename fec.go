@@ -209,6 +209,13 @@ func (dec *fecDecoder) freeRange(first, n int, q []fecElement) []fecElement {
 	return q[:len(q)-n]
 }
 
+// release all segments back to xmitBuf
+func (dec *fecDecoder) release() {
+	if n := len(dec.rx); n > 0 {
+		dec.rx = dec.freeRange(0, n, dec.rx)
+	}
+}
+
 type (
 	// fecEncoder for encoding outgoing packets
 	fecEncoder struct {

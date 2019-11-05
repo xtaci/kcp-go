@@ -360,6 +360,9 @@ func (s *UDPSession) Close() error {
 		s.uncork()
 		// release pending segments
 		s.kcp.ReleaseTX()
+		if s.fecDecoder != nil {
+			s.fecDecoder.release()
+		}
 		s.mu.Unlock()
 
 		if s.l != nil { // belongs to listener
