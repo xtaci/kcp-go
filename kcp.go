@@ -1055,10 +1055,14 @@ func (kcp *KCP) remove_front(q []segment, n int) []segment {
 // Release all cached outgoing segments
 func (kcp *KCP) ReleaseTX() {
 	for k := range kcp.snd_queue {
-		xmitBuf.Put(kcp.snd_queue[k].data)
+		if kcp.snd_queue[k].data != nil {
+			xmitBuf.Put(kcp.snd_queue[k].data)
+		}
 	}
 	for k := range kcp.snd_buf {
-		xmitBuf.Put(kcp.snd_buf[k].data)
+		if kcp.snd_buf[k].data != nil {
+			xmitBuf.Put(kcp.snd_buf[k].data)
+		}
 	}
 	kcp.snd_queue = nil
 	kcp.snd_buf = nil
