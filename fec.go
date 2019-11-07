@@ -156,7 +156,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 					dlen := len(shards[k])
 					shards[k] = shards[k][:maxlen]
 					copy(shards[k][dlen:], dec.zeros)
-				} else {
+				} else if k < dec.dataShards {
 					shards[k] = xmitBuf.Get().([]byte)[:0]
 				}
 			}

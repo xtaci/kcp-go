@@ -663,9 +663,10 @@ func (s *UDPSession) kcpInput(data []byte) {
 				if f.flag() == typeParity {
 					fecParityShards++
 				}
-				recovers := s.fecDecoder.decode(f)
 
+				// lock
 				s.mu.Lock()
+				recovers := s.fecDecoder.decode(f)
 				if f.flag() == typeData {
 					if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
 						kcpInErrors++
