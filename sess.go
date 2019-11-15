@@ -546,36 +546,89 @@ func (s *UDPSession) output(buf []byte) {
 
 	// 2&3. crc32 & encryption
 	if s.block != nil {
+		s.calculateCRC32AndEncrypt(buf)
+		/*
 		s.nonce.Fill(buf[:nonceSize])
 		checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
 		binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
 		s.block.Encrypt(buf, buf)
+		*/
 
 		for k := range ecc {
+			s.calculateCRC32AndEncrypt(ecc[k])
+			/*
 			s.nonce.Fill(ecc[k][:nonceSize])
 			checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
 			binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
 			s.block.Encrypt(ecc[k], ecc[k])
+			*/
 		}
 	}
 
 	// 4. TxQueue
-	var msg ipv4.Message
+	// var msg ipv4.Message
 	for i := 0; i < s.dup+1; i++ {
+		s.append2Queue(buf)
+		/*
 		bts := xmitBuf.Get().([]byte)[:len(buf)]
 		copy(bts, buf)
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remote
 		s.txqueue = append(s.txqueue, msg)
+		*/
 	}
 
 	for k := range ecc {
+		s.append2Queue(ecc[k])
+		/*
 		bts := xmitBuf.Get().([]byte)[:len(ecc[k])]
 		copy(bts, ecc[k])
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remote
 		s.txqueue = append(s.txqueue, msg)
+		*/
 	}
+}
+
+func (s *UDPSession) forceFecEncode() {
+	pb, ps := s.fecEncoder.forceEncode()
+	if pb == nil || ps == nil {
+		return
+	}
+
+	if s.block != nil {
+		for k := range pb {
+			s.calculateCRC32AndEncrypt(pb[k])
+		}
+		for k := range ps {
+			s.calculateCRC32AndEncrypt(ps[k])
+		}
+	}
+
+	for k := range pb {
+		for i := 0; i < s.dup+1; i++ {
+			s.append2Queue(pb[k])
+		}
+	}
+	for k := range ps {
+		s.append2Queue(ps[k])
+	}
+}
+
+func (s *UDPSession) calculateCRC32AndEncrypt(buf []byte) {
+	s.nonce.Fill(buf[:nonceSize])
+	checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
+	binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
+	s.block.Encrypt(buf, buf)
+}
+
+func (s *UDPSession) append2Queue(buf []byte) {
+	var msg ipv4.Message
+	bts := xmitBuf.Get().([]byte)[:len(buf)]
+	copy(bts, buf)
+	msg.Buffers = [][]byte{bts}
+	msg.Addr = s.remote
+	s.txqueue = append(s.txqueue, msg)
 }
 
 // sess updater to trigger protocol
@@ -588,8 +641,10 @@ func (s *UDPSession) updater() {
 			interval := time.Duration(s.kcp.flush(false)) * time.Millisecond
 			waitsnd := s.kcp.WaitSnd()
 			if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
+				s.forceFecEncode()
 				s.notifyWriteEvent()
 			}
+
 			s.uncork()
 			s.mu.Unlock()
 			timer.Reset(interval)

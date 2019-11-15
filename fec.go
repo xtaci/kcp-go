@@ -12,6 +12,7 @@ const (
 	fecHeaderSizePlus2 = fecHeaderSize + 2 // plus 2B data size
 	typeData           = 0xf1
 	typeParity         = 0xf2
+	typePadding        = 0xf3
 	fecExpire          = 60000
 )
 
@@ -286,6 +287,33 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
 	enc.shardCount++
 
+	return enc.doEncode(sz)
+}
+
+func (enc *fecEncoder) forceEncode() (paddingBuffers [][]byte, ps [][]byte) {
+	if enc.shardCount == 0 {
+		return
+	}
+
+	paddingBufferSize := enc.dataShards - enc.shardCount
+	paddingBuffers = make([][]byte, paddingBufferSize)
+
+	var padding []byte
+	var paddingSize int
+	paddingIndex := 0
+	for i := enc.shardCount; i < enc.dataShards; i++ {
+		padding, paddingSize = enc.makePadding()
+		paddingBuffers[paddingIndex] = padding
+		enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:paddingSize]
+		copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], padding[enc.payloadOffset:])
+		enc.shardCount++
+		paddingIndex++
+	}
+
+	return paddingBuffers, enc.doEncode(paddingSize)
+}
+
+func (enc *fecEncoder) doEncode(sz int) (ps [][]byte) {
 	// track max datashard length
 	if sz > enc.maxSize {
 		enc.maxSize = sz
@@ -334,4 +362,14 @@ func (enc *fecEncoder) markParity(data []byte) {
 	binary.LittleEndian.PutUint16(data[4:], typeParity)
 	// sequence wrap will only happen at parity shard
 	enc.next = (enc.next + 1) % enc.paws
+}
+
+func (enc *fecEncoder) makePadding() ([]byte, int) {
+	buffer := make([]byte, enc.payloadOffset+4)
+	data := buffer[enc.headerOffset:]
+	binary.LittleEndian.PutUint32(data, enc.next)
+	binary.LittleEndian.PutUint16(data[4:], typePadding)
+	binary.LittleEndian.PutUint16(buffer[enc.payloadOffset:], uint16(len(buffer[enc.payloadOffset:])))
+	enc.next++
+	return buffer, len(buffer)
 }
