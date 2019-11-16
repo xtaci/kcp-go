@@ -714,7 +714,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if s.fecDecoder != nil {
 		if len(data) > fecHeaderSize { // must be larger than fec header size
 			f := fecPacket(data)
-			if f.flag() == typeData || f.flag() == typeParity { // header check
+			if f.flag() == typeData || f.flag() == typeParity || f.flag() == typePadding { // header check
 				if f.flag() == typeParity {
 					fecParityShards++
 				}

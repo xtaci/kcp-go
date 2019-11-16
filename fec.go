@@ -135,7 +135,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				shards[seqid%uint32(dec.shardSize)] = dec.rx[i].data()
 				shardsflag[seqid%uint32(dec.shardSize)] = true
 				numshard++
-				if dec.rx[i].flag() == typeData {
+				if dec.rx[i].flag() == typeData || dec.rx[i].flag() == typePadding {
 					numDataShard++
 				}
 				if numshard == 1 {
@@ -163,7 +163,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			}
 			if err := dec.codec.ReconstructData(shards); err == nil {
 				for k := range shards[:dec.dataShards] {
-					if !shardsflag[k] {
+					if !shardsflag[k] && fecPacket(shards[k]).flag() != typePadding {
 						// recovered data should be recycled
 						recovered = append(recovered, shards[k])
 					}
@@ -365,7 +365,7 @@ func (enc *fecEncoder) markParity(data []byte) {
 }
 
 func (enc *fecEncoder) makePadding() ([]byte, int) {
-	buffer := make([]byte, enc.payloadOffset+4)
+	buffer := make([]byte, enc.payloadOffset+2+IKCP_OVERHEAD)
 	data := buffer[enc.headerOffset:]
 	binary.LittleEndian.PutUint32(data, enc.next)
 	binary.LittleEndian.PutUint16(data[4:], typePadding)
