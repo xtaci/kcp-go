@@ -117,11 +117,11 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				pkt = temporaryPkt
 			}
 		}
-		if pkt == nil {
-			return nil
-		}
 	} else {
 		insertIdx, pkt = dec.insertFecPacket(in)
+	}
+	if pkt == nil {
+		return nil
 	}
 
 	// shard range for current packet

@@ -83,6 +83,7 @@ type (
 		headerSize int       // the header size additional to a KCP frame
 		ackNoDelay bool      // send ack immediately for each incoming packet(testing purpose)
 		writeDelay bool      // delay kcp.flush() for Write() for bulk transfer
+		rapidFec   bool      // force fec encode on updater invoked
 		dup        int       // duplicate udp packets(testing purpose)
 
 		// notifications
@@ -455,6 +456,13 @@ func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 	s.ackNoDelay = nodelay
 }
 
+// SetRapidFec toggles the rapid fec mode of/off
+func (s *UDPSession) SetRapidFec(enable bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.rapidFec = enable
+}
+
 // (deprecated)
 //
 // SetDUP duplicates udp packets for kcp output.
@@ -548,19 +556,19 @@ func (s *UDPSession) output(buf []byte) {
 	if s.block != nil {
 		s.calculateCRC32AndEncrypt(buf)
 		/*
-		s.nonce.Fill(buf[:nonceSize])
-		checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
-		binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
-		s.block.Encrypt(buf, buf)
+			s.nonce.Fill(buf[:nonceSize])
+			checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
+			binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
+			s.block.Encrypt(buf, buf)
 		*/
 
 		for k := range ecc {
 			s.calculateCRC32AndEncrypt(ecc[k])
 			/*
-			s.nonce.Fill(ecc[k][:nonceSize])
-			checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
-			binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
-			s.block.Encrypt(ecc[k], ecc[k])
+				s.nonce.Fill(ecc[k][:nonceSize])
+				checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
+				binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
+				s.block.Encrypt(ecc[k], ecc[k])
 			*/
 		}
 	}
@@ -570,27 +578,30 @@ func (s *UDPSession) output(buf []byte) {
 	for i := 0; i < s.dup+1; i++ {
 		s.append2Queue(buf)
 		/*
-		bts := xmitBuf.Get().([]byte)[:len(buf)]
-		copy(bts, buf)
-		msg.Buffers = [][]byte{bts}
-		msg.Addr = s.remote
-		s.txqueue = append(s.txqueue, msg)
+			bts := xmitBuf.Get().([]byte)[:len(buf)]
+			copy(bts, buf)
+			msg.Buffers = [][]byte{bts}
+			msg.Addr = s.remote
+			s.txqueue = append(s.txqueue, msg)
 		*/
 	}
 
 	for k := range ecc {
 		s.append2Queue(ecc[k])
 		/*
-		bts := xmitBuf.Get().([]byte)[:len(ecc[k])]
-		copy(bts, ecc[k])
-		msg.Buffers = [][]byte{bts}
-		msg.Addr = s.remote
-		s.txqueue = append(s.txqueue, msg)
+			bts := xmitBuf.Get().([]byte)[:len(ecc[k])]
+			copy(bts, ecc[k])
+			msg.Buffers = [][]byte{bts}
+			msg.Addr = s.remote
+			s.txqueue = append(s.txqueue, msg)
 		*/
 	}
 }
 
 func (s *UDPSession) forceFecEncode() {
+	if s.fecEncoder == nil {
+		return
+	}
 	pb, ps := s.fecEncoder.forceEncode()
 	if pb == nil || ps == nil {
 		return
@@ -641,7 +652,9 @@ func (s *UDPSession) updater() {
 			interval := time.Duration(s.kcp.flush(false)) * time.Millisecond
 			waitsnd := s.kcp.WaitSnd()
 			if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-				s.forceFecEncode()
+				if s.rapidFec {
+					s.forceFecEncode()
+				}
 				s.notifyWriteEvent()
 			}
 
