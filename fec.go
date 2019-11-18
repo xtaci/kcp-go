@@ -72,14 +72,13 @@ func newFECDecoder(rxlimit, dataShards, parityShards int) *fecDecoder {
 	return dec
 }
 
-// decode a fec packet
-func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
+func (dec *fecDecoder) insertFecPacket(in fecPacket) (int, fecPacket) {
 	// insertion
 	n := len(dec.rx) - 1
 	insertIdx := 0
 	for i := n; i >= 0; i-- {
 		if in.seqid() == dec.rx[i].seqid() { // de-duplicate
-			return nil
+			return -1, nil
 		} else if _itimediff(in.seqid(), dec.rx[i].seqid()) > 0 { // insertion
 			insertIdx = i + 1
 			break
@@ -98,6 +97,31 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		dec.rx = append(dec.rx, fecElement{})
 		copy(dec.rx[insertIdx+1:], dec.rx[insertIdx:]) // shift right
 		dec.rx[insertIdx] = elem
+	}
+
+	return insertIdx, pkt
+}
+
+// decode a fec packet
+func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
+	var insertIdx int
+	var pkt fecPacket
+	// fill padding if any padding received
+	if in.flag() == typePadding {
+		seqStart := binary.LittleEndian.Uint32(in.data()[2:])
+		seqEnd := binary.LittleEndian.Uint32(in.data()[6:])
+		for i := seqStart; i <= seqEnd; i++ {
+			binary.LittleEndian.PutUint32(in, i)
+			_, temporaryPkt := dec.insertFecPacket(in)
+			if temporaryPkt != nil {
+				pkt = temporaryPkt
+			}
+		}
+		if pkt == nil {
+			return nil
+		}
+	} else {
+		insertIdx, pkt = dec.insertFecPacket(in)
 	}
 
 	// shard range for current packet
@@ -301,14 +325,21 @@ func (enc *fecEncoder) forceEncode() (paddingBuffers [][]byte, ps [][]byte) {
 	var padding []byte
 	var paddingSize int
 	paddingIndex := 0
-	for i := enc.shardCount; i < enc.dataShards; i++ {
-		padding, paddingSize = enc.makePadding()
+
+	seqStart := enc.next
+	padding2MakeCount := uint32(enc.dataShards) - uint32(enc.shardCount)
+	seqEnd := seqStart + padding2MakeCount - 1
+
+	for i := seqStart; i <= seqEnd; i++ {
+		padding, paddingSize = enc.makePadding(i, seqStart, seqEnd)
 		paddingBuffers[paddingIndex] = padding
 		enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:paddingSize]
 		copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], padding[enc.payloadOffset:])
 		enc.shardCount++
 		paddingIndex++
 	}
+
+	enc.next = seqEnd + 1
 
 	return paddingBuffers, enc.doEncode(paddingSize)
 }
@@ -364,12 +395,19 @@ func (enc *fecEncoder) markParity(data []byte) {
 	enc.next = (enc.next + 1) % enc.paws
 }
 
-func (enc *fecEncoder) makePadding() ([]byte, int) {
-	buffer := make([]byte, enc.payloadOffset+2+IKCP_OVERHEAD)
+func (enc *fecEncoder) makePadding(seq uint32, seqStart uint32, seqEnd uint32) ([]byte, int) {
+	buffer := make([]byte, enc.payloadOffset+2+IKCP_OVERHEAD+8)
 	data := buffer[enc.headerOffset:]
-	binary.LittleEndian.PutUint32(data, enc.next)
+	binary.LittleEndian.PutUint32(data, seq)
 	binary.LittleEndian.PutUint16(data[4:], typePadding)
 	binary.LittleEndian.PutUint16(buffer[enc.payloadOffset:], uint16(len(buffer[enc.payloadOffset:])))
-	enc.next++
+	enc.fillSeqRange(buffer, seqStart, seqEnd)
 	return buffer, len(buffer)
+
+}
+
+func (enc *fecEncoder) fillSeqRange(buffer[] byte, start uint32, end uint32) {
+	payload := buffer[enc.payloadOffset + 2:]
+	binary.LittleEndian.PutUint32(payload, start)
+	binary.LittleEndian.PutUint32(payload[4:], end)
 }
