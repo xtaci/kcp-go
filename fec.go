@@ -406,8 +406,8 @@ func (enc *fecEncoder) makePadding(seq uint32, seqStart uint32, seqEnd uint32) (
 
 }
 
-func (enc *fecEncoder) fillSeqRange(buffer[] byte, start uint32, end uint32) {
-	payload := buffer[enc.payloadOffset + 2:]
+func (enc *fecEncoder) fillSeqRange(buffer []byte, start uint32, end uint32) {
+	payload := buffer[enc.payloadOffset+2:]
 	binary.LittleEndian.PutUint32(payload, start)
 	binary.LittleEndian.PutUint32(payload[4:], end)
 }
