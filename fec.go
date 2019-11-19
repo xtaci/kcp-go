@@ -318,7 +318,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
 	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
 	enc.shardCount++
-	if enc.shardCount == 1 {
+	if enc.shardCount == 1 && enc.forceEncodeMinInterval > 0 {
 		enc.forceEncodeAvailableAt = time.Now().UnixNano() + enc.forceEncodeMinInterval
 	}
 
