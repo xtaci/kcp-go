@@ -3,6 +3,7 @@ package kcp
 import (
 	"encoding/binary"
 	"sync/atomic"
+	"time"
 
 	"github.com/klauspost/reedsolomon"
 )
@@ -256,6 +257,9 @@ type (
 		headerOffset  int // FEC header offset
 		payloadOffset int // FEC payload offset
 
+		forceEncodeMinInterval int64
+		forceEncodeAvailableAt int64
+
 		// caches
 		shardCache  [][]byte
 		encodeCache [][]byte
@@ -296,6 +300,10 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 	return enc
 }
 
+func (enc *fecEncoder) setForceEncodeMinInterval(interval time.Duration) {
+	enc.forceEncodeMinInterval = int64(interval)
+}
+
 // encodes the packet, outputs parity shards if we have collected quorum datashards
 // notice: the contents of 'ps' will be re-written in successive calling
 func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
@@ -310,12 +318,18 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
 	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
 	enc.shardCount++
+	if enc.shardCount == 1 {
+		enc.forceEncodeAvailableAt = time.Now().UnixNano() + enc.forceEncodeMinInterval
+	}
 
 	return enc.doEncode(sz)
 }
 
 func (enc *fecEncoder) forceEncode() (paddingBuffers [][]byte, ps [][]byte) {
 	if enc.shardCount == 0 {
+		return
+	}
+	if enc.forceEncodeAvailableAt > time.Now().UnixNano() {
 		return
 	}
 

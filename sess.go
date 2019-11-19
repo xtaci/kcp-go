@@ -463,6 +463,12 @@ func (s *UDPSession) SetRapidFec(enable bool) {
 	s.rapidFec = enable
 }
 
+func (s *UDPSession) SetRapidFecMinInterval(duration time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fecEncoder.setForceEncodeMinInterval(duration)
+}
+
 // (deprecated)
 //
 // SetDUP duplicates udp packets for kcp output.
