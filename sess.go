@@ -368,12 +368,12 @@ func (s *UDPSession) Close() error {
 		if s.l != nil { // belongs to listener
 			s.l.closeSession(s.remote)
 			return nil
-		} else { // client socket close
-			return s.conn.Close()
 		}
-	} else {
-		return errors.WithStack(io.ErrClosedPipe)
+
+		// client socket close
+		return s.conn.Close()
 	}
+	return errors.WithStack(io.ErrClosedPipe)
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
@@ -770,6 +770,24 @@ type (
 	}
 )
 
+// extract conv and sn from packet
+func (l *Listener) parsePacket(data []byte) (convValid bool, conv uint32, sn uint32) {
+	headerOffset := 0
+	if l.fecDecoder != nil {
+		isfec := binary.LittleEndian.Uint16(data[4:])
+		if isfec != typeData {
+			return
+		}
+		headerOffset = fecHeaderSizePlus2
+	}
+
+	convValid = true
+	conv = binary.LittleEndian.Uint32(data[headerOffset:])
+	// 12 == sn offset from raw kcp header
+	sn = binary.LittleEndian.Uint32(data[headerOffset+12:])
+	return
+}
+
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	dataValid := false
@@ -789,35 +807,28 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 
 	if dataValid {
 		l.sessionLock.Lock()
-		s, ok := l.sessions[addr.String()]
+		s := l.sessions[addr.String()]
 		l.sessionLock.Unlock()
 
-		if !ok { // new address:port
-			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
-				var conv uint32
-				convValid := false
-				if l.fecDecoder != nil {
-					isfec := binary.LittleEndian.Uint16(data[4:])
-					if isfec == typeData {
-						conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
-						convValid = true
-					}
-				} else {
-					conv = binary.LittleEndian.Uint32(data)
-					convValid = true
-				}
-
-				if convValid { // creates a new session only if the 'conv' field in kcp is accessible
-					s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, addr, l.block)
-					s.kcpInput(data)
-					l.sessionLock.Lock()
-					l.sessions[addr.String()] = s
-					l.sessionLock.Unlock()
-					l.chAccepts <- s
-				}
+		convValid, conv, sn := l.parsePacket(data)
+		if s != nil {
+			if !convValid || conv == s.kcp.conv {
+				s.kcpInput(data)
+			} else if sn == 0 { // first packet of a new kcp session
+				s.Close()
+				s = nil
 			}
-		} else {
-			s.kcpInput(data)
+		}
+
+		if s == nil && convValid && sn == 0 { // new address:port or new session
+			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
+				s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, addr, l.block)
+				s.kcpInput(data)
+				l.sessionLock.Lock()
+				l.sessions[addr.String()] = s
+				l.sessionLock.Unlock()
+				l.chAccepts <- s
+			}
 		}
 	}
 }
@@ -928,9 +939,8 @@ func (l *Listener) Close() error {
 
 	if once {
 		return l.conn.Close()
-	} else {
-		return errors.WithStack(io.ErrClosedPipe)
 	}
+	return errors.WithStack(io.ErrClosedPipe)
 }
 
 // closeSession notify the listener that a session has closed
