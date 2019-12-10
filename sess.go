@@ -820,7 +820,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 			}
 		}
 
-		if s == nil && convValid && sn == 0 { // new address:port or new session
+		if s == nil && convValid { // new address:port or new session
 			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
 				s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, addr, l.block)
 				s.kcpInput(data)
