@@ -792,21 +792,33 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		s, ok := l.sessions[addr.String()]
 		l.sessionLock.Unlock()
 
-		if !ok { // new address:port
-			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
-				var conv uint32
-				convValid := false
-				if l.fecDecoder != nil {
-					isfec := binary.LittleEndian.Uint16(data[4:])
-					if isfec == typeData {
-						conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
-						convValid = true
-					}
-				} else {
-					conv = binary.LittleEndian.Uint32(data)
-					convValid = true
-				}
+		var conv, sn uint32
+		convValid := false
+		if l.fecDecoder != nil {
+			isfec := binary.LittleEndian.Uint16(data[4:])
+			if isfec == typeData {
+				conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+				// 12 == sn offset from raw kcp header
+				sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+12:])
+				convValid = true
+			}
+		} else {
+			conv = binary.LittleEndian.Uint32(data)
+			sn = binary.LittleEndian.Uint32(data[12:])
+			convValid = true
+		}
 
+		if ok { // new address:port
+			if !convValid || conv == s.kcp.conv {
+				s.kcpInput(data)
+			} else if sn == 0 {
+				s.Close()
+				s = nil
+			}
+		}
+
+		if s == nil && convValid {
+			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
 				if convValid { // creates a new session only if the 'conv' field in kcp is accessible
 					s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, addr, l.block)
 					s.kcpInput(data)
@@ -816,8 +828,6 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 					l.chAccepts <- s
 				}
 			}
-		} else {
-			s.kcpInput(data)
 		}
 	}
 }
