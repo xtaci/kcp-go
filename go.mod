@@ -1,4 +1,4 @@
-module github.com/xtaci/kcp-go
+module github.com/xtaci/kcp-go/v5
 
 require (
 	github.com/klauspost/cpuid v1.2.2 // indirect
