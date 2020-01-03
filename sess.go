@@ -49,7 +49,8 @@ var (
 
 var (
 	// a system-wide packet buffer shared among sending, receiving and FEC
-	// to mitigate high-frequency memory allocation for packets
+	// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
+	// is aligned to 64bit
 	xmitBuf sync.Pool
 )
 
