@@ -330,7 +330,7 @@ func encrypt8(block cipher.Block, dst, src, buf []byte) {
 		base += 8
 		fallthrough
 	case 0:
-		xor.BytesA(dst[base:], src[base:], tbl)
+		xorBytes(dst[base:], src[base:], tbl)
 	}
 }
 
@@ -409,7 +409,7 @@ func encrypt16(block cipher.Block, dst, src, buf []byte) {
 		base += 16
 		fallthrough
 	case 0:
-		xor.BytesA(dst[base:], src[base:], tbl)
+		xorBytes(dst[base:], src[base:], tbl)
 	}
 }
 
@@ -500,7 +500,7 @@ func encryptVariant(block cipher.Block, dst, src, buf []byte) {
 		base += blocksize
 		fallthrough
 	case 0:
-		xor.BytesA(dst[base:], src[base:], tbl)
+		xorBytes(dst[base:], src[base:], tbl)
 	}
 }
 
@@ -602,7 +602,7 @@ func decrypt8(block cipher.Block, dst, src, buf []byte) {
 		base += 8
 		fallthrough
 	case 0:
-		xor.BytesA(dst[base:], src[base:], tbl)
+		xorBytes(dst[base:], src[base:], tbl)
 	}
 }
 
@@ -688,7 +688,7 @@ func decrypt16(block cipher.Block, dst, src, buf []byte) {
 		base += 16
 		fallthrough
 	case 0:
-		xor.BytesA(dst[base:], src[base:], tbl)
+		xorBytes(dst[base:], src[base:], tbl)
 	}
 }
 
@@ -787,6 +787,22 @@ func decryptVariant(block cipher.Block, dst, src, buf []byte) {
 		base += blocksize
 		fallthrough
 	case 0:
-		xor.BytesA(dst[base:], src[base:], tbl)
+		xorBytes(dst[base:], src[base:], tbl)
 	}
+}
+
+// per bytes xors
+func xorBytes(dst, a, b []byte) int {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	if n == 0 {
+		return 0
+	}
+
+	for i := 0; i < n; i++ {
+		dst[i] = a[i] ^ b[i]
+	}
+	return n
 }
