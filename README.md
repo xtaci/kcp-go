@@ -92,17 +92,16 @@ SIZE:
 
 ## Benchmark
 ```
-  Model Name:	MacBook Pro
-  Model Identifier:	MacBookPro14,1
-  Processor Name:	Intel Core i5
-  Processor Speed:	3.1 GHz
-  Number of Processors:	1
-  Total Number of Cores:	2
-  L2 Cache (per Core):	256 KB
-  L3 Cache:	4 MB
-  Memory:	8 GB
-```
-```
+Model Name:	MacBook Pro
+Model Identifier:	MacBookPro14,1
+Processor Name:	Intel Core i5
+Processor Speed:	3.1 GHz
+Number of Processors:	1
+Total Number of Cores:	2
+L2 Cache (per Core):	256 KB
+L3 Cache:	4 MB
+Memory:	8 GB
+
 $ go test -v -run=^$ -bench .
 beginning tests, encryption:salsa20, fec:10/3
 goos: darwin
@@ -140,6 +139,57 @@ BenchmarkSinkSpeed256K-4       	     500	   2373354 ns/op	 220.91 MB/s	  166332 
 BenchmarkSinkSpeed1M-4         	     300	   5117927 ns/op	 204.88 MB/s	  310378 B/op	    6988 allocs/op
 PASS
 ok  	github.com/xtaci/kcp-go	50.349s
+```
+
+```
+➜  kcp-go git:(master) cat /proc/cpuinfo
+processor	: 0
+model name	: ARMv7 Processor rev 3 (v7l)
+BogoMIPS	: 108.00
+Features	: half thumb fastmult vfp edsp neon vfpv3 tls vfpv4 idiva idivt vfpd32 lpae evtstrm crc32
+CPU implementer	: 0x41
+CPU architecture: 7
+CPU variant	: 0x0
+CPU part	: 0xd08
+CPU revision	: 3
+
+➜  kcp-go git:(master) go test -run=^$ -bench .
+2020/01/03 17:01:20 beginning tests, encryption:salsa20, fec:10/3
+goos: linux
+goarch: arm
+pkg: github.com/xtaci/kcp-go/v5
+BenchmarkSM4-4                 	   10000	    101301 ns/op	  29.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES128-4              	   20000	     76029 ns/op	  39.46 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES192-4              	   20000	     85112 ns/op	  35.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES256-4              	   20000	     93801 ns/op	  31.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTEA-4                 	   50000	     37356 ns/op	  80.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXOR-4                 	   50000	     32239 ns/op	  93.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBlowfish-4            	   20000	     65694 ns/op	  45.67 MB/s	       0 B/op	       0 allocs/op
+BenchmarkNone-4                	 3000000	       521 ns/op	5757.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCast5-4               	   20000	     72051 ns/op	  41.64 MB/s	       0 B/op	       0 allocs/op
+Benchmark3DES-4                	    5000	    398459 ns/op	   7.53 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTwofish-4             	    5000	    340181 ns/op	   8.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXTEA-4                	   10000	    120154 ns/op	  24.97 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSalsa20-4             	   50000	     37164 ns/op	  80.72 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCRC32-4               	 1000000	      1737 ns/op	 589.43 MB/s
+BenchmarkCsprngSystem-4        	 1000000	      2196 ns/op	   7.28 MB/s
+BenchmarkCsprngMD5-4           	 2000000	       818 ns/op	  19.54 MB/s
+BenchmarkCsprngSHA1-4          	 2000000	       860 ns/op	  23.25 MB/s
+BenchmarkCsprngNonceMD5-4      	 2000000	       891 ns/op	  17.94 MB/s
+BenchmarkCsprngNonceAES128-4   	 5000000	       326 ns/op	  49.05 MB/s
+BenchmarkFECDecode-4           	  200000	      9468 ns/op	 158.41 MB/s	     140 B/op	       1 allocs/op
+BenchmarkFECEncode-4           	  100000	     12719 ns/op	 117.93 MB/s	      11 B/op	       0 allocs/op
+BenchmarkFlush-4               	  100000	     22944 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEchoSpeed4K-4         	    2000	    992565 ns/op	   4.13 MB/s	   12427 B/op	     425 allocs/op
+BenchmarkEchoSpeed64K-4        	     100	  10391474 ns/op	   6.31 MB/s	  127564 B/op	    3835 allocs/op
+BenchmarkEchoSpeed512K-4       	      10	 110521615 ns/op	   4.74 MB/s	 1492676 B/op	   26791 allocs/op
+BenchmarkEchoSpeed1M-4         	       5	 298269651 ns/op	   3.52 MB/s	 3576904 B/op	   60760 allocs/op
+BenchmarkSinkSpeed4K-4         	   20000	     94335 ns/op	  43.42 MB/s	    3971 B/op	      99 allocs/op
+BenchmarkSinkSpeed64K-4        	    2000	   1164323 ns/op	  56.29 MB/s	   45752 B/op	    1080 allocs/op
+BenchmarkSinkSpeed256K-4       	     100	  12246407 ns/op	  42.81 MB/s	  449397 B/op	    9792 allocs/op
+BenchmarkSinkSpeed1M-4         	     100	  21781137 ns/op	  48.14 MB/s	  872098 B/op	   17772 allocs/op
+PASS
+ok  	github.com/xtaci/kcp-go/v5	60.906s
 ```
 
 
