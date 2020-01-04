@@ -26,6 +26,7 @@ func (h *timedFuncHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
 	x := old[n-1]
+	old[n-1].execute = nil // avoid memory leak
 	*h = old[0 : n-1]
 	return x
 }
@@ -103,12 +104,16 @@ func (ts *TimedSched) prepend() {
 			}
 			tasks = tasks[:len(ts.prependTasks)]
 			copy(tasks, ts.prependTasks)
+			for k := range ts.prependTasks {
+				ts.prependTasks[k].execute = nil // avoid memory leak
+			}
 			ts.prependTasks = ts.prependTasks[:0]
 			ts.prependLock.Unlock()
 
 			for k := range tasks {
 				select {
 				case ts.chTask <- tasks[k]:
+					tasks[k].execute = nil // avoid memory leak
 				case <-ts.die:
 					return
 				}
