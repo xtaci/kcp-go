@@ -15,15 +15,13 @@ type timedFunc struct {
 	ts      time.Time
 }
 
-// a heap for sorted time
+// a heap for sorted timed function
 type timedFuncHeap []timedFunc
 
-func (h timedFuncHeap) Len() int           { return len(h) }
-func (h timedFuncHeap) Less(i, j int) bool { return h[i].ts.Before(h[j].ts) }
-func (h timedFuncHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-
+func (h timedFuncHeap) Len() int            { return len(h) }
+func (h timedFuncHeap) Less(i, j int) bool  { return h[i].ts.Before(h[j].ts) }
+func (h timedFuncHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
 func (h *timedFuncHeap) Push(x interface{}) { *h = append(*h, x.(timedFunc)) }
-
 func (h *timedFuncHeap) Pop() interface{} {
 	old := *h
 	n := len(old)
@@ -46,7 +44,7 @@ type TimedSched struct {
 	die     chan struct{}
 }
 
-// NewTimedSched creates a parallel scheduler with parameters parallel and duration
+// NewTimedSched creates a parallel-scheduler with given parallelization
 func NewTimedSched(parallel int) *TimedSched {
 	ts := new(TimedSched)
 	ts.chTask = make(chan timedFunc)
@@ -67,13 +65,12 @@ func (ts *TimedSched) sched() {
 		select {
 		case task := <-ts.chTask:
 			now := time.Now()
-			// delayed! execute immediately
 			if now.After(task.ts) {
+				// already delayed! execute immediately
 				task.execute()
 			} else {
 				heap.Push(&tasks, task)
-				// activate timer if timer has hibernated
-				// due to no tasks.
+				// activate timer if timer has hibernated due to 0 tasks.
 				if tasks.Len() == 1 {
 					timer.Reset(task.ts.Sub(now))
 				}
@@ -95,12 +92,18 @@ func (ts *TimedSched) sched() {
 }
 
 func (ts *TimedSched) prepend() {
+	var tasks []timedFunc
 	for {
 		select {
 		case <-ts.chPrependNotify:
 			ts.prependLock.Lock()
-			tasks := ts.prependTasks
-			ts.prependTasks = nil
+			// keep cap to reuse slice
+			if cap(tasks) < cap(ts.prependTasks) {
+				tasks = make([]timedFunc, 0, cap(ts.prependTasks))
+			}
+			tasks = tasks[:len(ts.prependTasks)]
+			copy(tasks, ts.prependTasks)
+			ts.prependTasks = ts.prependTasks[:0]
 			ts.prependLock.Unlock()
 
 			for k := range tasks {
@@ -110,6 +113,7 @@ func (ts *TimedSched) prepend() {
 					return
 				}
 			}
+			tasks = tasks[:0]
 		case <-ts.die:
 			return
 		}
@@ -121,6 +125,7 @@ func (ts *TimedSched) Put(f func(), duration time.Duration) {
 	ts.prependLock.Lock()
 	ts.prependTasks = append(ts.prependTasks, timedFunc{f, time.Now().Add(duration)})
 	ts.prependLock.Unlock()
+
 	select {
 	case ts.chPrependNotify <- struct{}{}:
 	default:
