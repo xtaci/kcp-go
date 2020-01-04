@@ -183,7 +183,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	// start per-session updater
-	go sess.updater()
+	SystemTimedSched.Put(sess.update)
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -579,25 +579,21 @@ func (s *UDPSession) output(buf []byte) {
 	}
 }
 
-// sess updater to trigger protocol
-func (s *UDPSession) updater() {
-	timer := time.NewTimer(0)
-	for {
-		select {
-		case <-timer.C:
-			s.mu.Lock()
-			interval := time.Duration(s.kcp.flush(false)) * time.Millisecond
-			waitsnd := s.kcp.WaitSnd()
-			if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-				s.notifyWriteEvent()
-			}
-			s.uncork()
-			s.mu.Unlock()
-			timer.Reset(interval)
-		case <-s.die:
-			timer.Stop()
-			return
+// sess update to trigger protocol
+func (s *UDPSession) update() {
+	select {
+	case <-s.die:
+	default:
+		s.mu.Lock()
+		s.kcp.flush(false)
+		waitsnd := s.kcp.WaitSnd()
+		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
+			s.notifyWriteEvent()
 		}
+		s.uncork()
+		s.mu.Unlock()
+		// self-synchronized timed scheduling
+		SystemTimedSched.Put(s.update)
 	}
 }
 
