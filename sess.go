@@ -183,7 +183,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	// start per-session updater
-	SystemTimedSched.Put(sess.update)
+	SystemTimedSched.Put(sess.update, 0)
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -585,7 +585,7 @@ func (s *UDPSession) update() {
 	case <-s.die:
 	default:
 		s.mu.Lock()
-		s.kcp.flush(false)
+		interval := s.kcp.flush(false)
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
 			s.notifyWriteEvent()
@@ -593,7 +593,7 @@ func (s *UDPSession) update() {
 		s.uncork()
 		s.mu.Unlock()
 		// self-synchronized timed scheduling
-		SystemTimedSched.Put(s.update)
+		SystemTimedSched.Put(s.update, time.Duration(interval)*time.Millisecond)
 	}
 }
 
