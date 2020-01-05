@@ -125,10 +125,10 @@ func (ts *TimedSched) prepend() {
 	}
 }
 
-// Put a function awaiting to be executed
-func (ts *TimedSched) Put(f func(), duration time.Duration) {
+// Put a function 'f' awaiting to be executed at 'deadline'
+func (ts *TimedSched) Put(f func(), deadline time.Time) {
 	ts.prependLock.Lock()
-	ts.prependTasks = append(ts.prependTasks, timedFunc{f, time.Now().Add(duration)})
+	ts.prependTasks = append(ts.prependTasks, timedFunc{f, deadline})
 	ts.prependLock.Unlock()
 
 	select {
