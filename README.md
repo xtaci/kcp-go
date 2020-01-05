@@ -92,6 +92,7 @@ SIZE:
 
 ## Benchmark
 ```
+===
 Model Name:	MacBook Pro
 Model Identifier:	MacBookPro14,1
 Processor Name:	Intel Core i5
@@ -101,6 +102,7 @@ Total Number of Cores:	2
 L2 Cache (per Core):	256 KB
 L3 Cache:	4 MB
 Memory:	8 GB
+===
 
 $ go test -v -run=^$ -bench .
 beginning tests, encryption:salsa20, fec:10/3
@@ -142,6 +144,8 @@ ok  	github.com/xtaci/kcp-go	50.349s
 ```
 
 ```
+=== Raspberry Pi 4 ===
+
 ➜  kcp-go git:(master) cat /proc/cpuinfo
 processor	: 0
 model name	: ARMv7 Processor rev 3 (v7l)
