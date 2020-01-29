@@ -691,7 +691,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	for i, ack := range kcp.acklist {
 		makeSpace(IKCP_OVERHEAD)
 		// filter jitters caused by bufferbloat
-		if ack.sn >= kcp.rcv_nxt || len(kcp.acklist)-1 == i {
+		if _itimediff(ack.sn, kcp.rcv_nxt) >= 0 || len(kcp.acklist)-1 == i {
 			seg.sn, seg.ts = ack.sn, ack.ts
 			ptr = seg.encode(ptr)
 		}
