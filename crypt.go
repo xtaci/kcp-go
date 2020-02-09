@@ -249,7 +249,7 @@ func encrypt(block cipher.Block, dst, src, buf []byte) {
 	case 16:
 		encrypt16(block, dst, src, buf)
 	default:
-		encryptVariant(block, dst, src, buf)
+		panic("unsupported cipher block size")
 	}
 }
 
@@ -413,97 +413,6 @@ func encrypt16(block cipher.Block, dst, src, buf []byte) {
 	}
 }
 
-func encryptVariant(block cipher.Block, dst, src, buf []byte) {
-	blocksize := block.BlockSize()
-	tbl := buf[:blocksize]
-	block.Encrypt(tbl, initialVector)
-	n := len(src) / blocksize
-	base := 0
-	repeat := n / 8
-	left := n % 8
-	for i := 0; i < repeat; i++ {
-		// 1
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 2
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 3
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 4
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 5
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 6
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 7
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-
-		// 8
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-	}
-
-	switch left {
-	case 7:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 6:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 5:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 4:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 3:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 2:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 1:
-		xor.BytesB(dst[base:], src[base:], tbl)
-		block.Encrypt(tbl, dst[base:])
-		base += blocksize
-		fallthrough
-	case 0:
-		xorBytes(dst[base:], src[base:], tbl)
-	}
-}
-
 // decryption
 func decrypt(block cipher.Block, dst, src, buf []byte) {
 	switch block.BlockSize() {
@@ -512,7 +421,7 @@ func decrypt(block cipher.Block, dst, src, buf []byte) {
 	case 16:
 		decrypt16(block, dst, src, buf)
 	default:
-		decryptVariant(block, dst, src, buf)
+		panic("unsupported cipher block size")
 	}
 }
 
@@ -686,105 +595,6 @@ func decrypt16(block cipher.Block, dst, src, buf []byte) {
 		xor.Bytes16Align(dst[base:], src[base:], tbl)
 		tbl, next = next, tbl
 		base += 16
-		fallthrough
-	case 0:
-		xorBytes(dst[base:], src[base:], tbl)
-	}
-}
-
-func decryptVariant(block cipher.Block, dst, src, buf []byte) {
-	blocksize := block.BlockSize()
-	tbl := buf[:blocksize]
-	next := buf[blocksize:]
-	block.Encrypt(tbl, initialVector)
-	n := len(src) / blocksize
-	base := 0
-	repeat := n / 8
-	left := n % 8
-	for i := 0; i < repeat; i++ {
-		// 1
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		base += blocksize
-
-		// 2
-		block.Encrypt(tbl, src[base:])
-		xor.BytesB(dst[base:], src[base:], next)
-		base += blocksize
-
-		// 3
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		base += blocksize
-
-		// 4
-		block.Encrypt(tbl, src[base:])
-		xor.BytesB(dst[base:], src[base:], next)
-		base += blocksize
-
-		// 5
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		base += blocksize
-
-		// 6
-		block.Encrypt(tbl, src[base:])
-		xor.BytesB(dst[base:], src[base:], next)
-		base += blocksize
-
-		// 7
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		base += blocksize
-
-		// 8
-		block.Encrypt(tbl, src[base:])
-		xor.BytesB(dst[base:], src[base:], next)
-		base += blocksize
-	}
-
-	switch left {
-	case 7:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
-		fallthrough
-	case 6:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
-		fallthrough
-	case 5:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
-		fallthrough
-	case 4:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
-		fallthrough
-	case 3:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
-		fallthrough
-	case 2:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
-		fallthrough
-	case 1:
-		block.Encrypt(next, src[base:])
-		xor.BytesB(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
-		base += blocksize
 		fallthrough
 	case 0:
 		xorBytes(dst[base:], src[base:], tbl)
