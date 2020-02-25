@@ -635,10 +635,11 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					}
 					kcp.incr += (mss*mss)/kcp.incr + (mss / 16)
 					if (kcp.cwnd+1)*mss <= kcp.incr {
-						if mss == 0 {
-							mss = 1
+						if mss > 0 {
+							kcp.cwnd = (kcp.incr + mss - 1) / mss
+						} else {
+							kcp.cwnd = kcp.incr + mss - 1
 						}
-						kcp.cwnd = (kcp.incr + mss - 1) / mss
 					}
 				}
 				if kcp.cwnd > kcp.rmt_wnd {
