@@ -71,10 +71,8 @@ func (ts *TimedSched) sched() {
 				task.execute()
 			} else {
 				heap.Push(&tasks, task)
-				// activate timer if timer has hibernated due to 0 tasks.
-				if tasks.Len() == 1 {
-					timer.Reset(task.ts.Sub(now))
-				}
+				// reset timer to trigger based on the top element
+				timer.Reset(tasks[0].ts.Sub(now))
 			}
 		case <-timer.C:
 			for tasks.Len() > 0 {
