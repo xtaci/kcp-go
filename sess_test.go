@@ -559,3 +559,144 @@ func TestListenerClose(t *testing.T) {
 		t.Fail()
 	}
 }
+
+// A wrapper for net.PacketConn that remembers when Close has been called.
+type closedFlagPacketConn struct {
+	net.PacketConn
+	Closed bool
+}
+
+func (c *closedFlagPacketConn) Close() error {
+	c.Closed = true
+	return c.PacketConn.Close()
+}
+
+func newClosedFlagPacketConn(c net.PacketConn) *closedFlagPacketConn {
+	return &closedFlagPacketConn{c, false}
+}
+
+// Listener should close a net.PacketConn that it created.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestListenerOwnedPacketConn(t *testing.T) {
+	// ListenWithOptions creates its own net.PacketConn.
+	l, err := ListenWithOptions("127.0.0.1:0", nil, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+	// Replace the internal net.PacketConn with one that remembers when it
+	// has been closed.
+	pconn := newClosedFlagPacketConn(l.conn)
+	l.conn = pconn
+
+	if pconn.Closed {
+		t.Fatal("owned PacketConn closed before Listener.Close()")
+	}
+
+	err = l.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if !pconn.Closed {
+		t.Fatal("owned PacketConn not closed after Listener.Close()")
+	}
+}
+
+// Listener should not close a net.PacketConn that it did not create.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestListenerNonOwnedPacketConn(t *testing.T) {
+	// Create a net.PacketConn not owned by the Listener.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	// Make it remember when it has been closed.
+	pconn := newClosedFlagPacketConn(c)
+
+	l, err := ServeConn(nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed before Listener.Close()")
+	}
+
+	err = l.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed after Listener.Close()")
+	}
+}
+
+// UDPSession should close a net.PacketConn that it created.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestUDPSessionOwnedPacketConn(t *testing.T) {
+	l := sinkServer(0)
+	defer l.Close()
+
+	// DialWithOptions creates its own net.PacketConn.
+	client, err := DialWithOptions(l.Addr().String(), nil, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+	// Replace the internal net.PacketConn with one that remembers when it
+	// has been closed.
+	pconn := newClosedFlagPacketConn(client.conn)
+	client.conn = pconn
+
+	if pconn.Closed {
+		t.Fatal("owned PacketConn closed before UDPSession.Close()")
+	}
+
+	err = client.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if !pconn.Closed {
+		t.Fatal("owned PacketConn not closed after UDPSession.Close()")
+	}
+}
+
+// UDPSession should not close a net.PacketConn that it did not create.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
+	l := sinkServer(0)
+	defer l.Close()
+
+	// Create a net.PacketConn not owned by the UDPSession.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	// Make it remember when it has been closed.
+	pconn := newClosedFlagPacketConn(c)
+
+	client, err := NewConn2(l.Addr(), nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed before UDPSession.Close()")
+	}
+
+	err = client.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed after UDPSession.Close()")
+	}
+}
