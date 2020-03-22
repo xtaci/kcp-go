@@ -74,9 +74,8 @@ func (ts *TimedSched) sched() {
 				// reset timer to trigger based on the top element
 				timer.Reset(tasks[0].ts.Sub(now))
 			}
-		case <-timer.C:
+		case now := <-timer.C:
 			for tasks.Len() > 0 {
-				now := time.Now()
 				if now.After(tasks[0].ts) {
 					heap.Pop(&tasks).(timedFunc).execute()
 				} else {
