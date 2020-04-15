@@ -4,6 +4,7 @@ import (
 	"container/heap"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -11,7 +12,7 @@ import (
 var SystemTimedSched *TimedSched = NewTimedSched(runtime.NumCPU())
 
 type timedFunc struct {
-	execute func()
+	execute func() int
 	ts      time.Time
 }
 
@@ -39,7 +40,8 @@ type TimedSched struct {
 	chPrependNotify chan struct{}
 
 	// tasks will be distributed through chTask
-	chTask chan timedFunc
+	chTasks []chan timedFunc
+	chTaskCount []int64
 
 	dieOnce sync.Once
 	die     chan struct{}
@@ -48,28 +50,35 @@ type TimedSched struct {
 // NewTimedSched creates a parallel-scheduler with given parallelization
 func NewTimedSched(parallel int) *TimedSched {
 	ts := new(TimedSched)
-	ts.chTask = make(chan timedFunc)
+	ts.chTasks = make([]chan timedFunc, parallel)
+	ts.chTaskCount = make([]int64, parallel)
 	ts.die = make(chan struct{})
 	ts.chPrependNotify = make(chan struct{}, 1)
 
 	for i := 0; i < parallel; i++ {
-		go ts.sched()
+		ts.chTasks[i] = make(chan timedFunc, 10240)
+		go ts.sched(i)
 	}
-	go ts.prepend()
+
 	return ts
 }
 
-func (ts *TimedSched) sched() {
+func (ts *TimedSched) sched(index int) {
 	var tasks timedFuncHeap
 	timer := time.NewTimer(0)
 	drained := false
 	for {
 		select {
-		case task := <-ts.chTask:
+		case task := <-ts.chTasks[index]:
 			now := time.Now()
 			if now.After(task.ts) {
 				// already delayed! execute immediately
-				task.execute()
+				if interval := task.execute(); interval > 0 {
+					task.ts = now.Add(time.Duration(interval)*time.Millisecond)
+					heap.Push(&tasks, task)
+				} else {
+					atomic.AddInt64(&ts.chTaskCount[index], -1)
+				}
 			} else {
 				heap.Push(&tasks, task)
 				// properly reset timer to trigger based on the top element
@@ -84,7 +93,13 @@ func (ts *TimedSched) sched() {
 			drained = true
 			for tasks.Len() > 0 {
 				if now.After(tasks[0].ts) {
-					heap.Pop(&tasks).(timedFunc).execute()
+					task := heap.Pop(&tasks).(timedFunc)
+					if interval := task.execute(); interval > 0 {
+						task.ts = now.Add(time.Duration(interval)*time.Millisecond)
+						heap.Push(&tasks, task)
+					} else {
+						atomic.AddInt64(&ts.chTaskCount[index], -1)
+					}
 				} else {
 					timer.Reset(tasks[0].ts.Sub(now))
 					drained = false
@@ -97,49 +112,20 @@ func (ts *TimedSched) sched() {
 	}
 }
 
-func (ts *TimedSched) prepend() {
-	var tasks []timedFunc
-	for {
-		select {
-		case <-ts.chPrependNotify:
-			ts.prependLock.Lock()
-			// keep cap to reuse slice
-			if cap(tasks) < cap(ts.prependTasks) {
-				tasks = make([]timedFunc, 0, cap(ts.prependTasks))
-			}
-			tasks = tasks[:len(ts.prependTasks)]
-			copy(tasks, ts.prependTasks)
-			for k := range ts.prependTasks {
-				ts.prependTasks[k].execute = nil // avoid memory leak
-			}
-			ts.prependTasks = ts.prependTasks[:0]
-			ts.prependLock.Unlock()
-
-			for k := range tasks {
-				select {
-				case ts.chTask <- tasks[k]:
-					tasks[k].execute = nil // avoid memory leak
-				case <-ts.die:
-					return
-				}
-			}
-			tasks = tasks[:0]
-		case <-ts.die:
-			return
+// Put a function 'f' awaiting to be executed at 'deadline'
+func (ts *TimedSched) Put(f func() int, deadline time.Time) {
+	index := 0
+	minc := int64(0)
+	for k,v := range ts.chTaskCount {
+		if v < minc {
+			index = k
+			minc = v
 		}
 	}
-}
 
-// Put a function 'f' awaiting to be executed at 'deadline'
-func (ts *TimedSched) Put(f func(), deadline time.Time) {
-	ts.prependLock.Lock()
-	ts.prependTasks = append(ts.prependTasks, timedFunc{f, deadline})
-	ts.prependLock.Unlock()
+	atomic.AddInt64(&ts.chTaskCount[index], 1)
 
-	select {
-	case ts.chPrependNotify <- struct{}{}:
-	default:
-	}
+	ts.chTasks[index] <- timedFunc{f, deadline}
 }
 
 // Close terminates this scheduler

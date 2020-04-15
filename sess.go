@@ -584,9 +584,10 @@ func (s *UDPSession) output(buf []byte) {
 }
 
 // sess update to trigger protocol
-func (s *UDPSession) update() {
+func (s *UDPSession) update() int {
 	select {
 	case <-s.die:
+		return -1
 	default:
 		s.mu.Lock()
 		interval := s.kcp.flush(false)
@@ -596,8 +597,7 @@ func (s *UDPSession) update() {
 		}
 		s.uncork()
 		s.mu.Unlock()
-		// self-synchronized timed scheduling
-		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
+		return int(interval)
 	}
 }
 
