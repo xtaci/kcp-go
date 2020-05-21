@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"encoding/binary"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -31,6 +32,24 @@ const (
 	IKCP_SN_OFFSET   = 12
 )
 
+const (
+	// maximum packet size
+	mtuLimit = 1500
+)
+
+var (
+	// a system-wide packet buffer shared among sending, receiving and FEC
+	// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
+	// is aligned to 64bit
+	xmitBuf sync.Pool
+)
+
+func init() {
+	xmitBuf.New = func() interface{} {
+		return make([]byte, mtuLimit)
+	}
+}
+
 // monotonic reference time point
 var refTime time.Time = time.Now()
 
@@ -38,7 +57,7 @@ var refTime time.Time = time.Now()
 func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
 
 // output_callback is a prototype which ought capture conn and call conn.Write
-type output_callback func(buf []byte, size int)
+type output_callback func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64)
 
 /* encode 8 bits unsigned int */
 func ikcp_encode8u(p []byte, c byte) []byte {
@@ -674,11 +693,15 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	buffer := kcp.buffer
 	ptr := buffer[kcp.reserved:] // keep n bytes untouched
 
+	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
+	var lostSegsOld, fastRetransSegsOld, earlyRetransSegsOld uint64
+
 	// makeSpace makes room for writing
 	makeSpace := func(space int) {
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
-			kcp.output(buffer, size)
+			kcp.output(buffer, size, lostSegs-lostSegsOld, fastRetransSegs-fastRetransSegsOld, earlyRetransSegs-earlyRetransSegsOld)
+			lostSegsOld, fastRetransSegsOld, earlyRetransSegsOld = lostSegs, fastRetransSegs, earlyRetransSegs
 			ptr = buffer[kcp.reserved:]
 		}
 	}
@@ -687,7 +710,8 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	flushBuffer := func() {
 		size := len(buffer) - len(ptr)
 		if size > kcp.reserved {
-			kcp.output(buffer, size)
+			kcp.output(buffer, size, lostSegs-lostSegsOld, fastRetransSegs-fastRetransSegsOld, earlyRetransSegs-earlyRetransSegsOld)
+			lostSegsOld, fastRetransSegsOld, earlyRetransSegsOld = lostSegs, fastRetransSegs, earlyRetransSegs
 		}
 	}
 
@@ -779,7 +803,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// check for retransmissions
 	current := currentMs()
-	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
 	ref := kcp.snd_buf[:len(kcp.snd_buf)] // for bounds check elimination

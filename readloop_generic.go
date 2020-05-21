@@ -2,10 +2,6 @@
 
 package kcp
 
-func (s *UDPSession) readLoop() {
+func (s *UDPTunnel) readLoop() {
 	s.defaultReadLoop()
-}
-
-func (l *Listener) monitor() {
-	l.defaultMonitor()
 }

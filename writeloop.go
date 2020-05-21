@@ -7,7 +7,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
+func (s *UDPTunnel) writeSingle(txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for k := range txqueue {
@@ -21,4 +21,15 @@ func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
 	}
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
+}
+
+func (s *UDPTunnel) defaultWriteLoop() {
+	s.mu.Lock()
+	txqueues := s.txqueues
+	s.txqueues = s.txqueues[:0]
+	s.mu.Unlock()
+
+	for _, txqueue := range txqueues {
+		s.writeSingle(txqueue)
+	}
 }
