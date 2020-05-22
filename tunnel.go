@@ -91,6 +91,12 @@ func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
 		return
 	}
 
+	select {
+	case <-s.die:
+		return errors.WithStack(io.ErrClosedPipe)
+	default:
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.txqueues = append(s.txqueues, txqueue)
@@ -110,6 +116,11 @@ func (s *UDPTunnel) Close() error {
 	})
 
 	if once {
+		s.mu.Lock()
+		s.ReleaseTX(s.txqueues)
+		s.txqueues = s.txqueues[:0]
+		s.mu.Unlock()
+
 		s.conn.Close()
 		return nil
 	} else {
@@ -117,16 +128,30 @@ func (s *UDPTunnel) Close() error {
 	}
 }
 
+func (s *UDPTunnel) IsClosed() bool {
+	select {
+	case <-s.die:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *UDPTunnel) ReleaseTX(txqueues [][]ipv4.Message) {
+	for _, txqueue := range txqueues {
+		for k := range txqueue {
+			xmitBuf.Put(txqueue[k].Buffers[0])
+			txqueue[k].Buffers = nil
+		}
+	}
+}
+
 func (s *UDPTunnel) notifyReadError(err error) {
-	s.socketReadErrorOnce.Do(func() {
-		s.socketReadError.Store(err)
-		close(s.chSocketReadError)
-	})
+	//!todo
+	//read错误，有可能需要直接Close
 }
 
 func (s *UDPTunnel) notifyWriteError(err error) {
-	s.socketWriteErrorOnce.Do(func() {
-		s.socketWriteError.Store(err)
-		close(s.chSocketWriteError)
-	})
+	//!todo
+	//得确认是目标的问题，还是自身的问题
 }

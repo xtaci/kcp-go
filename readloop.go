@@ -7,17 +7,17 @@ import (
 	gouuid "github.com/satori/go.uuid"
 )
 
-func (l *UDPTunnel) defaultReadLoop() {
+func (s *UDPTunnel) defaultReadLoop() {
 	buf := make([]byte, mtuLimit)
 	for {
-		if n, from, err := l.conn.ReadFrom(buf); err == nil {
+		if n, from, err := s.conn.ReadFrom(buf); err == nil {
 			if n >= gouuid.Size+IKCP_OVERHEAD {
-				l.Input(buf[:n], from)
+				s.Input(buf[:n], from)
 			} else {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			l.notifyReadError(errors.WithStack(err))
+			s.notifyReadError(errors.WithStack(err))
 			return
 		}
 	}

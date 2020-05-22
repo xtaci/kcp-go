@@ -19,17 +19,25 @@ func (s *UDPTunnel) writeSingle(txqueue []ipv4.Message) {
 			break
 		}
 	}
+
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
 
 func (s *UDPTunnel) defaultWriteLoop() {
-	s.mu.Lock()
-	txqueues := s.txqueues
-	s.txqueues = s.txqueues[:0]
-	s.mu.Unlock()
+	for {
+		if s.IsClosed() {
+			return
+		}
 
-	for _, txqueue := range txqueues {
-		s.writeSingle(txqueue)
+		s.mu.Lock()
+		txqueues := s.txqueues
+		s.txqueues = s.txqueues[:0]
+		s.mu.Unlock()
+
+		for _, txqueue := range txqueues {
+			s.writeSingle(txqueue)
+		}
+		s.ReleaseTX(txqueues)
 	}
 }

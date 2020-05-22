@@ -51,12 +51,19 @@ func (s *UDPTunnel) writeLoop() {
 		return
 	}
 
-	s.mu.Lock()
-	txqueues := s.txqueues
-	s.txqueues = s.txqueues[:0]
-	s.mu.Unlock()
+	for {
+		if s.IsClosed() {
+			return
+		}
 
-	for _, txqueue := range txqueues {
-		s.writeBatch(txqueue)
+		s.mu.Lock()
+		txqueues := s.txqueues
+		s.txqueues = s.txqueues[:0]
+		s.mu.Unlock()
+
+		for _, txqueue := range txqueues {
+			s.writeBatch(txqueue)
+		}
+		s.ReleaseTX(txqueues)
 	}
 }

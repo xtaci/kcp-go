@@ -23,19 +23,24 @@ var (
 	errTimeout = errors.New("timeout")
 )
 
+const (
+	SYN = '1'
+	FIN = '2'
+	PSH = '3'
+)
+
 type (
 	// UDPStream defines a KCP session implemented by UDP
 	UDPStream struct {
-		uuid         gouuid.UUID
-		tunnel       *UDPTunnel
-		backupTunnel *UDPTunnel
-		kcp          *KCP // KCP ARQ protocol
-		remote       net.Addr
-		backupRemote net.Addr
+		uuid    gouuid.UUID
+		tunnels []*UDPTunnel
+		kcp     *KCP // KCP ARQ protocol
+		remotes []net.Addr
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
 		recvbuf []byte
+		sendbuf []byte
 		bufptr  []byte
 
 		// settings
@@ -44,7 +49,6 @@ type (
 		headerSize int       // the header size additional to a KCP frame
 		ackNoDelay bool      // send ack immediately for each incoming packet(testing purpose)
 		writeDelay bool      // delay kcp.flush() for Write() for bulk transfer
-		dup        int       // duplicate udp packets(testing purpose)
 
 		// notifications
 		die          chan struct{} // notify current session has Closed
@@ -53,25 +57,28 @@ type (
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
 
 		// packets waiting to be sent on wire
-		txqueue       []ipv4.Message
-		backupTxqueue []ipv4.Message
-		mu            sync.Mutex
+		txqueues [][]ipv4.Message
+		mu       sync.Mutex
 	}
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, tunnel, backupTunnel *UDPTunnel, remote, backupRemote net.Addr) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, tunnels []*UDPTunnel, remotes []net.Addr) (stream *UDPStream, err error) {
+	if len(tunnels) != len(remotes) {
+		return nil, errors.New("tunnels not equal with remotes")
+	}
+
 	stream = new(UDPStream)
 	stream.die = make(chan struct{})
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
+	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
-	stream.tunnel = tunnel
-	stream.backupTunnel = backupTunnel
-	stream.remote = remote
-	stream.backupRemote = backupRemote
+	stream.tunnels = tunnels
+	stream.remotes = remotes
 	stream.headerSize = gouuid.Size
+	stream.txqueues = make([][]ipv4.Message, len(tunnels))
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -89,10 +96,6 @@ func NewUDPStream(uuid gouuid.UUID, tunnel, backupTunnel *UDPTunnel, remote, bac
 	return stream, nil
 }
 
-func (s *UDPStream) Dial() (err error) {
-
-}
-
 // Read implements net.Conn
 func (s *UDPStream) Read(b []byte) (n int, err error) {
 	for {
@@ -106,13 +109,6 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 		}
 
 		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
-			if len(b) >= size { // receive data into 'b' directly
-				s.kcp.Recv(b)
-				s.mu.Unlock()
-				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
-				return size, nil
-			}
-
 			// if necessary resize the stream buffer to guarantee a sufficent buffer space
 			if cap(s.recvbuf) < size {
 				s.recvbuf = make([]byte, size)
@@ -121,8 +117,14 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 			// resize the length of recvbuf to correspond to data size
 			s.recvbuf = s.recvbuf[:size]
 			s.kcp.Recv(s.recvbuf)
-			n = copy(b, s.recvbuf)   // copy to 'b'
-			s.bufptr = s.recvbuf[n:] // pointer update
+			if s.recvbuf[0] != PSH {
+				s.ctrl(s.recvbuf)
+				s.mu.Unlock()
+				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
+				return 0, nil
+			}
+			n = copy(b, s.recvbuf[1:]) // copy to 'b'
+			s.bufptr = s.recvbuf[n+1:] // pointer update
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
 			return n, nil
@@ -158,10 +160,17 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 }
 
 // Write implements net.Conn
-func (s *UDPStream) Write(b []byte) (n int, err error) { return s.WriteBuffers([][]byte{b}) }
+func (s *UDPStream) Write(b []byte) (n int, err error) {
+	return s.WriteBuffer(PSH, b)
+}
+
+// Write implements net.Conn
+func (s *UDPStream) WriteCtrl(flag byte, b []byte) (n int, err error) {
+	return s.WriteBuffer(flag, b)
+}
 
 // WriteBuffers write a vector of byte slices to the underlying connection
-func (s *UDPStream) WriteBuffers(v [][]byte) (n int, err error) {
+func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 	for {
 		select {
 		case <-s.die:
@@ -174,16 +183,18 @@ func (s *UDPStream) WriteBuffers(v [][]byte) (n int, err error) {
 		// make sure write do not overflow the max sliding window on both side
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-			for _, b := range v {
-				n += len(b)
-				for {
-					if len(b) <= int(s.kcp.mss) {
-						s.kcp.Send(b)
-						break
-					} else {
-						s.kcp.Send(b[:s.kcp.mss])
-						b = b[s.kcp.mss:]
-					}
+			n += len(b)
+			for {
+				if len(b) < int(s.kcp.mss) {
+					s.sendbuf[0] = flag
+					copy(s.sendbuf[1:], b)
+					s.kcp.Send(s.sendbuf[0 : len(b)+1])
+					break
+				} else {
+					s.sendbuf[0] = flag
+					copy(s.sendbuf[1:], b[:s.kcp.mss-1])
+					s.kcp.Send(s.sendbuf[:s.kcp.mss])
+					b = b[s.kcp.mss-1:]
 				}
 			}
 
@@ -225,25 +236,29 @@ func (s *UDPStream) WriteBuffers(v [][]byte) (n int, err error) {
 // uncork sends data in txqueue if there is any
 func (s *UDPStream) uncork() {
 	s.mu.Lock()
-	txqueue := s.txqueue
-	s.txqueue = s.txqueue[:0]
-	backupTxqueue := s.backupTxqueue
-	s.backupTxqueue = s.backupTxqueue[:0]
+	txqueues = s.txqueues
+	s.txqueues = make([]ipv4.Message, len(s.tunnels))
 	s.mu.Unlock()
 
 	//todo
-	if len(txqueue) > 0 {
-		s.tunnel.Output(txqueue)
-	}
-	if len(backupTxqueue) > 0 {
-		s.backupTunnel.Output(backupTxqueue)
+	for i, txqueue := range txqueues {
+		if len(txqueue) > 0 {
+			s.tunnels[i].Output(txqueue)
+		}
 	}
 }
 
 // Close closes the connection.
 func (s *UDPStream) Close() error {
+	return s.close(true)
+}
+
+func (s *UDPStream) close(active bool) error {
 	var once bool
 	s.dieOnce.Do(func() {
+		if active {
+			s.WriteCtrl(FIN, nil)
+		}
 		close(s.die)
 		once = true
 	})
@@ -356,15 +371,6 @@ func (s *UDPStream) SetACKNoDelay(nodelay bool) {
 	s.ackNoDelay = nodelay
 }
 
-// (deprecated)
-//
-// SetDUP duplicates udp packets for kcp output.
-func (s *UDPStream) SetDUP(dup int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.dup = dup
-}
-
 // SetNoDelay calls nodelay() of kcp
 // https://github.com/skywind3000/kcp/blob/master/README.en.md#protocol-configuration
 func (s *UDPStream) SetNoDelay(nodelay, interval, resend, nc int) {
@@ -390,12 +396,6 @@ func (s *UDPStream) notifyWriteEvent() {
 	}
 }
 
-// post-processing for sending a packet from kcp core
-// steps:
-// 1. FEC packet generation
-// 2. CRC32 integrity
-// 3. Encryption
-// 4. TxQueue
 func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
 	bts := xmitBuf.Get().([]byte)[:len(buf)]
 	copy(bts, buf)
@@ -406,9 +406,15 @@ func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
 
 func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 	copy(buf, s.uuid[:])
-	s.txqueue = append(s.txqueue, s.fillMsg(buf, s.remote))
+	appendCount = 1
 	if lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0 {
-		s.backupTxqueue = append(s.backupTxqueue, s.fillMsg(buf, s.backupRemote))
+		appendCount = len(s.tunnels)
+	}
+	for i := 0; i < appendCount; i++ {
+		if len(s.txqueues[i]) == 0 {
+			s.txqueues[i] = make([]ipv4.Message, 0)
+		}
+		s.txqueues[i] = append(s.txqueues[i], s.fillMsg(buf, s.remotes[i]))
 	}
 }
 
@@ -433,4 +439,23 @@ func (s *UDPStream) input(data []byte) {
 	if kcpInErrors > 0 {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 	}
+}
+
+func (s *UDPStream) ctrl(data []byte) (err error) {
+	switch data[0] {
+	case SYN:
+		return s.Syn()
+	case FIN:
+		return s.Fin()
+	default:
+		return errors.New("invalid ctrl msg")
+	}
+}
+
+func (s *UDPStream) Syn() (err error) {
+	return nil
+}
+
+func (s *UDPStream) Fin() (err error) {
+	return s.close(false)
 }
