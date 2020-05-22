@@ -10,6 +10,7 @@ package kcp
 import (
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,10 +33,13 @@ const (
 type (
 	// UDPStream defines a KCP session implemented by UDP
 	UDPStream struct {
-		uuid    gouuid.UUID
-		tunnels []*UDPTunnel
-		kcp     *KCP // KCP ARQ protocol
-		remotes []net.Addr
+		uuid      gouuid.UUID
+		sel       *RouteSelector
+		transport *UDPTransport
+		kcp       *KCP // KCP ARQ protocol
+		ips       []string
+		tunnels   []*UDPTunnel
+		remotes   []net.Addr
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -63,11 +67,7 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, tunnels []*UDPTunnel, remotes []net.Addr) (stream *UDPStream, err error) {
-	if len(tunnels) != len(remotes) {
-		return nil, errors.New("tunnels not equal with remotes")
-	}
-
+func NewUDPStream(uuid gouuid.UUID, ips []string, sel *RouteSelector, transport *UDPTransport, bool accepted) (stream *UDPStream, err error) {
 	stream = new(UDPStream)
 	stream.die = make(chan struct{})
 	stream.chReadEvent = make(chan struct{}, 1)
@@ -75,8 +75,9 @@ func NewUDPStream(uuid gouuid.UUID, tunnels []*UDPTunnel, remotes []net.Addr) (s
 	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
-	stream.tunnels = tunnels
-	stream.remotes = remotes
+	stream.sel = sel
+	stream.transport = transport
+	stream.ips = ips
 	stream.headerSize = gouuid.Size
 	stream.txqueues = make([][]ipv4.Message, len(tunnels))
 
@@ -86,6 +87,12 @@ func NewUDPStream(uuid gouuid.UUID, tunnels []*UDPTunnel, remotes []net.Addr) (s
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
+
+	if !accepted {
+		stream.tunnels, stream.remotes = sel.Pick(ips)
+		stream.WriteCtrl(SYN, []byte{strings.Join(ips, ":")})
+		SystemTimedSched.Put(sess.update, time.Now())
+	}
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -117,16 +124,10 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 			// resize the length of recvbuf to correspond to data size
 			s.recvbuf = s.recvbuf[:size]
 			s.kcp.Recv(s.recvbuf)
-			if s.recvbuf[0] != PSH {
-				s.ctrl(s.recvbuf)
-				s.mu.Unlock()
-				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
-				return 0, nil
-			}
-			n = copy(b, s.recvbuf[1:]) // copy to 'b'
+			n, err := s.packetRead(s.recvbuf[0], s.recvbuf[1:], b)
 			s.bufptr = s.recvbuf[n+1:] // pointer update
 			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
+			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n+1))
 			return n, nil
 		}
 
@@ -441,21 +442,38 @@ func (s *UDPStream) input(data []byte) {
 	}
 }
 
-func (s *UDPStream) ctrl(data []byte) (err error) {
-	switch data[0] {
+func (s *UDPStream) packetRead(flag byte, data []byte, b []byte) (n int, err error) {
+	switch flag {
 	case SYN:
-		return s.Syn()
+		return s.Syn(data)
 	case FIN:
-		return s.Fin()
+		return s.Fin(data)
+	case PSH:
+		return s.Psh(data, b)
 	default:
-		return errors.New("invalid ctrl msg")
+		return 0, errors.New("invalid ctrl msg")
 	}
 }
 
-func (s *UDPStream) Syn() (err error) {
-	return nil
+func (s *UDPStream) Syn(data []byte) (n int, err error) {
+	if len(s.ips) != 0 {
+		return 0, errors.New("invalid syn packet, self ips not empty")
+	}
+	endpointInfo := string(data)
+	ips := strings.Split(endpointInfo, ":")
+	if len(ips) == 0 {
+		return len(data), errors.New("invalid syn packet")
+	}
+	s.ips = ips
+	s.tunnels, s.remotes = s.sel.Pick(ips)
+	SystemTimedSched.Put(s.update, time.Now())
+	return len(data), nil
 }
 
-func (s *UDPStream) Fin() (err error) {
-	return s.close(false)
+func (s *UDPStream) Fin(data []byte) (n int, err error) {
+	return 0, s.close(false)
+}
+
+func (s *UDPStream) Psh(data []byte, b []byte) (n int, err error) {
+	return copy(b, data)
 }

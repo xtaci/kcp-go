@@ -23,7 +23,7 @@ var (
 
 type RouteSelector interface {
 	AddTunnel(tunnel *UDPTunnel)
-	Pick(ips []string) (tunnels []*UDPTunnel, remotes net.Addr, err error)
+	Pick(ips []string) (tunnels []*UDPTunnel, remotes net.Addr)
 }
 
 type UDPTransport struct {
@@ -70,12 +70,8 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 	return tunnel, nil
 }
 
-func (t *UDPTransport) NewStream(uuid gouuid.UUID, ips []string) (stream *UDPStream, err error) {
-	tunnels, remotes, err := t.sel.Pick(ips)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-	stream, err = NewUDPStream(uuid, tunnels, remotes)
+func (t *UDPTransport) NewStream(uuid gouuid.UUID, ips []string, bool accepted) (stream *UDPStream, err error) {
+	stream, err = NewUDPStream(uuid, ips, sel, t, accepted)
 	if err != nil {
 		return nil, err
 	}
@@ -93,11 +89,8 @@ func (t *UDPTransport) tunnelInput(data []byte, rAddr net.Addr) {
 		stream = t.streamm.Upsert(uuidStr, nil, func(exist bool, valueInMap interface{}, newValue interface{}) interface{} {
 			if exist {
 				return valueInMap
-			} else if len(extra) == 0 || extra[0] != SYN {
-				return nil
 			}
-			ips := strings.Split(string(extra[0:]), ":")
-			stream, err := t.NewStream(uuid, ips)
+			stream, err := t.NewStream(uuid, nil, true)
 			if err != nil {
 				return nil
 			}
@@ -113,7 +106,7 @@ func (t *UDPTransport) tunnelInput(data []byte, rAddr net.Addr) {
 //interface
 func (t *UDPTransport) Open(ips []string) (stream *UDPStream, err error) {
 	uuid := gouuid.NewV1()
-	stream, err = t.NewStream(uuid, ips)
+	stream, err = t.NewStream(uuid, ips, false)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
