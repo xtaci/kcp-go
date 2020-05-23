@@ -46,8 +46,9 @@ type (
 		xconn           batchConn // for x/net
 		xconnWriteError error
 
-		mu    sync.Mutex
-		input input_callback
+		mu      sync.Mutex
+		input   input_callback
+		localIp string
 	}
 )
 
@@ -73,6 +74,7 @@ func NewUDPTunnel(laddr string, input input_callback) (tunnel *UDPTunnel, err er
 	tunnel.chSocketWriteError = make(chan struct{})
 	tunnel.conn = conn
 	tunnel.input = input
+	tunnel.localIp = lUDPAddr.IP.String()
 
 	// cast to writebatch conn
 	if lUDPAddr.IP.To4() != nil {
@@ -84,6 +86,10 @@ func NewUDPTunnel(laddr string, input input_callback) (tunnel *UDPTunnel, err er
 	go tunnel.readLoop()
 	go tunnel.writeLoop()
 	return tunnel, nil
+}
+
+func (s *UDPTunnel) LocalIp() (ip string) {
+	return s.localIp
 }
 
 func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
@@ -117,9 +123,12 @@ func (s *UDPTunnel) Close() error {
 
 	if once {
 		s.mu.Lock()
-		s.ReleaseTX(s.txqueues)
+		txqueues := s.txqueues
 		s.txqueues = s.txqueues[:0]
 		s.mu.Unlock()
+
+		//todo maybe leak, 1. Write before append s.txqueues 2. Close 3. Write append
+		s.ReleaseTX(txqueues)
 
 		s.conn.Close()
 		return nil

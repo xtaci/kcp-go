@@ -18,7 +18,6 @@ func (s *UDPTunnel) defaultReadLoop() {
 			}
 		} else {
 			s.notifyReadError(errors.WithStack(err))
-			return
 		}
 	}
 }

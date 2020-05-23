@@ -3,9 +3,7 @@ package kcp
 import (
 	"io"
 	"net"
-	"strings"
 	"sync"
-	"sync/atomic"
 
 	cmap "github.com/1ucio/concurrent-map"
 	"github.com/pkg/errors"
@@ -23,7 +21,7 @@ var (
 
 type RouteSelector interface {
 	AddTunnel(tunnel *UDPTunnel)
-	Pick(ips []string) (tunnels []*UDPTunnel, remotes net.Addr)
+	Pick(ips []string) (tunnels []*UDPTunnel, remotes []net.Addr)
 }
 
 type UDPTransport struct {
@@ -54,11 +52,6 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 		return tunnel, nil
 	}
 
-	lUDPAddr, err := net.ResolveUDPAddr("udp", lAddr)
-	if err != nil {
-		return nil, errors.WithStack(err)
-	}
-
 	tunnel, err = NewUDPTunnel(lAddr, func(data []byte, rAddr net.Addr) {
 		t.tunnelInput(data, rAddr)
 	})
@@ -70,8 +63,8 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 	return tunnel, nil
 }
 
-func (t *UDPTransport) NewStream(uuid gouuid.UUID, ips []string, bool accepted) (stream *UDPStream, err error) {
-	stream, err = NewUDPStream(uuid, ips, sel, t, accepted)
+func (t *UDPTransport) NewStream(uuid gouuid.UUID, ips []string, accepted bool) (stream *UDPStream, err error) {
+	stream, err = NewUDPStream(uuid, ips, t.sel, t, accepted)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +75,6 @@ func (t *UDPTransport) tunnelInput(data []byte, rAddr net.Addr) {
 	var uuid gouuid.UUID
 	copy(uuid[:], data)
 	uuidStr := uuid.String()
-	extra := data[gouuid.Size:]
 
 	stream, ok := t.streamm.Get(uuidStr)
 	if !ok {

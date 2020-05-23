@@ -21,7 +21,10 @@ import (
 )
 
 var (
-	errTimeout = errors.New("timeout")
+	errTimeout        = errors.New("timeout")
+	errInvalidCtrlMsg = errors.New("invalid ctrl msg")
+	errInvalidSynMsg  = errors.New("invalid syn packet")
+	errIpsInfoRepeat  = errors.New("self ips not empty")
 )
 
 const (
@@ -34,10 +37,10 @@ type (
 	// UDPStream defines a KCP session implemented by UDP
 	UDPStream struct {
 		uuid      gouuid.UUID
-		sel       *RouteSelector
+		sel       RouteSelector
 		transport *UDPTransport
-		kcp       *KCP // KCP ARQ protocol
-		ips       []string
+		kcp       *KCP     // KCP ARQ protocol
+		ips       []string //remote ips
 		tunnels   []*UDPTunnel
 		remotes   []net.Addr
 
@@ -57,6 +60,8 @@ type (
 		// notifications
 		die          chan struct{} // notify current session has Closed
 		dieOnce      sync.Once
+		finEventOnce sync.Once
+		chFinEvent   chan struct{} // notify FIN
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
 
@@ -67,9 +72,10 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, ips []string, sel *RouteSelector, transport *UDPTransport, bool accepted) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, ips []string, sel RouteSelector, transport *UDPTransport, accepted bool) (stream *UDPStream, err error) {
 	stream = new(UDPStream)
 	stream.die = make(chan struct{})
+	stream.chFinEvent = make(chan struct{})
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
 	stream.sendbuf = make([]byte, mtuLimit)
@@ -79,7 +85,7 @@ func NewUDPStream(uuid gouuid.UUID, ips []string, sel *RouteSelector, transport 
 	stream.transport = transport
 	stream.ips = ips
 	stream.headerSize = gouuid.Size
-	stream.txqueues = make([][]ipv4.Message, len(tunnels))
+	stream.txqueues = make([][]ipv4.Message, 0)
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -90,8 +96,12 @@ func NewUDPStream(uuid gouuid.UUID, ips []string, sel *RouteSelector, transport 
 
 	if !accepted {
 		stream.tunnels, stream.remotes = sel.Pick(ips)
-		stream.WriteCtrl(SYN, []byte{strings.Join(ips, ":")})
-		SystemTimedSched.Put(sess.update, time.Now())
+		localIps := make([]string, len(stream.tunnels))
+		for i := 0; i < len(stream.tunnels); i++ {
+			localIps[i] = stream.tunnels[i].LocalIp()
+		}
+		stream.WriteCtrl(SYN, []byte(strings.Join(localIps, ":")))
+		SystemTimedSched.Put(stream.update, time.Now())
 	}
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
@@ -107,7 +117,7 @@ func NewUDPStream(uuid gouuid.UUID, ips []string, sel *RouteSelector, transport 
 func (s *UDPStream) Read(b []byte) (n int, err error) {
 	for {
 		s.mu.Lock()
-		if len(s.bufptr) > 0 { // copy from buffer into b
+		if len(s.bufptr) > 0 { // copy from buffer into b, ctrl msg should not cache into this
 			n = copy(b, s.bufptr)
 			s.bufptr = s.bufptr[n:]
 			s.mu.Unlock()
@@ -124,11 +134,15 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 			// resize the length of recvbuf to correspond to data size
 			s.recvbuf = s.recvbuf[:size]
 			s.kcp.Recv(s.recvbuf)
-			n, err := s.packetRead(s.recvbuf[0], s.recvbuf[1:], b)
+			flag := s.recvbuf[0]
+			n, err := s.cmdRead(flag, s.recvbuf[1:], b)
 			s.bufptr = s.recvbuf[n+1:] // pointer update
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n+1))
-			return n, nil
+			if flag != PSH {
+				n = 0
+			}
+			return n, err
 		}
 
 		// deadline for current reading operation
@@ -152,6 +166,8 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 			if timeout != nil {
 				timeout.Stop()
 			}
+		case <-s.chFinEvent:
+			return 0, io.EOF
 		case <-c:
 			return 0, errors.WithStack(errTimeout)
 		case <-s.die:
@@ -184,7 +200,6 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 		// make sure write do not overflow the max sliding window on both side
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-			n += len(b)
 			for {
 				if len(b) < int(s.kcp.mss) {
 					s.sendbuf[0] = flag
@@ -204,8 +219,8 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 				s.kcp.flush(false)
 			}
 			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
-			return n, nil
+			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
+			return len(b), nil
 		}
 
 		var timeout *time.Timer
@@ -226,6 +241,8 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			if timeout != nil {
 				timeout.Stop()
 			}
+		case <-s.chFinEvent:
+			return 0, errors.WithStack(io.EOF)
 		case <-c:
 			return 0, errors.WithStack(errTimeout)
 		case <-s.die:
@@ -237,11 +254,11 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 // uncork sends data in txqueue if there is any
 func (s *UDPStream) uncork() {
 	s.mu.Lock()
-	txqueues = s.txqueues
-	s.txqueues = make([]ipv4.Message, len(s.tunnels))
+	txqueues := s.txqueues
+	s.txqueues = make([][]ipv4.Message, 0)
 	s.mu.Unlock()
 
-	//todo
+	//todo if tunnel output failure, can change tunnel or else
 	for i, txqueue := range txqueues {
 		if len(txqueue) > 0 {
 			s.tunnels[i].Output(txqueue)
@@ -251,15 +268,9 @@ func (s *UDPStream) uncork() {
 
 // Close closes the connection.
 func (s *UDPStream) Close() error {
-	return s.close(true)
-}
-
-func (s *UDPStream) close(active bool) error {
 	var once bool
 	s.dieOnce.Do(func() {
-		if active {
-			s.WriteCtrl(FIN, nil)
-		}
+		s.WriteCtrl(FIN, nil)
 		close(s.die)
 		once = true
 	})
@@ -274,6 +285,7 @@ func (s *UDPStream) close(active bool) error {
 		s.kcp.ReleaseTX()
 		s.mu.Unlock()
 		s.uncork()
+		// todo if should wait target endpoint recv
 
 		return nil
 	} else {
@@ -401,20 +413,20 @@ func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
 	bts := xmitBuf.Get().([]byte)[:len(buf)]
 	copy(bts, buf)
 	msg.Buffers = [][]byte{bts}
-	msg.Addr = s.remote
+	msg.Addr = remote
 	return
 }
 
 func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 	copy(buf, s.uuid[:])
-	appendCount = 1
-	if lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0 {
+	appendCount := 1
+	if (lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0) && len(s.tunnels) != 0 {
 		appendCount = len(s.tunnels)
 	}
+	for i := len(s.txqueues); i < appendCount; i++ {
+		s.txqueues = append(s.txqueues, make([]ipv4.Message, 0))
+	}
 	for i := 0; i < appendCount; i++ {
-		if len(s.txqueues[i]) == 0 {
-			s.txqueues[i] = make([]ipv4.Message, 0)
-		}
 		s.txqueues[i] = append(s.txqueues[i], s.fillMsg(buf, s.remotes[i]))
 	}
 }
@@ -442,7 +454,7 @@ func (s *UDPStream) input(data []byte) {
 	}
 }
 
-func (s *UDPStream) packetRead(flag byte, data []byte, b []byte) (n int, err error) {
+func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error) {
 	switch flag {
 	case SYN:
 		return s.Syn(data)
@@ -451,18 +463,18 @@ func (s *UDPStream) packetRead(flag byte, data []byte, b []byte) (n int, err err
 	case PSH:
 		return s.Psh(data, b)
 	default:
-		return 0, errors.New("invalid ctrl msg")
+		return 0, errors.WithStack(errInvalidCtrlMsg)
 	}
 }
 
 func (s *UDPStream) Syn(data []byte) (n int, err error) {
 	if len(s.ips) != 0 {
-		return 0, errors.New("invalid syn packet, self ips not empty")
+		return len(data), errors.WithStack(errIpsInfoRepeat)
 	}
 	endpointInfo := string(data)
 	ips := strings.Split(endpointInfo, ":")
 	if len(ips) == 0 {
-		return len(data), errors.New("invalid syn packet")
+		return len(data), errors.WithStack(errInvalidSynMsg)
 	}
 	s.ips = ips
 	s.tunnels, s.remotes = s.sel.Pick(ips)
@@ -471,9 +483,12 @@ func (s *UDPStream) Syn(data []byte) (n int, err error) {
 }
 
 func (s *UDPStream) Fin(data []byte) (n int, err error) {
-	return 0, s.close(false)
+	s.finEventOnce.Do(func() {
+		close(s.chFinEvent)
+	})
+	return len(data), nil
 }
 
 func (s *UDPStream) Psh(data []byte, b []byte) (n int, err error) {
-	return copy(b, data)
+	return copy(b, data), nil
 }

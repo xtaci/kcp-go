@@ -49,7 +49,6 @@ func (s *UDPTunnel) readLoop() {
 				}
 			}
 			s.notifyReadError(errors.WithStack(err))
-			return
 		}
 	}
 }
