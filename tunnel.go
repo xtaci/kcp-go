@@ -12,6 +12,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
@@ -49,6 +50,10 @@ type (
 		mu      sync.Mutex
 		input   input_callback
 		localIp string
+
+		loss     int
+		delayMin int
+		delayMax int
 	}
 )
 
@@ -88,6 +93,36 @@ func NewUDPTunnel(laddr string, input input_callback) (tunnel *UDPTunnel, err er
 	return tunnel, nil
 }
 
+func (s *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
+	s.loss = int(loss * 100)
+	s.delayMin = delayMin
+	s.delayMax = delayMax
+}
+
+func (s *UDPTunnel) trySimulate(txqueue []ipv4.Message) bool {
+	if s.loss == 0 && s.delayMin == 0 && s.delayMax == 0 {
+		return false
+	}
+
+	succTxqueue := make([]ipv4.Message, 0)
+	for k := range txqueue {
+		if lossRand.Intn(100) >= s.loss {
+			succTxqueue = append(succTxqueue, txqueue[k])
+		}
+	}
+	for _, msg := range succTxqueue {
+		delay := time.Duration(s.delayMin+lossRand.Intn(s.delayMax-s.delayMin)) * time.Millisecond
+		timerSender.Send(s, msg, delay)
+	}
+	return true
+}
+
+func (s *UDPTunnel) SimulateOutput(msg ipv4.Message) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.txqueues = append(s.txqueues, []ipv4.Message{msg})
+}
+
 func (s *UDPTunnel) LocalIp() (ip string) {
 	return s.localIp
 }
@@ -101,6 +136,10 @@ func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
 	case <-s.die:
 		return errors.WithStack(io.ErrClosedPipe)
 	default:
+	}
+
+	if s.trySimulate(txqueue) {
+		return
 	}
 
 	s.mu.Lock()

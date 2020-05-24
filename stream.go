@@ -8,6 +8,7 @@
 package kcp
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -24,7 +25,7 @@ var (
 	errTimeout        = errors.New("timeout")
 	errInvalidCtrlMsg = errors.New("invalid ctrl msg")
 	errInvalidSynMsg  = errors.New("invalid syn packet")
-	errIpsInfoRepeat  = errors.New("self ips not empty")
+	errIpsInfoRepeat  = errors.New("self remoteIps not empty")
 )
 
 const (
@@ -33,16 +34,23 @@ const (
 	PSH = '3'
 )
 
+const (
+	FLAGPOS      = gouuid.Size + IKCP_OVERHEAD
+	CleanTimeout = time.Second * 5
+)
+
 type (
 	// UDPStream defines a KCP session implemented by UDP
 	UDPStream struct {
 		uuid      gouuid.UUID
+		uuidStr   string
 		sel       RouteSelector
 		transport *UDPTransport
 		kcp       *KCP     // KCP ARQ protocol
-		ips       []string //remote ips
+		remoteIps []string //remoteips
 		tunnels   []*UDPTunnel
 		remotes   []net.Addr
+		accepted  bool
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -64,6 +72,8 @@ type (
 		chFinEvent   chan struct{} // notify FIN
 		chReadEvent  chan struct{} // notify Read() can be called without blocking
 		chWriteEvent chan struct{} // notify Write() can be called without blocking
+		chCleanEvent chan struct{} // notify Write() can be called without blocking
+		cleanTimer   <-chan time.Time
 
 		// packets waiting to be sent on wire
 		txqueues [][]ipv4.Message
@@ -72,20 +82,23 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, ips []string, sel RouteSelector, transport *UDPTransport, accepted bool) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, remoteIps []string, sel RouteSelector, transport *UDPTransport, accepted bool) (stream *UDPStream, err error) {
 	stream = new(UDPStream)
 	stream.die = make(chan struct{})
 	stream.chFinEvent = make(chan struct{})
+	stream.chCleanEvent = make(chan struct{})
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
 	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
+	stream.uuidStr = uuid.String()
 	stream.sel = sel
 	stream.transport = transport
-	stream.ips = ips
+	stream.remoteIps = remoteIps
 	stream.headerSize = gouuid.Size
 	stream.txqueues = make([][]ipv4.Message, 0)
+	stream.accepted = accepted
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -95,12 +108,13 @@ func NewUDPStream(uuid gouuid.UUID, ips []string, sel RouteSelector, transport *
 	stream.kcp.ReserveBytes(stream.headerSize)
 
 	if !accepted {
-		stream.tunnels, stream.remotes = sel.Pick(ips)
+		stream.tunnels, stream.remotes = sel.Pick(remoteIps)
 		localIps := make([]string, len(stream.tunnels))
 		for i := 0; i < len(stream.tunnels); i++ {
 			localIps[i] = stream.tunnels[i].LocalIp()
 		}
 		stream.WriteCtrl(SYN, []byte(strings.Join(localIps, ":")))
+		fmt.Println("new", stream.uuidStr, stream.headerSize, IKCP_OVERHEAD, len(strings.Join(localIps, ":")), strings.Join(localIps, ":"))
 		SystemTimedSched.Put(stream.update, time.Now())
 	}
 
@@ -178,6 +192,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 
 // Write implements net.Conn
 func (s *UDPStream) Write(b []byte) (n int, err error) {
+	fmt.Println("Write", string(b))
 	return s.WriteBuffer(PSH, b)
 }
 
@@ -204,7 +219,9 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 				if len(b) < int(s.kcp.mss) {
 					s.sendbuf[0] = flag
 					copy(s.sendbuf[1:], b)
-					s.kcp.Send(s.sendbuf[0 : len(b)+1])
+					fmt.Println("stream kcp send", len(s.kcp.snd_queue))
+					r := s.kcp.Send(s.sendbuf[0 : len(b)+1])
+					fmt.Println("stream kcp send", r, len(s.kcp.snd_queue))
 					break
 				} else {
 					s.sendbuf[0] = flag
@@ -218,6 +235,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			if waitsnd >= int(s.kcp.snd_wnd) || waitsnd >= int(s.kcp.rmt_wnd) || !s.writeDelay {
 				s.kcp.flush(false)
 			}
+
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 			return len(b), nil
@@ -261,6 +279,7 @@ func (s *UDPStream) uncork() {
 	//todo if tunnel output failure, can change tunnel or else
 	for i, txqueue := range txqueues {
 		if len(txqueue) > 0 {
+			fmt.Println("UDPStream uncork", s.tunnels[i].conn.LocalAddr(), len(txqueue), len(txqueue[0].Buffers[0]))
 			s.tunnels[i].Output(txqueue)
 		}
 	}
@@ -268,23 +287,31 @@ func (s *UDPStream) uncork() {
 
 // Close closes the connection.
 func (s *UDPStream) Close() error {
+	fmt.Println("UDPStream Close", s.uuidStr)
+
 	var once bool
 	s.dieOnce.Do(func() {
-		s.WriteCtrl(FIN, nil)
-		close(s.die)
 		once = true
 	})
 
 	if once {
+		if !s.recvFin() {
+			n, err := s.WriteCtrl(FIN, nil)
+			fmt.Println("UDPStream Send Fin", len(s.txqueues), len(s.txqueues[0]), string(s.txqueues[0][0].Buffers[0][40:]), n, err)
+		}
+		close(s.die)
+
 		atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 
 		// try best to send all queued messages
 		s.mu.Lock()
 		s.kcp.flush(false)
-		// release pending segments
-		s.kcp.ReleaseTX()
+		fmt.Println("UDPStream Send Fin", len(s.txqueues), len(s.txqueues[0]), string(s.txqueues[0][0].Buffers[0][40:]), len(s.kcp.snd_queue))
+		s.tryClean()
 		s.mu.Unlock()
 		s.uncork()
+		fmt.Println("UDPStream Send Fin", len(s.txqueues), len(s.kcp.snd_queue))
+
 		// todo if should wait target endpoint recv
 
 		return nil
@@ -296,7 +323,11 @@ func (s *UDPStream) Close() error {
 // sess update to trigger protocol
 func (s *UDPStream) update() {
 	select {
-	case <-s.die:
+	case <-s.chCleanEvent:
+	case <-s.cleanTimer:
+		s.mu.Lock()
+		s.kcp.ReleaseTX()
+		s.mu.Unlock()
 	default:
 		s.mu.Lock()
 		interval := s.kcp.flush(false)
@@ -393,7 +424,8 @@ func (s *UDPStream) SetNoDelay(nodelay, interval, resend, nc int) {
 }
 
 // GetConv gets conversation id of a session
-func (s *UDPStream) GetConv() uint32 { return s.kcp.conv }
+func (s *UDPStream) GetConv() uint32      { return s.kcp.conv }
+func (s *UDPStream) GetUUID() gouuid.UUID { return s.uuid }
 
 func (s *UDPStream) notifyReadEvent() {
 	select {
@@ -418,9 +450,13 @@ func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
 }
 
 func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
+	if len(s.tunnels) == 0 {
+		//todo log, never come to here
+		return
+	}
 	copy(buf, s.uuid[:])
 	appendCount := 1
-	if (lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0) && len(s.tunnels) != 0 {
+	if lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0 {
 		appendCount = len(s.tunnels)
 	}
 	for i := len(s.txqueues); i < appendCount; i++ {
@@ -435,9 +471,19 @@ func (s *UDPStream) input(data []byte) {
 	var kcpInErrors uint64
 
 	s.mu.Lock()
+	synPacket := false
+	if len(data) > FLAGPOS && data[FLAGPOS] == SYN && len(s.tunnels) == 0 && s.accepted {
+		synPacket = true
+	}
 	if ret := s.kcp.Input(data[gouuid.Size:], true, s.ackNoDelay); ret != 0 {
 		kcpInErrors++
 	}
+	if s.accepted {
+		fmt.Println("UDPStream input", s.remoteIps, s.accepted, len(data))
+	} else {
+		fmt.Println("UDPStream input", s.remoteIps, s.accepted, len(data), s.kcp.WaitSnd(), len(s.kcp.snd_queue))
+	}
+
 	if n := s.kcp.PeekSize(); n > 0 {
 		s.notifyReadEvent()
 	}
@@ -452,43 +498,70 @@ func (s *UDPStream) input(data []byte) {
 	if kcpInErrors > 0 {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 	}
+
+	//do accepted first package, it must be syn
+	if synPacket {
+		n, err := s.Read(nil)
+		if n != 0 || err != nil {
+			s.Close()
+		}
+	}
 }
 
 func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error) {
 	switch flag {
 	case SYN:
-		return s.Syn(data)
+		return s.syn(data)
 	case FIN:
-		return s.Fin(data)
+		return s.fin(data)
 	case PSH:
-		return s.Psh(data, b)
+		return s.psh(data, b)
 	default:
+		fmt.Println("UDPStream invalid cmdRead", s.uuid, flag)
 		return 0, errors.WithStack(errInvalidCtrlMsg)
 	}
 }
 
-func (s *UDPStream) Syn(data []byte) (n int, err error) {
-	if len(s.ips) != 0 {
+func (s *UDPStream) syn(data []byte) (n int, err error) {
+	if len(s.remoteIps) != 0 {
 		return len(data), errors.WithStack(errIpsInfoRepeat)
 	}
 	endpointInfo := string(data)
-	ips := strings.Split(endpointInfo, ":")
-	if len(ips) == 0 {
+	remoteIps := strings.Split(endpointInfo, ":")
+	if len(remoteIps) == 0 {
 		return len(data), errors.WithStack(errInvalidSynMsg)
 	}
-	s.ips = ips
-	s.tunnels, s.remotes = s.sel.Pick(ips)
+	s.remoteIps = remoteIps
+	s.tunnels, s.remotes = s.sel.Pick(remoteIps)
 	SystemTimedSched.Put(s.update, time.Now())
 	return len(data), nil
 }
 
-func (s *UDPStream) Fin(data []byte) (n int, err error) {
+func (s *UDPStream) fin(data []byte) (n int, err error) {
+	fmt.Println("UDPStream Fin", s.uuidStr)
 	s.finEventOnce.Do(func() {
 		close(s.chFinEvent)
 	})
-	return len(data), nil
+	return len(data), errors.WithStack(io.EOF)
 }
 
-func (s *UDPStream) Psh(data []byte, b []byte) (n int, err error) {
+func (s *UDPStream) recvFin() bool {
+	select {
+	case <-s.chFinEvent:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *UDPStream) psh(data []byte, b []byte) (n int, err error) {
 	return copy(b, data), nil
+}
+
+func (s *UDPStream) tryClean() {
+	if s.kcp.WaitSnd() == 0 {
+		close(s.chCleanEvent)
+	} else {
+		s.cleanTimer = time.NewTimer(CleanTimeout).C
+	}
 }

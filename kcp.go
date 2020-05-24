@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"encoding/binary"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -324,6 +325,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 
 // Send is user/upper level send, returns below zero for error
 func (kcp *KCP) Send(buffer []byte) int {
+	fmt.Println("kcp send", string(buffer))
 	var count int
 	if len(buffer) == 0 {
 		return -1

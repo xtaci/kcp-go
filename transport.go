@@ -21,7 +21,7 @@ var (
 
 type RouteSelector interface {
 	AddTunnel(tunnel *UDPTunnel)
-	Pick(ips []string) (tunnels []*UDPTunnel, remotes []net.Addr)
+	Pick(remoteIps []string) (tunnels []*UDPTunnel, remotes []net.Addr)
 }
 
 type UDPTransport struct {
@@ -63,8 +63,8 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 	return tunnel, nil
 }
 
-func (t *UDPTransport) NewStream(uuid gouuid.UUID, ips []string, accepted bool) (stream *UDPStream, err error) {
-	stream, err = NewUDPStream(uuid, ips, t.sel, t, accepted)
+func (t *UDPTransport) NewStream(uuid gouuid.UUID, remoteIps []string, accepted bool) (stream *UDPStream, err error) {
+	stream, err = NewUDPStream(uuid, remoteIps, t.sel, t, accepted)
 	if err != nil {
 		return nil, err
 	}
@@ -96,9 +96,9 @@ func (t *UDPTransport) tunnelInput(data []byte, rAddr net.Addr) {
 }
 
 //interface
-func (t *UDPTransport) Open(ips []string) (stream *UDPStream, err error) {
+func (t *UDPTransport) Open(remoteIps []string) (stream *UDPStream, err error) {
 	uuid := gouuid.NewV1()
-	stream, err = t.NewStream(uuid, ips, false)
+	stream, err = t.NewStream(uuid, remoteIps, false)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
