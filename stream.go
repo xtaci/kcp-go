@@ -114,7 +114,6 @@ func NewUDPStream(uuid gouuid.UUID, remoteIps []string, sel RouteSelector, trans
 			localIps[i] = stream.tunnels[i].LocalIp()
 		}
 		stream.WriteCtrl(SYN, []byte(strings.Join(localIps, ":")))
-		fmt.Println("new", stream.uuidStr, stream.headerSize, IKCP_OVERHEAD, len(strings.Join(localIps, ":")), strings.Join(localIps, ":"))
 		SystemTimedSched.Put(stream.update, time.Now())
 	}
 
@@ -192,7 +191,6 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 
 // Write implements net.Conn
 func (s *UDPStream) Write(b []byte) (n int, err error) {
-	fmt.Println("Write", string(b))
 	return s.WriteBuffer(PSH, b)
 }
 
@@ -219,9 +217,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 				if len(b) < int(s.kcp.mss) {
 					s.sendbuf[0] = flag
 					copy(s.sendbuf[1:], b)
-					fmt.Println("stream kcp send", len(s.kcp.snd_queue))
-					r := s.kcp.Send(s.sendbuf[0 : len(b)+1])
-					fmt.Println("stream kcp send", r, len(s.kcp.snd_queue))
+					s.kcp.Send(s.sendbuf[0 : len(b)+1])
 					break
 				} else {
 					s.sendbuf[0] = flag
@@ -279,7 +275,6 @@ func (s *UDPStream) uncork() {
 	//todo if tunnel output failure, can change tunnel or else
 	for i, txqueue := range txqueues {
 		if len(txqueue) > 0 {
-			fmt.Println("UDPStream uncork", s.tunnels[i].conn.LocalAddr(), len(txqueue), len(txqueue[0].Buffers[0]))
 			s.tunnels[i].Output(txqueue)
 		}
 	}
@@ -287,8 +282,6 @@ func (s *UDPStream) uncork() {
 
 // Close closes the connection.
 func (s *UDPStream) Close() error {
-	fmt.Println("UDPStream Close", s.uuidStr)
-
 	var once bool
 	s.dieOnce.Do(func() {
 		once = true
@@ -296,8 +289,7 @@ func (s *UDPStream) Close() error {
 
 	if once {
 		if !s.recvFin() {
-			n, err := s.WriteCtrl(FIN, nil)
-			fmt.Println("UDPStream Send Fin", len(s.txqueues), len(s.txqueues[0]), string(s.txqueues[0][0].Buffers[0][40:]), n, err)
+			s.WriteCtrl(FIN, nil)
 		}
 		close(s.die)
 
@@ -306,11 +298,9 @@ func (s *UDPStream) Close() error {
 		// try best to send all queued messages
 		s.mu.Lock()
 		s.kcp.flush(false)
-		fmt.Println("UDPStream Send Fin", len(s.txqueues), len(s.txqueues[0]), string(s.txqueues[0][0].Buffers[0][40:]), len(s.kcp.snd_queue))
 		s.tryClean()
 		s.mu.Unlock()
 		s.uncork()
-		fmt.Println("UDPStream Send Fin", len(s.txqueues), len(s.kcp.snd_queue))
 
 		// todo if should wait target endpoint recv
 
@@ -457,6 +447,7 @@ func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSe
 	copy(buf, s.uuid[:])
 	appendCount := 1
 	if lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0 {
+		fmt.Println("output", lostSegs, fastRetransSegs, earlyRetransSegs)
 		appendCount = len(s.tunnels)
 	}
 	for i := len(s.txqueues); i < appendCount; i++ {
@@ -477,11 +468,6 @@ func (s *UDPStream) input(data []byte) {
 	}
 	if ret := s.kcp.Input(data[gouuid.Size:], true, s.ackNoDelay); ret != 0 {
 		kcpInErrors++
-	}
-	if s.accepted {
-		fmt.Println("UDPStream input", s.remoteIps, s.accepted, len(data))
-	} else {
-		fmt.Println("UDPStream input", s.remoteIps, s.accepted, len(data), s.kcp.WaitSnd(), len(s.kcp.snd_queue))
 	}
 
 	if n := s.kcp.PeekSize(); n > 0 {
@@ -517,7 +503,6 @@ func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error)
 	case PSH:
 		return s.psh(data, b)
 	default:
-		fmt.Println("UDPStream invalid cmdRead", s.uuid, flag)
 		return 0, errors.WithStack(errInvalidCtrlMsg)
 	}
 }
@@ -538,7 +523,6 @@ func (s *UDPStream) syn(data []byte) (n int, err error) {
 }
 
 func (s *UDPStream) fin(data []byte) (n int, err error) {
-	fmt.Println("UDPStream Fin", s.uuidStr)
 	s.finEventOnce.Do(func() {
 		close(s.chFinEvent)
 	})

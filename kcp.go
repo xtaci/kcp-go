@@ -325,7 +325,6 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 
 // Send is user/upper level send, returns below zero for error
 func (kcp *KCP) Send(buffer []byte) int {
-	fmt.Println("kcp send", string(buffer))
 	var count int
 	if len(buffer) == 0 {
 		return -1
@@ -833,6 +832,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			change++
 			earlyRetransSegs++
 		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
+			fmt.Println("flush logSegs", string(segment.data), segment.rto)
 			needsend = true
 			if kcp.nodelay == 0 {
 				segment.rto += kcp.rx_rto
