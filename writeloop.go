@@ -1,6 +1,7 @@
 package kcp
 
 import (
+	"fmt"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -10,6 +11,7 @@ import (
 func (s *UDPTunnel) writeSingle(txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
+	fmt.Println("writeSingle", len(txqueue), len(txqueue[0].Buffers), len(txqueue[0].Buffers[0]))
 	for k := range txqueue {
 		if n, err := s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr); err == nil {
 			nbytes += n
@@ -32,9 +34,9 @@ func (s *UDPTunnel) defaultWriteLoop() {
 
 		s.mu.Lock()
 		txqueues := s.txqueues
-		s.txqueues = s.txqueues[:0]
+		// s.txqueues = s.txqueues[:0]
+		s.txqueues = make([][]ipv4.Message, 0)
 		s.mu.Unlock()
-
 		for _, txqueue := range txqueues {
 			s.writeSingle(txqueue)
 		}

@@ -275,6 +275,7 @@ func (s *UDPStream) uncork() {
 	//todo if tunnel output failure, can change tunnel or else
 	for i, txqueue := range txqueues {
 		if len(txqueue) > 0 {
+			fmt.Println("uncork", len(txqueue), len(txqueue[0].Buffers), len(txqueue[0].Buffers[0]))
 			s.tunnels[i].Output(txqueue)
 		}
 	}
@@ -445,11 +446,10 @@ func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSe
 		return
 	}
 	copy(buf, s.uuid[:])
-	appendCount := 1
-	if lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0 {
-		fmt.Println("output", lostSegs, fastRetransSegs, earlyRetransSegs)
-		appendCount = len(s.tunnels)
-	}
+	appendCount := len(s.tunnels)
+	// if lostSegs != 0 || fastRetransSegs != 0 || earlyRetransSegs != 0 {
+	// 	appendCount = len(s.tunnels)
+	// }
 	for i := len(s.txqueues); i < appendCount; i++ {
 		s.txqueues = append(s.txqueues, make([]ipv4.Message, 0))
 	}

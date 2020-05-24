@@ -8,11 +8,11 @@
 package kcp
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
@@ -75,6 +75,7 @@ func NewUDPTunnel(laddr string, input input_callback) (tunnel *UDPTunnel, err er
 	}
 
 	tunnel = new(UDPTunnel)
+	tunnel.die = make(chan struct{})
 	tunnel.chSocketReadError = make(chan struct{})
 	tunnel.chSocketWriteError = make(chan struct{})
 	tunnel.conn = conn
@@ -110,10 +111,16 @@ func (s *UDPTunnel) trySimulate(txqueue []ipv4.Message) bool {
 			succTxqueue = append(succTxqueue, txqueue[k])
 		}
 	}
-	for _, msg := range succTxqueue {
-		delay := time.Duration(s.delayMin+lossRand.Intn(s.delayMax-s.delayMin)) * time.Millisecond
-		timerSender.Send(s, msg, delay)
-	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.txqueues = append(s.txqueues, succTxqueue)
+
+	// for _, msg := range succTxqueue {
+	// 	delay := time.Duration(s.delayMin+lossRand.Intn(s.delayMax-s.delayMin)) * time.Millisecond
+	// 	timerSender.Send(s, msg, delay)
+	// }
+
 	return true
 }
 
@@ -138,9 +145,11 @@ func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
 	default:
 	}
 
-	if s.trySimulate(txqueue) {
-		return
-	}
+	fmt.Println("tunnel output", len(txqueue), len(txqueue[0].Buffers), len(txqueue[0].Buffers[0]))
+
+	// if s.trySimulate(txqueue) {
+	// 	return
+	// }
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +172,8 @@ func (s *UDPTunnel) Close() error {
 	if once {
 		s.mu.Lock()
 		txqueues := s.txqueues
-		s.txqueues = s.txqueues[:0]
+		// s.txqueues = s.txqueues[:0]
+		s.txqueues = make([][]ipv4.Message, 0)
 		s.mu.Unlock()
 
 		//todo maybe leak, 1. Write before append s.txqueues 2. Close 3. Write append
