@@ -2,7 +2,6 @@ package kcp
 
 import (
 	"encoding/binary"
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -832,7 +831,6 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			change++
 			earlyRetransSegs++
 		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
-			fmt.Println("flush logSegs", string(segment.data), segment.rto)
 			needsend = true
 			if kcp.nodelay == 0 {
 				segment.rto += kcp.rx_rto

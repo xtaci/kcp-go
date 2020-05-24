@@ -549,3 +549,14 @@ func (s *UDPStream) tryClean() {
 		s.cleanTimer = time.NewTimer(CleanTimeout).C
 	}
 }
+
+func (s *UDPStream) IsClean() bool {
+	select {
+	case <-s.chCleanEvent:
+		return true
+	case <-s.cleanTimer:
+		return true
+	default:
+		return false
+	}
+}

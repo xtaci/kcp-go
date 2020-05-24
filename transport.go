@@ -24,7 +24,22 @@ type RouteSelector interface {
 	Pick(remoteIps []string) (tunnels []*UDPTunnel, remotes []net.Addr)
 }
 
+type KCPOption struct {
+	nodelay  int
+	interval int
+	resend   int
+	nc       int
+}
+
+var defaultKCPOption = &KCPOption{
+	nodelay:  1,
+	interval: 20,
+	resend:   2,
+	nc:       1,
+}
+
 type UDPTransport struct {
+	kcpOption  *KCPOption
 	streamm    cmap.ConcurrentMap
 	acceptChan chan *UDPStream
 
@@ -35,8 +50,12 @@ type UDPTransport struct {
 	dieOnce sync.Once
 }
 
-func NewUDPTransport(sel RouteSelector) (t *UDPTransport, err error) {
+func NewUDPTransport(sel RouteSelector, option *KCPOption) (t *UDPTransport, err error) {
+	if option == nil {
+		option = defaultKCPOption
+	}
 	t = &UDPTransport{
+		kcpOption:   option,
 		streamm:     cmap.New(),
 		acceptChan:  make(chan *UDPStream),
 		tunnelHostM: make(map[string]*UDPTunnel),
@@ -65,6 +84,7 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 
 func (t *UDPTransport) NewStream(uuid gouuid.UUID, remoteIps []string, accepted bool) (stream *UDPStream, err error) {
 	stream, err = NewUDPStream(uuid, remoteIps, t.sel, t, accepted)
+	stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
 	if err != nil {
 		return nil, err
 	}
