@@ -47,9 +47,10 @@ type (
 		xconn           batchConn // for x/net
 		xconnWriteError error
 
-		mu      sync.Mutex
-		input   input_callback
-		localIp string
+		mu        sync.Mutex
+		input     input_callback
+		localIp   string
+		localAddr string
 
 		loss     int
 		delayMin int
@@ -81,6 +82,7 @@ func NewUDPTunnel(laddr string, input input_callback) (tunnel *UDPTunnel, err er
 	tunnel.conn = conn
 	tunnel.input = input
 	tunnel.localIp = lUDPAddr.IP.String()
+	tunnel.localAddr = laddr
 
 	// cast to writebatch conn
 	if lUDPAddr.IP.To4() != nil {
@@ -134,6 +136,10 @@ func (s *UDPTunnel) LocalIp() (ip string) {
 	return s.localIp
 }
 
+func (s *UDPTunnel) LocalAddr() (lAddr string) {
+	return s.localAddr
+}
+
 func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
 	if len(txqueue) == 0 {
 		return
@@ -144,8 +150,6 @@ func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
 		return errors.WithStack(io.ErrClosedPipe)
 	default:
 	}
-
-	fmt.Println("tunnel output", len(txqueue), len(txqueue[0].Buffers), len(txqueue[0].Buffers[0]))
 
 	// if s.trySimulate(txqueue) {
 	// 	return
@@ -163,6 +167,8 @@ func (s *UDPTunnel) Input(data []byte, addr net.Addr) {
 
 // Close closes the connection.
 func (s *UDPTunnel) Close() error {
+	fmt.Println("Tunnel Close", s.LocalAddr())
+
 	var once bool
 	s.dieOnce.Do(func() {
 		close(s.die)
@@ -205,6 +211,7 @@ func (s *UDPTunnel) ReleaseTX(txqueues [][]ipv4.Message) {
 }
 
 func (s *UDPTunnel) notifyReadError(err error) {
+	fmt.Println("notifyReadError", err)
 	//!todo
 	//read错误，有可能需要直接Close
 }

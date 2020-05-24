@@ -8,7 +8,6 @@
 package kcp
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -275,7 +274,6 @@ func (s *UDPStream) uncork() {
 	//todo if tunnel output failure, can change tunnel or else
 	for i, txqueue := range txqueues {
 		if len(txqueue) > 0 {
-			fmt.Println("uncork", len(txqueue), len(txqueue[0].Buffers), len(txqueue[0].Buffers[0]))
 			s.tunnels[i].Output(txqueue)
 		}
 	}
