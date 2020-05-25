@@ -42,7 +42,6 @@ type (
 	// UDPStream defines a KCP session implemented by UDP
 	UDPStream struct {
 		uuid      gouuid.UUID
-		uuidStr   string
 		sel       RouteSelector
 		transport *UDPTransport
 		kcp       *KCP     // KCP ARQ protocol
@@ -91,7 +90,6 @@ func NewUDPStream(uuid gouuid.UUID, remoteIps []string, sel RouteSelector, trans
 	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
-	stream.uuidStr = uuid.String()
 	stream.sel = sel
 	stream.transport = transport
 	stream.remoteIps = remoteIps
@@ -122,6 +120,7 @@ func NewUDPStream(uuid gouuid.UUID, remoteIps []string, sel RouteSelector, trans
 		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
 	}
 
+	KCPLogf(INFO, "NewUDPStream uuid:%v accepted:%v remoteIps:%v", uuid, accepted, remoteIps)
 	return stream, nil
 }
 
@@ -281,6 +280,8 @@ func (s *UDPStream) uncork() {
 
 // Close closes the connection.
 func (s *UDPStream) Close() error {
+	KCPLogf(INFO, "UDPStream::Close uuid:%v accepted:%v", s.uuid, s.accepted)
+
 	var once bool
 	s.dieOnce.Do(func() {
 		once = true
@@ -506,6 +507,8 @@ func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error)
 }
 
 func (s *UDPStream) syn(data []byte) (n int, err error) {
+	KCPLogf(INFO, "UDPStream::syn uuid:%v accepted:%v", s.uuid, s.accepted)
+
 	if len(s.remoteIps) != 0 {
 		return len(data), errors.WithStack(errIpsInfoRepeat)
 	}
@@ -521,6 +524,8 @@ func (s *UDPStream) syn(data []byte) (n int, err error) {
 }
 
 func (s *UDPStream) fin(data []byte) (n int, err error) {
+	KCPLogf(INFO, "UDPStream::fin uuid:%v accepted:%v", s.uuid, s.accepted)
+
 	s.finEventOnce.Do(func() {
 		close(s.chFinEvent)
 	})
@@ -541,6 +546,8 @@ func (s *UDPStream) psh(data []byte, b []byte) (n int, err error) {
 }
 
 func (s *UDPStream) tryClean() {
+	KCPLogf(INFO, "UDPStream::tryClean uuid:%v accepted:%v waitSnd:%v", s.uuid, s.accepted, s.kcp.WaitSnd())
+
 	if s.kcp.WaitSnd() == 0 {
 		close(s.chCleanEvent)
 	} else {

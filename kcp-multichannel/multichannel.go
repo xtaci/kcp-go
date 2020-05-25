@@ -216,6 +216,11 @@ func ServeServerStream(stream *kcp.UDPStream) {
 }
 
 func main() {
+	kcp.KCPLogf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
+		fmt.Printf(f, args...)
+		fmt.Println()
+	}
+
 	fmt.Println("Start")
 	quit := make(chan int)
 

@@ -8,11 +8,11 @@
 package kcp
 
 import (
-	"fmt"
 	"io"
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
@@ -93,6 +93,8 @@ func NewUDPTunnel(laddr string, input input_callback) (tunnel *UDPTunnel, err er
 
 	go tunnel.readLoop()
 	go tunnel.writeLoop()
+
+	KCPLogf(INFO, "NewUDPTunnel localAddr:%v", laddr)
 	return tunnel, nil
 }
 
@@ -118,10 +120,10 @@ func (s *UDPTunnel) trySimulate(txqueue []ipv4.Message) bool {
 	defer s.mu.Unlock()
 	s.txqueues = append(s.txqueues, succTxqueue)
 
-	// for _, msg := range succTxqueue {
-	// 	delay := time.Duration(s.delayMin+lossRand.Intn(s.delayMax-s.delayMin)) * time.Millisecond
-	// 	timerSender.Send(s, msg, delay)
-	// }
+	for _, msg := range succTxqueue {
+		delay := time.Duration(s.delayMin+lossRand.Intn(s.delayMax-s.delayMin)) * time.Millisecond
+		timerSender.Send(s, msg, delay)
+	}
 
 	return true
 }
@@ -151,9 +153,9 @@ func (s *UDPTunnel) Output(txqueue []ipv4.Message) (err error) {
 	default:
 	}
 
-	// if s.trySimulate(txqueue) {
-	// 	return
-	// }
+	if s.trySimulate(txqueue) {
+		return
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -167,7 +169,7 @@ func (s *UDPTunnel) Input(data []byte, addr net.Addr) {
 
 // Close closes the connection.
 func (s *UDPTunnel) Close() error {
-	fmt.Println("Tunnel Close", s.LocalAddr())
+	KCPLogf(INFO, "UDPTunnel::Close localAddr:%v", s.localAddr)
 
 	var once bool
 	s.dieOnce.Do(func() {
@@ -211,12 +213,13 @@ func (s *UDPTunnel) ReleaseTX(txqueues [][]ipv4.Message) {
 }
 
 func (s *UDPTunnel) notifyReadError(err error) {
-	fmt.Println("notifyReadError", err)
+	KCPLogf(WARN, "UDPTunnel::notifyReadError localAddr:%v", s.localAddr)
 	//!todo
 	//read错误，有可能需要直接Close
 }
 
 func (s *UDPTunnel) notifyWriteError(err error) {
+	KCPLogf(WARN, "UDPTunnel::notifyWriteError localAddr:%v", s.localAddr)
 	//!todo
 	//得确认是目标的问题，还是自身的问题
 }
