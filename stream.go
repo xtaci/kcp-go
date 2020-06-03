@@ -21,9 +21,10 @@ import (
 )
 
 var (
-	errTimeout     = errors.New("timeout")
-	errInvalidFlag = errors.New("invalid flag")
-	errInvalidSyn  = errors.New("invalid syn")
+	errTimeout    = errors.New("timeout")
+	errRemoteIps  = errors.New("err remote ips")
+	errStreamFlag = errors.New("err stream flag")
+	errSynInfo    = errors.New("err syn info")
 )
 
 const (
@@ -91,6 +92,11 @@ type (
 
 // newUDPSession create a new udp session for client or server
 func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel RouteSelector, cleancb clean_callback) (stream *UDPStream, err error) {
+	tunnels, remotes := sel.Pick(remoteIps)
+	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
+		return nil, errRemoteIps
+	}
+
 	stream = new(UDPStream)
 	stream.rst = make(chan struct{})
 	stream.chSendFinEvent = make(chan struct{})
@@ -108,7 +114,8 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
 	stream.hrtTicker = time.NewTicker(HrtTimeout)
-	stream.tunnels, stream.remotes = sel.Pick(remoteIps)
+	stream.tunnels = tunnels
+	stream.remotes = remotes
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -582,7 +589,7 @@ func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error)
 	case RST:
 		return s.recvRst(data)
 	default:
-		return 0, errInvalidFlag
+		return 0, errStreamFlag
 	}
 }
 
@@ -602,7 +609,7 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 		endpointInfo := string(data)
 		remoteIps := strings.Split(endpointInfo, ":")
 		if len(remoteIps) == 0 {
-			return len(data), errInvalidSyn
+			return len(data), errSynInfo
 		}
 		s.remoteIps = remoteIps
 		s.tunnels, s.remotes = s.sel.Pick(remoteIps)
