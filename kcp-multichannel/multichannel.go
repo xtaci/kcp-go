@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"crypto/md5"
-	"fmt"
 	"io"
 	"log"
 	"net"
@@ -21,11 +20,11 @@ func init() {
 		log.Ldate|log.Ltime)
 
 	Info := log.New(os.Stdout,
-		"INFO: ",
+		"INFO : ",
 		log.Ldate|log.Ltime)
 
 	Warning := log.New(os.Stdout,
-		"WARNING: ",
+		"WARN : ",
 		log.Ldate|log.Ltime)
 
 	Error := log.New(os.Stdout,
@@ -124,21 +123,19 @@ func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
-			fmt.Printf("error reading err:%v n:%v", err, n)
-			fmt.Println("")
+			kcp.Logf(kcp.INFO, "error reading err:%v n:%v", err, n)
 			break
 		}
 
 		_, err = dst.Write((*buf)[:n])
 		if err != nil {
-			fmt.Printf("error writing err:%v", err)
-			fmt.Println("")
+			kcp.Logf(kcp.INFO, "error writing err:%v", err)
 			break
 		}
 	}
 	bufPool.Put(buf)
 
-	fmt.Println("iobridge end")
+	kcp.Logf(kcp.INFO, "iobridge end")
 }
 
 func Client() {
@@ -171,7 +168,6 @@ func Client() {
 
 	go func() {
 		time.Sleep(time.Second * 5)
-		closeTunnel.Close()
 	}()
 
 	ServeClientStream(stream)
@@ -181,7 +177,7 @@ var lFileHash []byte
 var lFileSaveHash []byte
 
 func ServeClientStream(stream *kcp.UDPStream) {
-	fmt.Println("ServeClientStream Start", stream.GetUUID())
+	kcp.Logf(kcp.INFO, "ServeClientStream start uuid:%v", stream.GetUUID())
 
 	// bridge connection
 	shutdown := make(chan bool, 2)
@@ -200,7 +196,8 @@ func ServeClientStream(stream *kcp.UDPStream) {
 	<-shutdown
 	lFileHash = h.Sum(nil)
 	stream.Close()
-	fmt.Println("ServeClientStream End", stream.GetUUID())
+
+	kcp.Logf(kcp.INFO, "ServeClientStream end uuid:%v", stream.GetUUID())
 }
 
 func Server() {

@@ -110,6 +110,8 @@ func NewUDPTransport(sel RouteSelector, option *KCPOption, accept bool) (t *UDPT
 }
 
 func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
+	Logf(INFO, "UDPTransport::NewTunnel lAddr:%v", lAddr)
+
 	tunnel, ok := t.tunnelHostM[lAddr]
 	if ok {
 		return tunnel, nil
@@ -124,12 +126,12 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 	}
 	t.tunnelHostM[lAddr] = tunnel
 	t.sel.AddTunnel(tunnel)
-
-	Logf(INFO, "UDPTransport::NewTunnel lAddr:%v", lAddr)
 	return tunnel, nil
 }
 
-func (t *UDPTransport) NewStream(uuid gouuid.UUID, remoteIps []string, accepted bool) (stream *UDPStream, err error) {
+func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remoteIps []string) (stream *UDPStream, err error) {
+	Logf(INFO, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v", uuid, accepted, remoteIps)
+
 	stream, err = NewUDPStream(uuid, accepted, remoteIps, t.sel, func(uuid gouuid.UUID) {
 		t.handleClose(uuid)
 	})
@@ -138,14 +140,15 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, remoteIps []string, accepted 
 		return nil, err
 	}
 	stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
-	Logf(INFO, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v", uuid, accepted, remoteIps)
 	return stream, err
 }
 
 //interface
 func (t *UDPTransport) Open(remoteIps []string) (stream *UDPStream, err error) {
 	uuid := gouuid.NewV1()
-	stream, err = t.NewStream(uuid, remoteIps, false)
+	Logf(INFO, "UDPTransport::Open uuid:%v remoteIps:%v", uuid, remoteIps)
+
+	stream, err = t.NewStream(uuid, false, remoteIps)
 	if err != nil {
 		Logf(ERROR, "UDPTransport::Open uuid:%v remoteIps:%v err:%v", uuid, remoteIps, err)
 		return nil, errors.WithStack(err)
@@ -156,7 +159,6 @@ func (t *UDPTransport) Open(remoteIps []string) (stream *UDPStream, err error) {
 		Logf(WARN, "UDPTransport::open timeout uuid:%v remoteIps:%v", uuid, remoteIps)
 		return nil, err
 	}
-	Logf(INFO, "UDPTransport::Open uuid:%v remoteIps:%v", uuid, remoteIps)
 	return stream, nil
 }
 
@@ -191,7 +193,7 @@ func (t *UDPTransport) handleOpen(uuid gouuid.UUID, remoteIP string) (stream *UD
 		if exist {
 			return valueInMap
 		}
-		s, err := t.NewStream(uuid, []string{remoteIP}, true)
+		s, err := t.NewStream(uuid, true, []string{remoteIP})
 		if err != nil {
 			return nil
 		}
