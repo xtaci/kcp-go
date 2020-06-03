@@ -31,7 +31,7 @@ func (s *UDPTunnel) readLoop() {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				if msg.N >= gouuid.Size+IKCP_OVERHEAD {
-					s.Input(msg.Buffers[0][:msg.N], msg.Addr)
+					s.input(msg.Buffers[0][:msg.N], msg.Addr)
 				} else {
 					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				}
@@ -49,7 +49,6 @@ func (s *UDPTunnel) readLoop() {
 				}
 			}
 			s.notifyReadError(errors.WithStack(err))
-			break
 		}
 	}
 }

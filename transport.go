@@ -12,7 +12,8 @@ import (
 
 const (
 	// accept backlog
-	acceptBacklog = 128
+	acceptBacklog       = 128
+	streamDialTimeoutMs = 200
 )
 
 var (
@@ -29,7 +30,7 @@ const (
 	FATAL = LogLevel(5)
 )
 
-var KCPLogf = func(lvl LogLevel, f string, args ...interface{}) {}
+var Logf = func(lvl LogLevel, f string, args ...interface{}) {}
 
 func (l LogLevel) String() string {
 	switch l {
@@ -66,6 +67,17 @@ var defaultKCPOption = &KCPOption{
 	nc:       1,
 }
 
+func netAddrToIP(addr net.Addr) string {
+	switch addr := addr.(type) {
+	case *net.UDPAddr:
+		return addr.IP.String()
+	case *net.TCPAddr:
+		return addr.IP.String()
+	default:
+		return ""
+	}
+}
+
 type UDPTransport struct {
 	kcpOption  *KCPOption
 	streamm    cmap.ConcurrentMap
@@ -78,14 +90,18 @@ type UDPTransport struct {
 	dieOnce sync.Once
 }
 
-func NewUDPTransport(sel RouteSelector, option *KCPOption) (t *UDPTransport, err error) {
+func NewUDPTransport(sel RouteSelector, option *KCPOption, accept bool) (t *UDPTransport, err error) {
 	if option == nil {
 		option = defaultKCPOption
+	}
+	var accepteChan chan *UDPStream
+	if accept {
+		accepteChan = make(chan *UDPStream)
 	}
 	t = &UDPTransport{
 		kcpOption:   option,
 		streamm:     cmap.New(),
-		acceptChan:  make(chan *UDPStream),
+		acceptChan:  accepteChan,
 		tunnelHostM: make(map[string]*UDPTunnel),
 		sel:         sel,
 		die:         make(chan struct{}),
@@ -100,53 +116,30 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 	}
 
 	tunnel, err = NewUDPTunnel(lAddr, func(data []byte, rAddr net.Addr) {
-		t.tunnelInput(data, rAddr)
+		t.handleInput(data, rAddr)
 	})
 	if err != nil {
-		KCPLogf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)
+		Logf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)
 		return nil, errors.WithStack(err)
 	}
 	t.tunnelHostM[lAddr] = tunnel
 	t.sel.AddTunnel(tunnel)
 
-	KCPLogf(INFO, "UDPTransport::NewTunnel lAddr:%v", lAddr)
+	Logf(INFO, "UDPTransport::NewTunnel lAddr:%v", lAddr)
 	return tunnel, nil
 }
 
 func (t *UDPTransport) NewStream(uuid gouuid.UUID, remoteIps []string, accepted bool) (stream *UDPStream, err error) {
-	stream, err = NewUDPStream(uuid, remoteIps, t.sel, t, accepted)
-	stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
+	stream, err = NewUDPStream(uuid, accepted, remoteIps, t.sel, func(uuid gouuid.UUID) {
+		t.handleClose(uuid)
+	})
 	if err != nil {
-		KCPLogf(ERROR, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v err:%v", uuid, accepted, remoteIps, err)
+		Logf(ERROR, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v err:%v", uuid, accepted, remoteIps, err)
 		return nil, err
 	}
-
-	KCPLogf(INFO, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v", uuid, accepted, remoteIps)
+	stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
+	Logf(INFO, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v", uuid, accepted, remoteIps)
 	return stream, err
-}
-
-func (t *UDPTransport) tunnelInput(data []byte, rAddr net.Addr) {
-	var uuid gouuid.UUID
-	copy(uuid[:], data)
-	uuidStr := uuid.String()
-
-	stream, ok := t.streamm.Get(uuidStr)
-	if !ok {
-		stream = t.streamm.Upsert(uuidStr, nil, func(exist bool, valueInMap interface{}, newValue interface{}) interface{} {
-			if exist {
-				return valueInMap
-			}
-			stream, err := t.NewStream(uuid, nil, true)
-			if err != nil {
-				return nil
-			}
-			t.acceptChan <- stream
-			return stream
-		})
-	}
-	if s, ok := stream.(*UDPStream); ok && s != nil {
-		s.input(data)
-	}
 }
 
 //interface
@@ -154,22 +147,60 @@ func (t *UDPTransport) Open(remoteIps []string) (stream *UDPStream, err error) {
 	uuid := gouuid.NewV1()
 	stream, err = t.NewStream(uuid, remoteIps, false)
 	if err != nil {
-		KCPLogf(ERROR, "UDPTransport::Open uuid:%v remoteIps:%v err:%v", uuid, remoteIps, err)
+		Logf(ERROR, "UDPTransport::Open uuid:%v remoteIps:%v err:%v", uuid, remoteIps, err)
 		return nil, errors.WithStack(err)
 	}
 	t.streamm.Set(uuid.String(), stream)
-
-	KCPLogf(INFO, "UDPTransport::Open uuid:%v remoteIps:%v", uuid, remoteIps)
+	err = stream.Dial(streamDialTimeoutMs)
+	if err != nil {
+		Logf(WARN, "UDPTransport::open timeout uuid:%v remoteIps:%v", uuid, remoteIps)
+		return nil, err
+	}
+	Logf(INFO, "UDPTransport::Open uuid:%v remoteIps:%v", uuid, remoteIps)
 	return stream, nil
 }
 
-//interface
 func (t *UDPTransport) Accept() (stream *UDPStream, err error) {
 	select {
 	case stream = <-t.acceptChan:
-		KCPLogf(INFO, "UDPTransport::Accept uuid:%v", stream.GetUUID())
+		Logf(INFO, "UDPTransport::Accept uuid:%v", stream.GetUUID())
 		return stream, nil
 	case <-t.die:
 		return nil, errors.WithStack(io.ErrClosedPipe)
 	}
+}
+
+func (t *UDPTransport) handleInput(data []byte, rAddr net.Addr) {
+	var uuid gouuid.UUID
+	copy(uuid[:], data)
+
+	stream, new := t.handleOpen(uuid, netAddrToIP(rAddr))
+	if stream != nil {
+		if stream.input(data) == nil && new && t.acceptChan != nil {
+			t.acceptChan <- stream
+		}
+	}
+}
+
+func (t *UDPTransport) handleOpen(uuid gouuid.UUID, remoteIP string) (stream *UDPStream, new bool) {
+	s, ok := t.streamm.Get(uuid.String())
+	if ok {
+		return s.(*UDPStream), false
+	}
+	s = t.streamm.Upsert(uuid.String(), nil, func(exist bool, valueInMap interface{}, newValue interface{}) interface{} {
+		if exist {
+			return valueInMap
+		}
+		s, err := t.NewStream(uuid, []string{remoteIP}, true)
+		if err != nil {
+			return nil
+		}
+		new = true
+		return s
+	})
+	return s.(*UDPStream), new
+}
+
+func (t *UDPTransport) handleClose(uuid gouuid.UUID) {
+	t.streamm.Remove(uuid.String())
 }

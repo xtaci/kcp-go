@@ -80,7 +80,7 @@ func (h *TimedSender) sendLoop() {
 		for h.Len() > 0 {
 			entry := &h.entries[0]
 			if !time.Now().Before(entry.ts) {
-				entry.tunnel.SimulateOutput(entry.msg)
+				entry.tunnel.pushMsgs([]ipv4.Message{entry.msg})
 				heap.Pop(h)
 			} else {
 				break

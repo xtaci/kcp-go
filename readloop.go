@@ -12,13 +12,12 @@ func (s *UDPTunnel) defaultReadLoop() {
 	for {
 		if n, from, err := s.conn.ReadFrom(buf); err == nil {
 			if n >= gouuid.Size+IKCP_OVERHEAD {
-				s.Input(buf[:n], from)
+				s.input(buf[:n], from)
 			} else {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
 			s.notifyReadError(errors.WithStack(err))
-			break
 		}
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"sync"
@@ -114,10 +115,13 @@ func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
 
 func Client() {
 	sel, _ := NewTestSelector(rAddrs)
-	transport, _ := kcp.NewUDPTransport(sel, nil)
+	transport, _ := kcp.NewUDPTransport(sel, nil, false)
 	var closeTunnel *kcp.UDPTunnel
 	for _, lAddr := range lAddrs {
-		tunnel, _ := transport.NewTunnel(lAddr)
+		tunnel, err := transport.NewTunnel(lAddr)
+		if err != nil {
+			panic("NewTunnel")
+		}
 		tunnel.Simulate(0, 0, 0)
 		if closeTunnel == nil {
 			closeTunnel = tunnel
@@ -157,23 +161,17 @@ func ServeClientStream(stream *kcp.UDPStream) {
 	<-shutdown
 	lFileHash = h.Sum(nil)
 	stream.Close()
-
-	for {
-		if stream.IsClean() {
-			break
-		} else {
-			time.Sleep(time.Millisecond * 10)
-		}
-	}
-
 	fmt.Println("ServeClientStream End", stream.GetUUID())
 }
 
 func Server() {
 	sel, _ := NewTestSelector(lAddrs)
-	transport, _ := kcp.NewUDPTransport(sel, nil)
+	transport, _ := kcp.NewUDPTransport(sel, nil, true)
 	for _, rAddr := range rAddrs {
-		tunnel, _ := transport.NewTunnel(rAddr)
+		tunnel, err := transport.NewTunnel(rAddr)
+		if err != nil {
+			panic("NewTunnel")
+		}
 		tunnel.Simulate(0, 0, 0)
 	}
 
@@ -203,23 +201,17 @@ func ServeServerStream(stream *kcp.UDPStream) {
 	<-shutdown
 	lFileSaveHash = h.Sum(nil)
 	stream.Close()
-
-	for {
-		if stream.IsClean() {
-			break
-		} else {
-			time.Sleep(time.Millisecond * 10)
-		}
-	}
-
 	fmt.Println("ServeServerStream End", stream.GetUUID(), bytes.Equal(lFileHash, lFileSaveHash))
 }
 
 func main() {
-	kcp.KCPLogf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
+	kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
+
 		fmt.Printf(f, args...)
 		fmt.Println()
 	}
+
+	log.Println("xxx")
 
 	fmt.Println("Start")
 	quit := make(chan int)

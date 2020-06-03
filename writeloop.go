@@ -7,11 +7,11 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-func (s *UDPTunnel) writeSingle(txqueue []ipv4.Message) {
+func (s *UDPTunnel) writeSingle(msgs []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
-	for k := range txqueue {
-		if n, err := s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr); err == nil {
+	for k := range msgs {
+		if n, err := s.conn.WriteTo(msgs[k].Buffers[0], msgs[k].Addr); err == nil {
 			nbytes += n
 			npkts++
 		} else {
@@ -26,18 +26,16 @@ func (s *UDPTunnel) writeSingle(txqueue []ipv4.Message) {
 
 func (s *UDPTunnel) defaultWriteLoop() {
 	for {
-		if s.IsClosed() {
+		select {
+		case <-s.die:
 			return
+		case <-s.chFlush:
 		}
 
-		s.mu.Lock()
-		txqueues := s.txqueues
-		// s.txqueues = s.txqueues[:0]
-		s.txqueues = make([][]ipv4.Message, 0)
-		s.mu.Unlock()
-		for _, txqueue := range txqueues {
-			s.writeSingle(txqueue)
+		msgss := s.popMsgss()
+		for _, msgs := range msgss {
+			s.writeSingle(msgs)
 		}
-		s.ReleaseTX(txqueues)
+		s.releaseMsgss(msgss)
 	}
 }

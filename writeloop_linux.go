@@ -11,17 +11,17 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-func (s *UDPTunnel) writeBatch(txqueue []ipv4.Message) {
+func (s *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 	// x/net version
 	nbytes := 0
 	npkts := 0
-	for len(txqueue) > 0 {
-		if n, err := s.xconn.WriteBatch(txqueue, 0); err == nil {
-			for k := range txqueue[:n] {
-				nbytes += len(txqueue[k].Buffers[0])
+	for len(msgs) > 0 {
+		if n, err := s.xconn.WriteBatch(msgs, 0); err == nil {
+			for k := range msgs[:n] {
+				nbytes += len(msgs[k].Buffers[0])
 			}
 			npkts += n
-			txqueue = txqueue[n:]
+			msgs = msgs[n:]
 		} else {
 			// compatibility issue:
 			// for linux kernel<=2.6.32, support for sendmmsg is not available
@@ -30,7 +30,7 @@ func (s *UDPTunnel) writeBatch(txqueue []ipv4.Message) {
 				if se, ok := operr.Err.(*os.SyscallError); ok {
 					if se.Syscall == "sendmmsg" {
 						s.xconnWriteError = se
-						s.writeSingle(txqueue)
+						s.writeSingle(msgs)
 						return
 					}
 				}
@@ -52,18 +52,16 @@ func (s *UDPTunnel) writeLoop() {
 	}
 
 	for {
-		if s.IsClosed() {
+		select {
+		case <-s.die:
 			return
+		case <-s.chFlush:
 		}
 
-		s.mu.Lock()
-		txqueues := s.txqueues
-		s.txqueues = s.txqueues[:0]
-		s.mu.Unlock()
-
-		for _, txqueue := range txqueues {
-			s.writeBatch(txqueue)
+		msgss := s.popMsgss()
+		for _, msgs := range msgss {
+			s.writeBatch(msgs)
 		}
-		s.ReleaseTX(txqueues)
+		s.releaseMsgss(msgss)
 	}
 }
