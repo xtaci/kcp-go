@@ -123,19 +123,47 @@ func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
-			kcp.Logf(kcp.INFO, "error reading err:%v n:%v", err, n)
+			kcp.Logf(kcp.INFO, "iobridge reading err:%v n:%v", err, n)
 			break
 		}
 
 		_, err = dst.Write((*buf)[:n])
 		if err != nil {
-			kcp.Logf(kcp.INFO, "error writing err:%v", err)
+			kcp.Logf(kcp.INFO, "iobridge writing err:%v", err)
 			break
 		}
 	}
 	bufPool.Put(buf)
 
 	kcp.Logf(kcp.INFO, "iobridge end")
+}
+
+type fileToStream struct {
+	src    io.Reader
+	stream *kcp.UDPStream
+}
+
+func (fs *fileToStream) Read(b []byte) (n int, err error) {
+	n, err = fs.src.Read(b)
+	if err == io.EOF {
+		fs.stream.CloseWrite()
+	}
+	return n, err
+}
+
+func fileSend(src io.Reader, dst *kcp.UDPStream, shutdown chan bool) {
+	fs := &fileToStream{src, dst}
+	iobridge(fs, dst, shutdown)
+
+	kcp.Logf(kcp.INFO, "fileSend end")
+}
+
+func fileRecv(src *kcp.UDPStream, dst io.Writer, expectHash []byte, shutdown chan bool) {
+	h := md5.New()
+	ts := io.TeeReader(src, h)
+	iobridge(ts, dst, shutdown)
+
+	kcp.Logf(kcp.INFO, "fileRecv end hashcheck:%v", bytes.Equal(expectHash, h.Sum(nil)))
 }
 
 func Client() {
@@ -175,26 +203,26 @@ func Client() {
 
 var lFileHash []byte
 var lFileSaveHash []byte
+var rFileHash []byte
+var rFileSaveHash []byte
 
 func ServeClientStream(stream *kcp.UDPStream) {
 	kcp.Logf(kcp.INFO, "ServeClientStream start uuid:%v", stream.GetUUID())
 
 	// bridge connection
 	shutdown := make(chan bool, 2)
-	h := md5.New()
 
 	lf, _ := os.Open(lFile)
 	defer lf.Close()
-	tr := io.TeeReader(lf, h)
-	go iobridge(tr, stream, shutdown)
+	go fileSend(lf, stream, shutdown)
 
-	// rf, _ := os.Create(rFileSave)
-	// defer rf.Close()
-	// go iobridge(stream, rf, shutdown)
+	rf, _ := os.Create(rFileSave)
+	defer rf.Close()
+	go fileRecv(stream, rf, rFileHash, shutdown)
 
-	// <-shutdown
 	<-shutdown
-	lFileHash = h.Sum(nil)
+	<-shutdown
+
 	stream.Close()
 
 	kcp.Logf(kcp.INFO, "ServeClientStream end uuid:%v", stream.GetUUID())
@@ -232,26 +260,37 @@ func ServeServerStream(stream *kcp.UDPStream) {
 
 	// bridge connection
 	shutdown := make(chan bool, 2)
-	h := md5.New()
-
-	// lf, _ := os.Open(rFile)
-	// defer lf.Close()
-	// go iobridge(lf, stream, shutdown)
 
 	rf, _ := os.Create(lFileSave)
-	tr := io.TeeReader(stream, h)
 	defer rf.Close()
-	go iobridge(tr, rf, shutdown)
+	go fileRecv(stream, rf, lFileHash, shutdown)
 
-	// <-shutdown
+	lf, _ := os.Open(rFile)
+	defer lf.Close()
+	go fileSend(lf, stream, shutdown)
+
 	<-shutdown
-	lFileSaveHash = h.Sum(nil)
-	stream.Close()
+	<-shutdown
 
-	kcp.Logf(kcp.INFO, "ServeServerStream end uuid:%v hashCheck:%v", stream.GetUUID(), bytes.Equal(lFileHash, lFileSaveHash))
+	stream.Close()
+	kcp.Logf(kcp.INFO, "ServeServerStream end uuid:%v", stream.GetUUID())
 }
 
 func main() {
+	lf, _ := os.Open(lFile)
+	defer lf.Close()
+	lh := md5.New()
+	_, err := io.Copy(lh, lf)
+	lFileHash = lh.Sum(nil)
+	kcp.Logf(kcp.INFO, "local file hash:%v err:%v", lFileHash, err)
+
+	rf, _ := os.Open(rFile)
+	defer rf.Close()
+	rh := md5.New()
+	_, err = io.Copy(rh, rf)
+	rFileHash = rh.Sum(nil)
+	kcp.Logf(kcp.INFO, "remote file hash:%v err:%v", rFileHash, err)
+
 	quit := make(chan int)
 
 	go Server()
