@@ -38,7 +38,7 @@ const (
 type clean_callback func(uuid gouuid.UUID)
 
 type (
-	// UDPStream defines a KCP session implemented by UDP
+	// UDPStream defines a KCP session
 	UDPStream struct {
 		uuid      gouuid.UUID
 		sel       RouteSelector
@@ -69,13 +69,12 @@ type (
 		recvFinOnce    sync.Once
 		chRecvFinEvent chan struct{} // notify recv fin
 		rstOnce        sync.Once
-		chRst          chan struct{} // notify current session has Closed
+		chRst          chan struct{} // notify current stream reset
 		closeOnce      sync.Once
-		chClose        chan struct{} // notify current session has Closed
-		chClean        chan struct{} // notify current session has cleand
-
-		chReadEvent  chan struct{} // notify Read() can be called without blocking
-		chWriteEvent chan struct{} // notify Write() can be called without blocking
+		chClose        chan struct{} // notify stream has Closed
+		chClean        chan struct{} // notify stream has cleand
+		chReadEvent    chan struct{} // notify Read() can be called without blocking
+		chWriteEvent   chan struct{} // notify Write() can be called without blocking
 
 		hrtTicker *time.Ticker
 

@@ -18,7 +18,7 @@ var (
 type input_callback func(data []byte, addr net.Addr)
 
 type (
-	// UDPTunnel defines a KCP session implemented by UDP
+	// UDPTunnel defines a session implemented by UDP
 	UDPTunnel struct {
 		conn     net.PacketConn // the underlying packet connection
 		lUDPAddr *net.UDPAddr
@@ -26,7 +26,7 @@ type (
 		inputcb  input_callback
 
 		// notifications
-		die     chan struct{} // notify current session has Closed
+		die     chan struct{} // notify tunnel has Closed
 		dieOnce sync.Once
 
 		chFlush chan struct{} // notify Write
