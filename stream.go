@@ -56,6 +56,7 @@ type (
 		bufptr  []byte
 
 		// settings
+		hrtTime    time.Time // next heart beat time
 		rd         time.Time // read deadline
 		wd         time.Time // write deadline
 		headerSize int       // the header size additional to a KCP frame
@@ -75,8 +76,6 @@ type (
 		chClean        chan struct{} // notify stream has cleand
 		chReadEvent    chan struct{} // notify Read() can be called without blocking
 		chWriteEvent   chan struct{} // notify Write() can be called without blocking
-
-		hrtTicker *time.Ticker
 
 		// packets waiting to be sent on wire
 		msgss [][]ipv4.Message
@@ -107,7 +106,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	stream.headerSize = gouuid.Size
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
-	stream.hrtTicker = time.NewTicker(HrtTimeout)
+	stream.hrtTime = time.Now().Add(HrtTimeout)
 	stream.remoteIps = remoteIps
 	stream.tunnels = tunnels
 	stream.remotes = remotes
@@ -408,19 +407,18 @@ func (s *UDPStream) Dial(timeoutMs int) error {
 
 // Close closes the connection.
 func (s *UDPStream) Close() error {
-	Logf(INFO, "UDPStream::Close uuid:%v accepted:%v", s.uuid, s.accepted)
-
 	var once bool
 	s.closeOnce.Do(func() {
 		once = true
 	})
+
+	Logf(INFO, "UDPStream::Close uuid:%v accepted:%v once:%v", s.uuid, s.accepted, once)
 	if !once {
 		return io.ErrClosedPipe
 	}
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	s.hrtTicker.Stop()
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 
 	SystemTimedSched.Put(s.clean, time.Now().Add(CleanTimeout))
@@ -428,21 +426,25 @@ func (s *UDPStream) Close() error {
 }
 
 func (s *UDPStream) CloseWrite() {
-	Logf(INFO, "UDPStream::CloseWrite uuid:%v accepted:%v", s.uuid, s.accepted)
-
+	var once bool
 	s.sendFinOnce.Do(func() {
+		once = true
 		s.WriteFlag(FIN, nil)
 		close(s.chSendFinEvent)
 	})
+
+	Logf(INFO, "UDPStream::CloseWrite uuid:%v accepted:%v once:%v", s.uuid, s.accepted, once)
 }
 
 func (s *UDPStream) reset() {
-	Logf(INFO, "UDPStream::reset uuid:%v accepted:%v", s.uuid, s.accepted)
-
-	s.recvSynOnce.Do(func() {
+	var once bool
+	s.rstOnce.Do(func() {
+		once = true
 		close(s.chRst)
 		s.kcp.ReleaseTX()
 	})
+
+	Logf(INFO, "UDPStream::reset uuid:%v accepted:%v once:%v", s.uuid, s.accepted, once)
 }
 
 func (s *UDPStream) clean() {
@@ -450,17 +452,26 @@ func (s *UDPStream) clean() {
 	close(s.chClean)
 }
 
+func (s *UDPStream) heartBeat(now time.Time) {
+	if now.Before(s.hrtTime) {
+		return
+	}
+	Logf(DEBUG, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
+	s.hrtTime = now.Add(HrtTimeout)
+	s.WriteFlag(HRT, nil)
+}
+
 // sess update to trigger protocol
 func (s *UDPStream) update() {
 	select {
-	case <-s.hrtTicker.C:
-		s.WriteFlag(HRT, nil)
 	case <-s.chClean:
 		s.mu.Lock()
 		s.kcp.ReleaseTX()
 		s.mu.Unlock()
 		s.cleancb(s.uuid)
 	default:
+		now := time.Now()
+		s.heartBeat(now)
 		s.mu.Lock()
 		if s.kcp.state == 0xFFFFFFFF {
 			s.reset()
@@ -475,7 +486,7 @@ func (s *UDPStream) update() {
 		s.mu.Unlock()
 		s.uncork()
 		// self-synchronized timed scheduling
-		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
+		SystemTimedSched.Put(s.update, now.Add(time.Duration(interval)*time.Millisecond))
 	}
 }
 

@@ -42,6 +42,65 @@ func init() {
 	}
 }
 
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
+	defer func() {
+		shutdown <- true
+	}()
+
+	buf := bufPool.Get().(*[]byte)
+	for {
+		n, err := src.Read(*buf)
+		if err != nil {
+			kcp.Logf(kcp.INFO, "iobridge reading err:%v n:%v", err, n)
+			break
+		}
+
+		_, err = dst.Write((*buf)[:n])
+		if err != nil {
+			kcp.Logf(kcp.INFO, "iobridge writing err:%v", err)
+			break
+		}
+	}
+	bufPool.Put(buf)
+
+	kcp.Logf(kcp.INFO, "iobridge end")
+}
+
+type fileToStream struct {
+	src    io.Reader
+	stream *kcp.UDPStream
+}
+
+func (fs *fileToStream) Read(b []byte) (n int, err error) {
+	n, err = fs.src.Read(b)
+	if err == io.EOF {
+		fs.stream.CloseWrite()
+	}
+	return n, err
+}
+
+func fileSend(src io.Reader, dst *kcp.UDPStream, shutdown chan bool) {
+	fs := &fileToStream{src, dst}
+	iobridge(fs, dst, shutdown)
+
+	kcp.Logf(kcp.INFO, "fileSend end")
+}
+
+func fileRecv(src *kcp.UDPStream, dst io.Writer, expectHash []byte, shutdown chan bool) {
+	h := md5.New()
+	ts := io.TeeReader(src, h)
+	iobridge(ts, dst, shutdown)
+
+	kcp.Logf(kcp.INFO, "fileRecv end hashcheck:%v", bytes.Equal(expectHash, h.Sum(nil)))
+}
+
 type TunnelPoll struct {
 	tunnels []*kcp.UDPTunnel
 	idx     uint32
@@ -106,65 +165,6 @@ var rFileSave = "./file/rFileSave"
 var rAddrs = []string{"127.0.0.1:8001", "127.0.0.1:8002"}
 var rFile = "./file/rFile"
 var lFileSave = "./file/lFileSave"
-
-var bufPool = sync.Pool{
-	New: func() interface{} {
-		b := make([]byte, 32*1024)
-		return &b
-	},
-}
-
-func iobridge(src io.Reader, dst io.Writer, shutdown chan bool) {
-	defer func() {
-		shutdown <- true
-	}()
-
-	buf := bufPool.Get().(*[]byte)
-	for {
-		n, err := src.Read(*buf)
-		if err != nil {
-			kcp.Logf(kcp.INFO, "iobridge reading err:%v n:%v", err, n)
-			break
-		}
-
-		_, err = dst.Write((*buf)[:n])
-		if err != nil {
-			kcp.Logf(kcp.INFO, "iobridge writing err:%v", err)
-			break
-		}
-	}
-	bufPool.Put(buf)
-
-	kcp.Logf(kcp.INFO, "iobridge end")
-}
-
-type fileToStream struct {
-	src    io.Reader
-	stream *kcp.UDPStream
-}
-
-func (fs *fileToStream) Read(b []byte) (n int, err error) {
-	n, err = fs.src.Read(b)
-	if err == io.EOF {
-		fs.stream.CloseWrite()
-	}
-	return n, err
-}
-
-func fileSend(src io.Reader, dst *kcp.UDPStream, shutdown chan bool) {
-	fs := &fileToStream{src, dst}
-	iobridge(fs, dst, shutdown)
-
-	kcp.Logf(kcp.INFO, "fileSend end")
-}
-
-func fileRecv(src *kcp.UDPStream, dst io.Writer, expectHash []byte, shutdown chan bool) {
-	h := md5.New()
-	ts := io.TeeReader(src, h)
-	iobridge(ts, dst, shutdown)
-
-	kcp.Logf(kcp.INFO, "fileRecv end hashcheck:%v", bytes.Equal(expectHash, h.Sum(nil)))
-}
 
 func Client() {
 	sel, err := NewTestSelector(rAddrs)

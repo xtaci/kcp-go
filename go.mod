@@ -10,6 +10,7 @@ require (
 	github.com/templexxx/xor v0.0.0-20191217153810-f85b25db303b // indirect
 	github.com/templexxx/xorsimd v0.4.1
 	github.com/tjfoc/gmsm v1.0.1
+	github.com/urfave/cli v1.22.4 // indirect
 	github.com/xtaci/kcp-go v5.4.20+incompatible // indirect
 	github.com/xtaci/lossyconn v0.0.0-20190602105132-8df528c0c9ae
 	golang.org/x/crypto v0.0.0-20191206172530-e9b2fee46413
