@@ -184,7 +184,7 @@ func Client() {
 			panic("NewTunnel")
 		}
 		sel.AddTunnel(tunnel)
-		tunnel.Simulate(0, 0, 0)
+		tunnel.Simulate(0.2, 10, 100)
 		if closeTunnel == nil {
 			closeTunnel = tunnel
 		}
@@ -248,7 +248,7 @@ func Server() {
 			panic("NewTunnel")
 		}
 		sel.AddTunnel(tunnel)
-		tunnel.Simulate(0, 0, 0)
+		tunnel.Simulate(0.2, 10, 100)
 	}
 
 	for {

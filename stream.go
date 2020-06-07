@@ -56,7 +56,7 @@ type (
 		bufptr  []byte
 
 		// settings
-		hrtTime    time.Time // next heart beat time
+		flushTime  time.Time // flush time
 		rd         time.Time // read deadline
 		wd         time.Time // write deadline
 		headerSize int       // the header size additional to a KCP frame
@@ -106,10 +106,10 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	stream.headerSize = gouuid.Size
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
-	stream.hrtTime = time.Now().Add(HrtTimeout)
 	stream.remoteIps = remoteIps
 	stream.tunnels = tunnels
 	stream.remotes = remotes
+	stream.flushTime = time.Now()
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -125,7 +125,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 		}
 		stream.WriteFlag(SYN, []byte(strings.Join(localIps, ":")))
 		stream.kcp.flush(false)
-		stream.uncork()
+		stream.flush()
 	}
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
@@ -263,7 +263,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 			s.kcp.Recv(s.recvbuf)
 			flag := s.recvbuf[0]
 			n, err := s.cmdRead(flag, s.recvbuf[1:], b)
-			s.bufptr = s.recvbuf[n+1:] // pointer update
+			s.bufptr = s.recvbuf[n+1:]
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n+1))
 			if flag != PSH {
@@ -363,6 +363,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 			return len(b), nil
 		}
+		Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
 
 		var timeout *time.Timer
 		var c <-chan time.Time
@@ -460,13 +461,13 @@ func (s *UDPStream) clean() {
 	close(s.chClean)
 }
 
-func (s *UDPStream) heartBeat(now time.Time) {
-	if now.Before(s.hrtTime) {
-		return
+func (s *UDPStream) heartBeat(now time.Time, tickSend bool) {
+	if tickSend {
+		s.flushTime = now
+	} else if now.Sub(s.flushTime) >= HrtTimeout {
+		Logf(DEBUG, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
+		s.WriteFlag(HRT, nil)
 	}
-	Logf(DEBUG, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
-	s.hrtTime = now.Add(HrtTimeout)
-	s.WriteFlag(HRT, nil)
 }
 
 // sess update to trigger protocol
@@ -478,8 +479,6 @@ func (s *UDPStream) update() {
 		s.mu.Unlock()
 		s.cleancb(s.uuid)
 	default:
-		now := time.Now()
-		s.heartBeat(now)
 		s.mu.Lock()
 		if s.kcp.state == 0xFFFFFFFF {
 			s.reset()
@@ -492,14 +491,15 @@ func (s *UDPStream) update() {
 			s.notifyWriteEvent()
 		}
 		s.mu.Unlock()
-		s.uncork()
 		// self-synchronized timed scheduling
+		now := time.Now()
 		SystemTimedSched.Put(s.update, now.Add(time.Duration(interval)*time.Millisecond))
+		s.heartBeat(now, s.flush() != 0)
 	}
 }
 
-// uncork sends data in txqueue if there is any
-func (s *UDPStream) uncork() {
+// flush sends data in txqueue if there is any
+func (s *UDPStream) flush() (flushCnt int) {
 	s.mu.Lock()
 	if len(s.msgss) == 0 {
 		s.mu.Unlock()
@@ -509,14 +509,16 @@ func (s *UDPStream) uncork() {
 	s.msgss = make([][]ipv4.Message, 0)
 	s.mu.Unlock()
 
-	Logf(DEBUG, "UDPStream:uncork uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
+	Logf(DEBUG, "UDPStream:flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
 
 	//todo if tunnel output failure, can change tunnel or else
 	for i, msgs := range msgss {
 		if len(msgs) > 0 {
+			flushCnt += len(msgs)
 			s.tunnels[i].output(msgs)
 		}
 	}
+	return flushCnt
 }
 
 func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
