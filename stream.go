@@ -307,12 +307,20 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 
 // Write implements net.Conn
 func (s *UDPStream) Write(b []byte) (n int, err error) {
-	return s.WriteBuffer(PSH, b)
+	n, err = s.WriteBuffer(PSH, b)
+	if err != nil {
+		Logf(ERROR, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
+	}
+	return
 }
 
 // Write implements net.Conn
 func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
-	return s.WriteBuffer(flag, b)
+	n, err = s.WriteBuffer(flag, b)
+	if err != nil {
+		Logf(ERROR, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
+	}
+	return
 }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
@@ -500,6 +508,8 @@ func (s *UDPStream) uncork() {
 	msgss := s.msgss
 	s.msgss = make([][]ipv4.Message, 0)
 	s.mu.Unlock()
+
+	Logf(DEBUG, "UDPStream:uncork uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
 
 	//todo if tunnel output failure, can change tunnel or else
 	for i, msgs := range msgss {

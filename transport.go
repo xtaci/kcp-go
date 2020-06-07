@@ -125,7 +125,6 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 		return nil, errors.WithStack(err)
 	}
 	t.tunnelHostM[lAddr] = tunnel
-	t.sel.AddTunnel(tunnel)
 	return tunnel, nil
 }
 

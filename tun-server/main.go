@@ -157,6 +157,7 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 		if err == io.EOF {
 			conn.CloseWrite()
 		}
+		shutdown <- struct{}{}
 	}
 
 	go toUDPStream(s, conn, shutdown)
@@ -254,8 +255,9 @@ func main() {
 		transport, err := kcp.NewUDPTransport(sel, nil, true)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
-			_, err := transport.NewTunnel(localIp + ":" + strconv.Itoa(portS))
+			tunnel, err := transport.NewTunnel(localIp + ":" + strconv.Itoa(portS))
 			checkError(err)
+			sel.AddTunnel(tunnel)
 		}
 
 		remoteIps := []string{}

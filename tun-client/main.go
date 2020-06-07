@@ -255,8 +255,9 @@ func main() {
 		transport, err := kcp.NewUDPTransport(sel, nil, false)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
-			_, err := transport.NewTunnel(localIp + ":" + strconv.Itoa(portS))
+			tunnel, err := transport.NewTunnel(localIp + ":" + strconv.Itoa(portS))
 			checkError(err)
+			sel.AddTunnel(tunnel)
 		}
 
 		remoteIps := []string{}
