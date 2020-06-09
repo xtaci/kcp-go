@@ -11,8 +11,6 @@ func (s *UDPTunnel) defaultReadLoop() {
 	buf := make([]byte, mtuLimit)
 	for {
 		if n, from, err := s.conn.ReadFrom(buf); err == nil {
-			Logf(DEBUG, "UDPTunnel::ReadFrom from:%v n:%v", from, n)
-
 			if n >= gouuid.Size+IKCP_OVERHEAD {
 				s.input(buf[:n], from)
 			} else {

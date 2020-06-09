@@ -174,8 +174,6 @@ func (s *UDPTunnel) input(data []byte, addr net.Addr) {
 }
 
 func (s *UDPTunnel) notifyFlush() {
-	Logf(DEBUG, "UDPTunnel::notifyFlush localAddr:%v", s.lUDPAddr)
-
 	select {
 	case s.chFlush <- struct{}{}:
 	default:
