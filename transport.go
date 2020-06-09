@@ -4,16 +4,16 @@ import (
 	"io"
 	"net"
 	"sync"
+	"time"
 
 	cmap "github.com/1ucio/concurrent-map"
 	"github.com/pkg/errors"
 	gouuid "github.com/satori/go.uuid"
 )
 
-const (
-	// accept backlog
-	acceptBacklog       = 128
-	streamDialTimeoutMs = 200
+var (
+	DefaultAcceptBacklog = 128
+	DefaultDialTimeout   = time.Millisecond * 200
 )
 
 var (
@@ -96,7 +96,7 @@ func NewUDPTransport(sel RouteSelector, option *KCPOption, accept bool) (t *UDPT
 	}
 	var accepteChan chan *UDPStream
 	if accept {
-		accepteChan = make(chan *UDPStream)
+		accepteChan = make(chan *UDPStream, DefaultAcceptBacklog)
 	}
 	t = &UDPTransport{
 		kcpOption:   option,
@@ -153,9 +153,10 @@ func (t *UDPTransport) Open(remoteIps []string) (stream *UDPStream, err error) {
 		return nil, errors.WithStack(err)
 	}
 	t.streamm.Set(uuid.String(), stream)
-	err = stream.Dial(streamDialTimeoutMs)
+	err = stream.Dial(DefaultDialTimeout)
 	if err != nil {
 		Logf(WARN, "UDPTransport::open timeout uuid:%v remoteIps:%v", uuid, remoteIps)
+		stream.Close()
 		return nil, err
 	}
 	return stream, nil

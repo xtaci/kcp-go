@@ -34,8 +34,8 @@ const (
 	HeartbeatInterval = time.Second * 30
 )
 
-const (
-	DefaultDialCheckInterval = 20
+var (
+	DefaultDialCheckInterval = time.Millisecond * 20
 	DefaultParallelXmit      = 4
 	DefaultParallelTime      = time.Second * 60
 )
@@ -119,7 +119,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	stream.tunnels = tunnels
 	stream.remotes = remotes
 	stream.hrtTime = time.Now().Add(HeartbeatInterval)
-	stream.parallelXmit = DefaultParallelXmit
+	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
@@ -405,15 +405,15 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 	}
 }
 
-func (s *UDPStream) Dial(timeoutMs int) error {
+func (s *UDPStream) Dial(timeout time.Duration) error {
 	Logf(INFO, "UDPStream::Dial uuid:%v accepted:%v", s.uuid, s.accepted)
 
 	if s.accepted {
 		return nil
 	}
-	checkTime := timeoutMs/DefaultDialCheckInterval + 1
+	checkTime := int(timeout/DefaultDialCheckInterval) + 1
 	for i := 0; i < checkTime; i++ {
-		time.Sleep(time.Duration(DefaultDialCheckInterval) * time.Millisecond)
+		time.Sleep(DefaultDialCheckInterval)
 		s.mu.Lock()
 		snd_una := s.kcp.snd_una
 		s.mu.Unlock()

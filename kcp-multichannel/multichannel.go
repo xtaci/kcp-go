@@ -17,23 +17,23 @@ import (
 func init() {
 	Debug := log.New(os.Stdout,
 		"DEBUG: ",
-		log.Ldate|log.Ltime)
+		log.Ldate|log.Lmicroseconds)
 
 	Info := log.New(os.Stdout,
 		"INFO : ",
-		log.Ldate|log.Ltime)
+		log.Ldate|log.Lmicroseconds)
 
 	Warning := log.New(os.Stdout,
 		"WARN : ",
-		log.Ldate|log.Ltime)
+		log.Ldate|log.Lmicroseconds)
 
 	Error := log.New(os.Stdout,
 		"ERROR: ",
-		log.Ldate|log.Ltime)
+		log.Ldate|log.Lmicroseconds)
 
 	Fatal := log.New(os.Stdout,
 		"FATAL: ",
-		log.Ldate|log.Ltime)
+		log.Ldate|log.Lmicroseconds)
 
 	logs := [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
 
@@ -279,6 +279,8 @@ func ServeServerStream(stream *kcp.UDPStream) {
 }
 
 func main() {
+	kcp.DefaultDialTimeout = time.Millisecond * 2000
+
 	lf, _ := os.Open(lFile)
 	defer lf.Close()
 	lh := md5.New()

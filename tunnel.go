@@ -174,6 +174,8 @@ func (s *UDPTunnel) input(data []byte, addr net.Addr) {
 }
 
 func (s *UDPTunnel) notifyFlush() {
+	Logf(DEBUG, "UDPTunnel::notifyFlush localAddr:%v", s.lUDPAddr)
+
 	select {
 	case s.chFlush <- struct{}{}:
 	default:
@@ -182,12 +184,10 @@ func (s *UDPTunnel) notifyFlush() {
 
 func (s *UDPTunnel) notifyReadError(err error) {
 	Logf(WARN, "UDPTunnel::notifyReadError localAddr:%v err:%v", s.lUDPAddr, err)
-	//!todo
 	//read错误，有可能需要直接Close
 }
 
 func (s *UDPTunnel) notifyWriteError(err error) {
 	Logf(WARN, "UDPTunnel::notifyWriteError localAddr:%v err:%v", s.lUDPAddr, err)
-	//!todo
 	//得确认是目标的问题，还是自身的问题
 }

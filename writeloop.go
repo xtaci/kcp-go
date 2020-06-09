@@ -8,6 +8,8 @@ import (
 )
 
 func (s *UDPTunnel) writeSingle(msgs []ipv4.Message) {
+	Logf(DEBUG, "UDPTunnel::writeSingle msgs:%v", len(msgs))
+
 	nbytes := 0
 	npkts := 0
 	for k := range msgs {
