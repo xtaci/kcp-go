@@ -57,7 +57,7 @@ var refTime time.Time = time.Now()
 func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
 
 // output_callback is a prototype which ought capture conn and call conn.Write
-type output_callback func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64)
+type output_callback func(buf []byte, size int, xmitMax uint32)
 
 /* encode 8 bits unsigned int */
 func ikcp_encode8u(p []byte, c byte) []byte {
@@ -693,16 +693,15 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	buffer := kcp.buffer
 	ptr := buffer[kcp.reserved:] // keep n bytes untouched
 
-	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
-	var lostSegsOld, fastRetransSegsOld, earlyRetransSegsOld uint64
+	var xmitMax uint32
 
 	// makeSpace makes room for writing
 	makeSpace := func(space int) {
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
-			kcp.output(buffer, size, lostSegs-lostSegsOld, fastRetransSegs-fastRetransSegsOld, earlyRetransSegs-earlyRetransSegsOld)
-			lostSegsOld, fastRetransSegsOld, earlyRetransSegsOld = lostSegs, fastRetransSegs, earlyRetransSegs
+			kcp.output(buffer, size, xmitMax)
 			ptr = buffer[kcp.reserved:]
+			xmitMax = 0
 		}
 	}
 
@@ -710,8 +709,8 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	flushBuffer := func() {
 		size := len(buffer) - len(ptr)
 		if size > kcp.reserved {
-			kcp.output(buffer, size, lostSegs-lostSegsOld, fastRetransSegs-fastRetransSegsOld, earlyRetransSegs-earlyRetransSegsOld)
-			lostSegsOld, fastRetransSegsOld, earlyRetransSegsOld = lostSegs, fastRetransSegs, earlyRetransSegs
+			kcp.output(buffer, size, xmitMax)
+			xmitMax = 0
 		}
 	}
 
@@ -803,6 +802,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// check for retransmissions
 	current := currentMs()
+	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
 	ref := kcp.snd_buf[:len(kcp.snd_buf)] // for bounds check elimination
@@ -857,6 +857,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 			if segment.xmit >= kcp.dead_link {
 				kcp.state = 0xFFFFFFFF
+			}
+			if segment.xmit > xmitMax {
+				xmitMax = segment.xmit
 			}
 		}
 

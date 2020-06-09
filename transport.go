@@ -13,7 +13,7 @@ import (
 const (
 	// accept backlog
 	acceptBacklog       = 128
-	streamDialTimeoutMs = 2000
+	streamDialTimeoutMs = 200
 )
 
 var (

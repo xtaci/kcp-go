@@ -29,10 +29,15 @@ const (
 )
 
 const (
-	DialCheckInterval = 20
 	FlagOffset        = gouuid.Size + IKCP_OVERHEAD
 	CleanTimeout      = time.Second * 5
-	HrtTimeout        = time.Second * 30
+	HeartbeatInterval = time.Second * 30
+)
+
+const (
+	DefaultDialCheckInterval = 20
+	DefaultParallelXmit      = 4
+	DefaultParallelTime      = time.Second * 60
 )
 
 type clean_callback func(uuid gouuid.UUID)
@@ -56,7 +61,7 @@ type (
 		bufptr  []byte
 
 		// settings
-		flushTime  time.Time // flush time
+		hrtTime    time.Time // flush time
 		rd         time.Time // read deadline
 		wd         time.Time // write deadline
 		headerSize int       // the header size additional to a KCP frame
@@ -80,6 +85,10 @@ type (
 		// packets waiting to be sent on wire
 		msgss [][]ipv4.Message
 		mu    sync.Mutex
+
+		parallelXmit   uint32
+		parallelTime   time.Duration
+		parallelExpire time.Time
 	}
 )
 
@@ -109,11 +118,13 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	stream.remoteIps = remoteIps
 	stream.tunnels = tunnels
 	stream.remotes = remotes
-	stream.flushTime = time.Now()
+	stream.hrtTime = time.Now().Add(HeartbeatInterval)
+	stream.parallelXmit = DefaultParallelXmit
+	stream.parallelTime = DefaultParallelTime
 
-	stream.kcp = NewKCP(1, func(buf []byte, size int, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
+	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
-			stream.output(buf[:size], lostSegs, fastRetransSegs, earlyRetransSegs)
+			stream.output(buf[:size], xmitMax)
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
@@ -124,8 +135,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 			localIps[i] = stream.tunnels[i].LocalIp()
 		}
 		stream.WriteFlag(SYN, []byte(strings.Join(localIps, ":")))
-		stream.kcp.flush(false)
-		stream.flush()
+		stream.flush(true)
 	}
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
@@ -355,11 +365,11 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			}
 
 			waitsnd = s.kcp.WaitSnd()
-			if waitsnd >= int(s.kcp.snd_wnd) || waitsnd >= int(s.kcp.rmt_wnd) || !s.writeDelay {
-				s.kcp.flush(false)
-			}
-
+			needFlush := waitsnd >= int(s.kcp.snd_wnd) || waitsnd >= int(s.kcp.rmt_wnd) || !s.writeDelay
 			s.mu.Unlock()
+			if needFlush {
+				s.flush(true)
+			}
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 			return len(b), nil
 		}
@@ -401,9 +411,9 @@ func (s *UDPStream) Dial(timeoutMs int) error {
 	if s.accepted {
 		return nil
 	}
-	checkTime := timeoutMs/DialCheckInterval + 1
+	checkTime := timeoutMs/DefaultDialCheckInterval + 1
 	for i := 0; i < checkTime; i++ {
-		time.Sleep(time.Duration(DialCheckInterval) * time.Millisecond)
+		time.Sleep(time.Duration(DefaultDialCheckInterval) * time.Millisecond)
 		s.mu.Lock()
 		snd_una := s.kcp.snd_una
 		s.mu.Unlock()
@@ -461,13 +471,14 @@ func (s *UDPStream) clean() {
 	close(s.chClean)
 }
 
-func (s *UDPStream) heartBeat(now time.Time, tickSend bool) {
-	if tickSend {
-		s.flushTime = now
-	} else if now.Sub(s.flushTime) >= HrtTimeout {
-		Logf(DEBUG, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
-		s.WriteFlag(HRT, nil)
+func (s *UDPStream) heartBeat(now time.Time) {
+	if now.Before(s.hrtTime) {
+		return
 	}
+	Logf(DEBUG, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
+
+	s.hrtTime = now.Add(HeartbeatInterval)
+	s.WriteFlag(HRT, nil)
 }
 
 // sess update to trigger protocol
@@ -485,45 +496,76 @@ func (s *UDPStream) update() {
 			s.mu.Unlock()
 			return
 		}
-		interval := s.kcp.flush(false)
-		waitsnd := s.kcp.WaitSnd()
-		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-			s.notifyWriteEvent()
-		}
 		s.mu.Unlock()
+		notifyWrite, interval := s.flush(true)
+
 		// self-synchronized timed scheduling
 		now := time.Now()
 		SystemTimedSched.Put(s.update, now.Add(time.Duration(interval)*time.Millisecond))
-		s.heartBeat(now, s.flush() != 0)
+
+		//block? maybe change heartBeat place some day
+		if notifyWrite {
+			s.heartBeat(now)
+		}
 	}
 }
 
 // flush sends data in txqueue if there is any
-func (s *UDPStream) flush() (flushCnt int) {
+// return if interval means next flush interval
+func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 	s.mu.Lock()
+	if kcpFlush {
+		interval = s.kcp.flush(false)
+	}
+
+	waitsnd := s.kcp.WaitSnd()
+	notifyWrite = waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd)
+
 	if len(s.msgss) == 0 {
 		s.mu.Unlock()
+		if notifyWrite {
+			s.notifyWriteEvent()
+		}
 		return
 	}
 	msgss := s.msgss
 	s.msgss = make([][]ipv4.Message, 0)
 	s.mu.Unlock()
 
-	Logf(DEBUG, "UDPStream:flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
+	if notifyWrite {
+		s.notifyWriteEvent()
+	}
+
+	Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
 
 	//todo if tunnel output failure, can change tunnel or else
 	for i, msgs := range msgss {
 		if len(msgs) > 0 {
-			flushCnt += len(msgs)
 			s.tunnels[i].output(msgs)
 		}
 	}
-	return flushCnt
+	return
 }
 
-func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSegs uint64) {
+func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
+	if xmitMax >= s.parallelXmit {
+		Logf(DEBUG, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
+		s.parallelExpire = time.Now().Add(s.parallelTime)
+		return len(s.tunnels)
+	} else if s.parallelExpire.IsZero() {
+		return 1
+	} else if s.parallelExpire.After(time.Now()) {
+		return len(s.tunnels)
+	} else {
+		Logf(DEBUG, "UDPStream::parallelTun leave uuid:%v accepted:%v parallelXmit:%v", s.uuid, s.accepted, s.parallelXmit)
+		s.parallelExpire = time.Time{}
+		return 1
+	}
+}
+
+func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 	copy(buf, s.uuid[:])
-	appendCount := len(s.tunnels)
+	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
@@ -533,7 +575,7 @@ func (s *UDPStream) output(buf []byte, lostSegs, fastRetransSegs, earlyRetransSe
 }
 
 func (s *UDPStream) input(data []byte) error {
-	Logf(DEBUG, "UDPStream:input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
+	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 
@@ -546,11 +588,9 @@ func (s *UDPStream) input(data []byte) error {
 	if n := s.kcp.PeekSize(); n > 0 {
 		s.notifyReadEvent()
 	}
-	waitsnd := s.kcp.WaitSnd()
-	if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-		s.notifyWriteEvent()
-	}
 	s.mu.Unlock()
+
+	s.flush(false)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
