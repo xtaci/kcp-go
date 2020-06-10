@@ -36,7 +36,7 @@ const (
 
 var (
 	DefaultDialCheckInterval = time.Millisecond * 20
-	DefaultParallelXmit      = 4
+	DefaultParallelXmit      = 5
 	DefaultParallelTime      = time.Second * 60
 )
 
@@ -128,15 +128,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
-
-	if !accepted {
-		localIps := make([]string, len(stream.tunnels))
-		for i := 0; i < len(stream.tunnels); i++ {
-			localIps[i] = stream.tunnels[i].LocalIp()
-		}
-		stream.WriteFlag(SYN, []byte(strings.Join(localIps, ":")))
-		stream.flush(true)
-	}
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -411,6 +402,13 @@ func (s *UDPStream) Dial(timeout time.Duration) error {
 	if s.accepted {
 		return nil
 	}
+	localIps := make([]string, len(s.tunnels))
+	for i := 0; i < len(s.tunnels); i++ {
+		localIps[i] = s.tunnels[i].LocalIp()
+	}
+	s.WriteFlag(SYN, []byte(strings.Join(localIps, ":")))
+	s.flush(true)
+
 	checkTime := int(timeout/DefaultDialCheckInterval) + 1
 	for i := 0; i < checkTime; i++ {
 		time.Sleep(DefaultDialCheckInterval)
@@ -444,7 +442,7 @@ func (s *UDPStream) Close() error {
 	return nil
 }
 
-func (s *UDPStream) CloseWrite() {
+func (s *UDPStream) CloseWrite() error {
 	var once bool
 	s.sendFinOnce.Do(func() {
 		once = true
@@ -453,6 +451,7 @@ func (s *UDPStream) CloseWrite() {
 	})
 
 	Logf(INFO, "UDPStream::CloseWrite uuid:%v accepted:%v once:%v", s.uuid, s.accepted, once)
+	return nil
 }
 
 func (s *UDPStream) reset() {
@@ -548,6 +547,7 @@ func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 }
 
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
+	//todo time.Now optimize
 	if xmitMax >= s.parallelXmit {
 		Logf(DEBUG, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		s.parallelExpire = time.Now().Add(s.parallelTime)

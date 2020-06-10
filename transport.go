@@ -49,7 +49,6 @@ func (l LogLevel) String() string {
 }
 
 type RouteSelector interface {
-	AddTunnel(tunnel *UDPTunnel)
 	Pick(remoteIps []string) (tunnels []*UDPTunnel, remotes []net.Addr)
 }
 
