@@ -549,7 +549,7 @@ func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	//todo time.Now optimize
 	if xmitMax >= s.parallelXmit {
-		Logf(DEBUG, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
+		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		s.parallelExpire = time.Now().Add(s.parallelTime)
 		return len(s.tunnels)
 	} else if s.parallelExpire.IsZero() {
@@ -557,7 +557,7 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	} else if s.parallelExpire.After(time.Now()) {
 		return len(s.tunnels)
 	} else {
-		Logf(DEBUG, "UDPStream::parallelTun leave uuid:%v accepted:%v parallelXmit:%v", s.uuid, s.accepted, s.parallelXmit)
+		Logf(INFO, "UDPStream::parallelTun leave uuid:%v accepted:%v parallelXmit:%v", s.uuid, s.accepted, s.parallelXmit)
 		s.parallelExpire = time.Time{}
 		return 1
 	}

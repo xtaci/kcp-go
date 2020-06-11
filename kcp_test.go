@@ -82,8 +82,12 @@ func init() {
 	Logf(INFO, "init")
 	DefaultDialTimeout = time.Second * 2
 
-	var lAddrs = []string{"127.0.0.1:17001", "127.0.0.1:17002"}
-	var rAddrs = []string{"127.0.0.1:18001", "127.0.0.1:18002"}
+	// var lAddrs = []string{"127.0.0.1:17001", "127.0.0.1:17002"}
+	// var rAddrs = []string{"127.0.0.1:18001", "127.0.0.1:18002"}
+	// var remoteIps = []string{"127.0.0.1", "127.0.0.1"}
+	var lAddrs = []string{"127.0.0.1:17001"}
+	var rAddrs = []string{"127.0.0.1:18001"}
+	var remoteIps = []string{"127.0.0.1"}
 
 	clientSel, err := NewTestSelector(rAddrs)
 	if err != nil {
@@ -119,7 +123,7 @@ func init() {
 		serverTunnels = append(serverTunnels, tunnel)
 	}
 
-	clientStream, err = clientTransport.Open([]string{"127.0.0.1", "127.0.0.1"})
+	clientStream, err = clientTransport.Open(remoteIps)
 	if err != nil {
 		panic("clientTransport Open")
 	}
