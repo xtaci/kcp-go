@@ -110,6 +110,8 @@ func (s *UDPTunnel) LocalIp() (ip string) {
 
 // for test
 func (s *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
+	Logf(INFO, "UDPTunnel::Simulate localAddr:%v loss:%v delayMin:%v delayMax:%v", s.lUDPAddr, loss, delayMin, delayMax)
+
 	s.loss = int(loss * 100)
 	s.delayMin = delayMin
 	s.delayMax = delayMax
