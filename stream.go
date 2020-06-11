@@ -537,7 +537,7 @@ func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 
 	Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
 
-	//todo if tunnel output failure, can change tunnel or else
+	//if tunnel output failure, can change tunnel or else ?
 	for i, msgs := range msgss {
 		if len(msgs) > 0 {
 			s.tunnels[i].output(msgs)

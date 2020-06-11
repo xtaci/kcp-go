@@ -81,7 +81,6 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	return tunnel, nil
 }
 
-// Close closes the connection.
 func (s *UDPTunnel) Close() error {
 	Logf(INFO, "UDPTunnel::Close localAddr:%v", s.lUDPAddr)
 

@@ -154,7 +154,7 @@ func (t *UDPTransport) Open(remoteIps []string) (stream *UDPStream, err error) {
 	t.streamm.Set(uuid.String(), stream)
 	err = stream.Dial(DefaultDialTimeout)
 	if err != nil {
-		Logf(WARN, "UDPTransport::open timeout uuid:%v remoteIps:%v", uuid, remoteIps)
+		Logf(WARN, "UDPTransport::Open timeout uuid:%v remoteIps:%v", uuid, remoteIps)
 		stream.Close()
 		return nil, err
 	}
