@@ -2,6 +2,6 @@
 
 package kcp
 
-func (s *UDPTunnel) writeLoop() {
-	s.defaultWriteLoop()
+func (t *UDPTunnel) writeLoop() {
+	t.defaultWriteLoop()
 }

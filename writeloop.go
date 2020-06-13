@@ -7,15 +7,15 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-func (s *UDPTunnel) writeSingle(msgs []ipv4.Message) {
+func (t *UDPTunnel) writeSingle(msgs []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for k := range msgs {
-		if n, err := s.conn.WriteTo(msgs[k].Buffers[0], msgs[k].Addr); err == nil {
+		if n, err := t.conn.WriteTo(msgs[k].Buffers[0], msgs[k].Addr); err == nil {
 			nbytes += n
 			npkts++
 		} else {
-			s.notifyWriteError(errors.WithStack(err))
+			t.notifyWriteError(errors.WithStack(err))
 			break
 		}
 	}
@@ -24,18 +24,18 @@ func (s *UDPTunnel) writeSingle(msgs []ipv4.Message) {
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
 
-func (s *UDPTunnel) defaultWriteLoop() {
+func (t *UDPTunnel) defaultWriteLoop() {
 	for {
 		select {
-		case <-s.die:
+		case <-t.die:
 			return
-		case <-s.chFlush:
+		case <-t.chFlush:
 		}
 
-		msgss := s.popMsgss()
+		msgss := t.popMsgss()
 		for _, msgs := range msgss {
-			s.writeSingle(msgs)
+			t.writeSingle(msgs)
 		}
-		s.releaseMsgss(msgss)
+		t.releaseMsgss(msgss)
 	}
 }

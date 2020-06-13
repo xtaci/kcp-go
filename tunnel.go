@@ -20,7 +20,7 @@ type input_callback func(data []byte, addr net.Addr)
 type (
 	// UDPTunnel defines a session implemented by UDP
 	UDPTunnel struct {
-		conn     net.PacketConn // the underlying packet connection
+		conn     *net.UDPConn // the underlying packet connection
 		lUDPAddr *net.UDPAddr
 		mu       sync.Mutex
 		inputcb  input_callback
@@ -81,11 +81,19 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	return tunnel, nil
 }
 
-func (s *UDPTunnel) Close() error {
-	Logf(INFO, "UDPTunnel::Close localAddr:%v", s.lUDPAddr)
+func (t *UDPTunnel) SetReadBuffer(bytes int) error {
+	return t.conn.SetReadBuffer(bytes)
+}
+
+func (t *UDPTunnel) SetWriteBuffer(bytes int) error {
+	return t.conn.SetWriteBuffer(bytes)
+}
+
+func (t *UDPTunnel) Close() error {
+	Logf(INFO, "UDPTunnel::Close localAddr:%v", t.lUDPAddr)
 
 	var once bool
-	s.dieOnce.Do(func() {
+	t.dieOnce.Do(func() {
 		once = true
 	})
 
@@ -94,45 +102,45 @@ func (s *UDPTunnel) Close() error {
 	}
 
 	// maybe leak, but that's ok
-	// 1. Write before append s.txqueues
+	// 1. Write before append t.txqueues
 	// 2. Close
 	// 3. Write append
-	close(s.die)
-	msgss := s.popMsgss()
-	s.releaseMsgss(msgss)
-	s.conn.Close()
+	close(t.die)
+	msgss := t.popMsgss()
+	t.releaseMsgss(msgss)
+	t.conn.Close()
 	return nil
 }
 
-func (s *UDPTunnel) LocalIp() (ip string) {
-	return s.lUDPAddr.IP.String()
+func (t *UDPTunnel) LocalIp() (ip string) {
+	return t.lUDPAddr.IP.String()
 }
 
 // for test
-func (s *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
-	Logf(INFO, "UDPTunnel::Simulate localAddr:%v loss:%v delayMin:%v delayMax:%v", s.lUDPAddr, loss, delayMin, delayMax)
+func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
+	Logf(INFO, "UDPTunnel::Simulate localAddr:%v loss:%v delayMin:%v delayMax:%v", t.lUDPAddr, loss, delayMin, delayMax)
 
-	s.loss = int(loss * 100)
-	s.delayMin = delayMin
-	s.delayMax = delayMax
+	t.loss = int(loss * 100)
+	t.delayMin = delayMin
+	t.delayMax = delayMax
 }
 
-func (s *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
-	s.mu.Lock()
-	s.msgss = append(s.msgss, msgs)
-	s.mu.Unlock()
-	s.notifyFlush()
+func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
+	t.mu.Lock()
+	t.msgss = append(t.msgss, msgs)
+	t.mu.Unlock()
+	t.notifyFlush()
 }
 
-func (s *UDPTunnel) popMsgss() (msgss [][]ipv4.Message) {
-	s.mu.Lock()
-	msgss = s.msgss
-	s.msgss = make([][]ipv4.Message, 0)
-	s.mu.Unlock()
+func (t *UDPTunnel) popMsgss() (msgss [][]ipv4.Message) {
+	t.mu.Lock()
+	msgss = t.msgss
+	t.msgss = make([][]ipv4.Message, 0)
+	t.mu.Unlock()
 	return msgss
 }
 
-func (s *UDPTunnel) releaseMsgss(msgss [][]ipv4.Message) {
+func (t *UDPTunnel) releaseMsgss(msgss [][]ipv4.Message) {
 	for _, msgs := range msgss {
 		for k := range msgs {
 			xmitBuf.Put(msgs[k].Buffers[0])
@@ -141,52 +149,52 @@ func (s *UDPTunnel) releaseMsgss(msgss [][]ipv4.Message) {
 	}
 }
 
-func (s *UDPTunnel) output(msgs []ipv4.Message) (err error) {
+func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {
 	if len(msgs) == 0 {
 		return errInvalidOperation
 	}
 
 	select {
-	case <-s.die:
+	case <-t.die:
 		return io.ErrClosedPipe
 	default:
 	}
 
-	if s.loss == 0 && s.delayMin == 0 && s.delayMax == 0 {
-		s.pushMsgs(msgs)
+	if t.loss == 0 && t.delayMin == 0 && t.delayMax == 0 {
+		t.pushMsgs(msgs)
 		return
 	}
 
 	succMsgs := make([]ipv4.Message, 0)
 	for k := range msgs {
-		if lossRand.Intn(100) >= s.loss {
+		if lossRand.Intn(100) >= t.loss {
 			succMsgs = append(succMsgs, msgs[k])
 		}
 	}
 	for _, msg := range succMsgs {
-		delay := time.Duration(s.delayMin+lossRand.Intn(s.delayMax-s.delayMin)) * time.Millisecond
-		timerSender.Send(s, msg, delay)
+		delay := time.Duration(t.delayMin+lossRand.Intn(t.delayMax-t.delayMin)) * time.Millisecond
+		timerSender.Send(t, msg, delay)
 	}
 	return
 }
 
-func (s *UDPTunnel) input(data []byte, addr net.Addr) {
-	s.inputcb(data, addr)
+func (t *UDPTunnel) input(data []byte, addr net.Addr) {
+	t.inputcb(data, addr)
 }
 
-func (s *UDPTunnel) notifyFlush() {
+func (t *UDPTunnel) notifyFlush() {
 	select {
-	case s.chFlush <- struct{}{}:
+	case t.chFlush <- struct{}{}:
 	default:
 	}
 }
 
-func (s *UDPTunnel) notifyReadError(err error) {
-	Logf(WARN, "UDPTunnel::notifyReadError localAddr:%v err:%v", s.lUDPAddr, err)
+func (t *UDPTunnel) notifyReadError(err error) {
+	Logf(WARN, "UDPTunnel::notifyReadError localAddr:%v err:%v", t.lUDPAddr, err)
 	//read错误，有可能需要直接Close
 }
 
-func (s *UDPTunnel) notifyWriteError(err error) {
-	Logf(WARN, "UDPTunnel::notifyWriteError localAddr:%v err:%v", s.lUDPAddr, err)
+func (t *UDPTunnel) notifyWriteError(err error) {
+	Logf(WARN, "UDPTunnel::notifyWriteError localAddr:%v err:%v", t.lUDPAddr, err)
 	//得确认是目标的问题，还是自身的问题
 }

@@ -11,12 +11,12 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-func (s *UDPTunnel) writeBatch(msgs []ipv4.Message) {
+func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 	// x/net version
 	nbytes := 0
 	npkts := 0
 	for len(msgs) > 0 {
-		if n, err := s.xconn.WriteBatch(msgs, 0); err == nil {
+		if n, err := t.xconn.WriteBatch(msgs, 0); err == nil {
 			for k := range msgs[:n] {
 				nbytes += len(msgs[k].Buffers[0])
 			}
@@ -29,13 +29,13 @@ func (s *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 			if operr, ok := err.(*net.OpError); ok {
 				if se, ok := operr.Err.(*os.SyscallError); ok {
 					if se.Syscall == "sendmmsg" {
-						s.xconnWriteError = se
-						s.writeSingle(msgs)
+						t.xconnWriteError = se
+						t.writeSingle(msgs)
 						return
 					}
 				}
 			}
-			s.notifyWriteError(errors.WithStack(err))
+			t.notifyWriteError(errors.WithStack(err))
 			break
 		}
 	}
@@ -44,24 +44,24 @@ func (s *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
 }
 
-func (s *UDPTunnel) writeLoop() {
+func (t *UDPTunnel) writeLoop() {
 	// default version
-	if s.xconn == nil || s.xconnWriteError != nil {
-		s.defaultWriteLoop()
+	if t.xconn == nil || t.xconnWriteError != nil {
+		t.defaultWriteLoop()
 		return
 	}
 
 	for {
 		select {
-		case <-s.die:
+		case <-t.die:
 			return
-		case <-s.chFlush:
+		case <-t.chFlush:
 		}
 
-		msgss := s.popMsgss()
+		msgss := t.popMsgss()
 		for _, msgs := range msgss {
-			s.writeBatch(msgs)
+			t.writeBatch(msgs)
 		}
-		s.releaseMsgss(msgss)
+		t.releaseMsgss(msgss)
 	}
 }

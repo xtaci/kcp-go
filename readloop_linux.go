@@ -13,10 +13,10 @@ import (
 )
 
 // monitor incoming data for all connections of server
-func (s *UDPTunnel) readLoop() {
+func (t *UDPTunnel) readLoop() {
 	// default version
-	if s.xconn == nil {
-		s.defaultReadLoop()
+	if t.xconn == nil {
+		t.defaultReadLoop()
 		return
 	}
 
@@ -27,11 +27,11 @@ func (s *UDPTunnel) readLoop() {
 	}
 
 	for {
-		if count, err := s.xconn.ReadBatch(msgs, 0); err == nil {
+		if count, err := t.xconn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				if msg.N >= gouuid.Size+IKCP_OVERHEAD {
-					s.input(msg.Buffers[0][:msg.N], msg.Addr)
+					t.input(msg.Buffers[0][:msg.N], msg.Addr)
 				} else {
 					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				}
@@ -43,12 +43,12 @@ func (s *UDPTunnel) readLoop() {
 			if operr, ok := err.(*net.OpError); ok {
 				if se, ok := operr.Err.(*os.SyscallError); ok {
 					if se.Syscall == "recvmmsg" {
-						s.defaultReadLoop()
+						t.defaultReadLoop()
 						return
 					}
 				}
 			}
-			s.notifyReadError(errors.WithStack(err))
+			t.notifyReadError(errors.WithStack(err))
 		}
 	}
 }

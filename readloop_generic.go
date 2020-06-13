@@ -2,6 +2,6 @@
 
 package kcp
 
-func (s *UDPTunnel) readLoop() {
-	s.defaultReadLoop()
+func (t *UDPTunnel) readLoop() {
+	t.defaultReadLoop()
 }

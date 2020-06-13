@@ -179,7 +179,7 @@ func Client() {
 	}
 	var closeTunnel *kcp.UDPTunnel
 	for _, lAddr := range lAddrs {
-		tunnel, err := transport.NewTunnel(lAddr)
+		tunnel, err := transport.NewTunnel(lAddr, nil)
 		if err != nil {
 			panic("NewTunnel")
 		}
@@ -243,7 +243,7 @@ func Server() {
 	}
 
 	for _, rAddr := range rAddrs {
-		tunnel, err := transport.NewTunnel(rAddr)
+		tunnel, err := transport.NewTunnel(rAddr, nil)
 		if err != nil {
 			panic("NewTunnel")
 		}

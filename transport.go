@@ -59,11 +59,21 @@ type KCPOption struct {
 	nc       int
 }
 
-var defaultKCPOption = &KCPOption{
+type TunnelOption struct {
+	readBuffer  int
+	writeBuffer int
+}
+
+var DefaultKCPOption = &KCPOption{
 	nodelay:  1,
 	interval: 20,
 	resend:   2,
 	nc:       1,
+}
+
+var DefaultTunOption = &TunnelOption{
+	readBuffer:  16 * 1024 * 1024,
+	writeBuffer: 16 * 1024 * 1024,
 }
 
 func netAddrToIP(addr net.Addr) string {
@@ -90,9 +100,6 @@ type UDPTransport struct {
 }
 
 func NewUDPTransport(sel RouteSelector, option *KCPOption, accept bool) (t *UDPTransport, err error) {
-	if option == nil {
-		option = defaultKCPOption
-	}
 	var accepteChan chan *UDPStream
 	if accept {
 		accepteChan = make(chan *UDPStream, DefaultAcceptBacklog)
@@ -108,7 +115,20 @@ func NewUDPTransport(sel RouteSelector, option *KCPOption, accept bool) (t *UDPT
 	return t, nil
 }
 
-func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
+func (t *UDPTransport) InitTunnel(tunnel *UDPTunnel, option *TunnelOption) error {
+	if option == nil {
+		return nil
+	}
+	if err := tunnel.SetReadBuffer(option.readBuffer); err != nil {
+		return err
+	}
+	if err := tunnel.SetWriteBuffer(option.writeBuffer); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel *UDPTunnel, err error) {
 	Logf(INFO, "UDPTransport::NewTunnel lAddr:%v", lAddr)
 
 	tunnel, ok := t.tunnelHostM[lAddr]
@@ -123,6 +143,13 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 		Logf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)
 		return nil, errors.WithStack(err)
 	}
+	err = t.InitTunnel(tunnel, tunOption)
+	if err != nil {
+		Logf(ERROR, "UDPTransport::NewTunnel InitTunnel lAddr:%v err:%v", lAddr, err)
+		tunnel.Close()
+		return nil, errors.WithStack(err)
+	}
+
 	t.tunnelHostM[lAddr] = tunnel
 	return tunnel, nil
 }
@@ -137,7 +164,9 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remoteIps []st
 		Logf(ERROR, "UDPTransport::NewStream uuid:%v accepted:%v remoteIps:%v err:%v", uuid, accepted, remoteIps, err)
 		return nil, err
 	}
-	stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
+	if t.kcpOption != nil {
+		stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
+	}
 	return stream, err
 }
 

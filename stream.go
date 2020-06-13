@@ -136,7 +136,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	}
 
 	SystemTimedSched.Put(stream.update, time.Now())
-	Logf(INFO, "NewUDPStream uuid:%v accepted:%v remoteIps:%v", uuid, accepted, remoteIps)
+	Logf(INFO, "NewUDPStream uuid:%v accepted:%v remotes:%v", uuid, accepted, remotes)
 	return stream, nil
 }
 
@@ -195,17 +195,6 @@ func (s *UDPStream) SetMtu(mtu int) bool {
 	return true
 }
 
-// SetStreamMode toggles the stream mode on/off
-func (s *UDPStream) SetStreamMode(enable bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if enable {
-		s.kcp.stream = 1
-	} else {
-		s.kcp.stream = 0
-	}
-}
-
 // SetACKNoDelay changes ack flush option, set true to flush ack immediately,
 func (s *UDPStream) SetACKNoDelay(nodelay bool) {
 	s.mu.Lock()
@@ -233,17 +222,17 @@ func (s *UDPStream) GetUUID() gouuid.UUID { return s.uuid }
 
 // Read implements net.Conn
 func (s *UDPStream) Read(b []byte) (n int, err error) {
-	for {
-		select {
-		case <-s.chClose:
-			return 0, io.ErrClosedPipe
-		case <-s.chRst:
-			return 0, io.ErrUnexpectedEOF
-		case <-s.chRecvFinEvent:
-			return 0, io.EOF
-		default:
-		}
+	select {
+	case <-s.chClose:
+		return 0, io.ErrClosedPipe
+	case <-s.chRst:
+		return 0, io.ErrUnexpectedEOF
+	case <-s.chRecvFinEvent:
+		return 0, io.EOF
+	default:
+	}
 
+	for {
 		s.mu.Lock()
 		if len(s.bufptr) > 0 { // copy from buffer into b, ctrl msg should not cache into this
 			n = copy(b, s.bufptr)
@@ -310,7 +299,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 func (s *UDPStream) Write(b []byte) (n int, err error) {
 	n, err = s.WriteBuffer(PSH, b)
 	if err != nil {
-		Logf(ERROR, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
+		Logf(WARN, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
 	}
 	return
 }
@@ -319,24 +308,24 @@ func (s *UDPStream) Write(b []byte) (n int, err error) {
 func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
 	n, err = s.WriteBuffer(flag, b)
 	if err != nil {
-		Logf(ERROR, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
+		Logf(WARN, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
 	}
 	return
 }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
-	for {
-		select {
-		case <-s.chClose:
-			return 0, io.ErrClosedPipe
-		case <-s.chRst:
-			return 0, io.ErrUnexpectedEOF
-		case <-s.chSendFinEvent:
-			return 0, io.ErrClosedPipe
-		default:
-		}
+	select {
+	case <-s.chClose:
+		return 0, io.ErrClosedPipe
+	case <-s.chRst:
+		return 0, io.ErrUnexpectedEOF
+	case <-s.chSendFinEvent:
+		return 0, io.ErrClosedPipe
+	default:
+	}
 
+	for {
 		s.mu.Lock()
 		// make sure write do not overflow the max sliding window on both side
 		waitsnd := s.kcp.WaitSnd()
@@ -684,6 +673,8 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 	s.remoteIps = remoteIps
 	s.tunnels = tunnels
 	s.remotes = remotes
+
+	Logf(INFO, "UDPStream::recvSyn uuid:%v accepted:%v remotes:%v", s.uuid, s.accepted, remotes)
 	return len(data), nil
 }
 
