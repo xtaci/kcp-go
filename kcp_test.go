@@ -100,7 +100,7 @@ func init() {
 		if lvl < INFO {
 			return
 		}
-		fmt.Printf(f+"\n", args...)
+		// fmt.Printf(f+"\n", args...)
 	}
 
 	for i := 0; i < lPortCount; i++ {
@@ -506,50 +506,38 @@ func TestSNMP(t *testing.T) {
 	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
 }
 
-func BenchmarkEchoSpeed4K(b *testing.B) {
+func echoSpeed(b *testing.B, bytes int) {
 	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
 	if err != nil {
-		b.Fatal("BenchmarkEchoSpeed4K setTunnelBuffer", err)
+		b.Fatal("echoSpeed setTunnelBuffer", err)
 	}
 	b.ReportAllocs()
 
 	go echoServer()
-	echoClient(4096, b.N)
-	b.SetBytes(4096)
+	echoClient(bytes, b.N)
+	b.SetBytes(int64(bytes))
+}
+
+func BenchmarkEchoSpeed128B(b *testing.B) {
+	echoSpeed(b, 128)
+}
+
+func BenchmarkEchoSpeed1K(b *testing.B) {
+	echoSpeed(b, 1024)
+}
+
+func BenchmarkEchoSpeed4K(b *testing.B) {
+	echoSpeed(b, 4096)
 }
 
 func BenchmarkEchoSpeed64K(b *testing.B) {
-	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
-	if err != nil {
-		b.Fatal("BenchmarkEchoSpeed4K setTunnelBuffer", err)
-	}
-	b.ReportAllocs()
-
-	go echoServer()
-	echoClient(65536, b.N)
-	b.SetBytes(65536)
+	echoSpeed(b, 65536)
 }
 
 func BenchmarkEchoSpeed512K(b *testing.B) {
-	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
-	if err != nil {
-		b.Fatal("BenchmarkEchoSpeed4K setTunnelBuffer", err)
-	}
-	b.ReportAllocs()
-
-	go echoServer()
-	echoClient(524288, b.N)
-	b.SetBytes(524288)
+	echoSpeed(b, 524288)
 }
 
 func BenchmarkEchoSpeed1M(b *testing.B) {
-	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
-	if err != nil {
-		b.Fatal("BenchmarkEchoSpeed4K setTunnelBuffer", err)
-	}
-	b.ReportAllocs()
-
-	go echoServer()
-	echoClient(1048576, b.N)
-	b.SetBytes(1048576)
+	echoSpeed(b, 1048576)
 }
