@@ -552,22 +552,19 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	}
 }
 
-func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
-	bts := xmitBuf.Get().([]byte)[:len(buf)]
-	copy(bts, s.uuid[:])
-	copy(bts[gouuid.Size:], buf[gouuid.Size:])
-	msg.Buffers = [][]byte{bts}
-	msg.Addr = remote
-	return
-}
-
 func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
 	for i := 0; i < appendCount; i++ {
-		s.msgss[i] = append(s.msgss[i], s.fillMsg(buf, s.remotes[i]))
+		msg := ipv4.Message{}
+		bts := xmitBuf.Get().([]byte)[:len(buf)]
+		copy(bts, s.uuid[:])
+		copy(bts[gouuid.Size:], buf[gouuid.Size:])
+		msg.Buffers = [][]byte{bts}
+		msg.Addr = s.remotes[i]
+		s.msgss[i] = append(s.msgss[i], msg)
 	}
 }
 
