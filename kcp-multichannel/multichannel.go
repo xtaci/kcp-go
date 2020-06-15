@@ -172,7 +172,7 @@ func Client() {
 		kcp.Logf(kcp.ERROR, "Client NewTestSelector err:%v", err)
 		return
 	}
-	transport, err := kcp.NewUDPTransport(sel, nil, false)
+	transport, err := kcp.NewUDPTransport(sel, kcp.DefaultKCPOption, false)
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Client NewUDPTransport err:%v", err)
 		return
@@ -236,7 +236,7 @@ func Server() {
 		return
 	}
 
-	transport, err := kcp.NewUDPTransport(sel, nil, true)
+	transport, err := kcp.NewUDPTransport(sel, kcp.DefaultKCPOption, true)
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Server transport open err:%v", err)
 		return

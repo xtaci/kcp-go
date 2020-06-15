@@ -423,10 +423,37 @@ func handleEchoClient(stream *UDPStream) {
 	}
 }
 
+func handleSinkClient(stream *UDPStream) {
+	defer stream.Close()
+
+	stream.SetNoDelay(1, 10, 2, 1)
+	stream.SetWindowSize(4096, 4096)
+	stream.SetNoDelay(1, 10, 2, 1)
+	stream.SetMtu(1400)
+	stream.SetACKNoDelay(false)
+	stream.SetReadDeadline(time.Now().Add(time.Hour))
+	stream.SetWriteDeadline(time.Now().Add(time.Hour))
+
+	buf := make([]byte, 65536)
+	for {
+		_, err := stream.Read(buf)
+		if err != nil {
+			return
+		}
+	}
+}
+
 func echoServer() {
 	for {
 		stream, _ := serverTransport.Accept()
 		go handleEchoClient(stream)
+	}
+}
+
+func sinkServer() {
+	for {
+		stream, _ := serverTransport.Accept()
+		go handleSinkClient(stream)
 	}
 }
 
@@ -455,6 +482,18 @@ func echoTester(stream *UDPStream, msglen, msgcount int) error {
 	return nil
 }
 
+func sinkTester(stream *UDPStream, msglen, msgcount int) error {
+	buf := make([]byte, msglen)
+	for i := 0; i < msgcount; i++ {
+		// send packet
+		_, err := stream.Write(buf)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func echoClient(nbytes, N int) error {
 	stream, err := clientTransport.Open(remoteIps)
 	if err != nil {
@@ -468,9 +507,31 @@ func echoClient(nbytes, N int) error {
 	stream.SetMtu(1400)
 	stream.SetACKNoDelay(true)
 	stream.SetACKNoDelay(false)
-	stream.SetDeadline(time.Now().Add(time.Minute))
+	stream.SetDeadline(time.Now().Add(time.Hour))
 
 	err = echoTester(stream, nbytes, N)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func sinkClient(nbytes, N int) error {
+	stream, err := clientTransport.Open(remoteIps)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+	stream.SetWindowSize(1024, 1024)
+	stream.SetNoDelay(1, 10, 2, 1)
+	stream.SetMtu(1400)
+	stream.SetMtu(1600)
+	stream.SetMtu(1400)
+	stream.SetACKNoDelay(true)
+	stream.SetACKNoDelay(false)
+	stream.SetDeadline(time.Now().Add(time.Hour))
+
+	err = sinkTester(stream, nbytes, N)
 	if err != nil {
 		return err
 	}
@@ -518,6 +579,18 @@ func echoSpeed(b *testing.B, bytes int) {
 	b.SetBytes(int64(bytes))
 }
 
+func sinkSpeed(b *testing.B, bytes int) {
+	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
+	if err != nil {
+		b.Fatal("echoSpeed setTunnelBuffer", err)
+	}
+	b.ReportAllocs()
+
+	go sinkServer()
+	sinkClient(bytes, b.N)
+	b.SetBytes(int64(bytes))
+}
+
 func BenchmarkEchoSpeed128B(b *testing.B) {
 	echoSpeed(b, 128)
 }
@@ -540,4 +613,8 @@ func BenchmarkEchoSpeed512K(b *testing.B) {
 
 func BenchmarkEchoSpeed1M(b *testing.B) {
 	echoSpeed(b, 1048576)
+}
+
+func BenchmarkSinkSpeed1K(b *testing.B) {
+	sinkSpeed(b, 1024)
 }

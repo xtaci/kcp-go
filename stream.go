@@ -353,7 +353,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 			return len(b), nil
 		}
-		Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
+		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
 
 		var timeout *time.Timer
 		var c <-chan time.Time
@@ -463,7 +463,7 @@ func (s *UDPStream) heartBeat(now time.Time) {
 	if now.Before(s.hrtTime) {
 		return
 	}
-	Logf(DEBUG, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
+	Logf(INFO, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
 
 	s.hrtTime = now.Add(HeartbeatInterval)
 	s.WriteFlag(HRT, nil)
@@ -524,7 +524,7 @@ func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 		s.notifyWriteEvent()
 	}
 
-	Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
+	// Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
 
 	//if tunnel output failure, can change tunnel or else ?
 	for i, msgs := range msgss {
@@ -552,8 +552,16 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	}
 }
 
+func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
+	bts := xmitBuf.Get().([]byte)[:len(buf)]
+	copy(bts, s.uuid[:])
+	copy(bts[gouuid.Size:], buf[gouuid.Size:])
+	msg.Buffers = [][]byte{bts}
+	msg.Addr = remote
+	return
+}
+
 func (s *UDPStream) output(buf []byte, xmitMax uint32) {
-	copy(buf, s.uuid[:])
 	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
@@ -564,7 +572,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) error {
-	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 
@@ -606,14 +614,6 @@ func (s *UDPStream) notifyWriteEvent() {
 	case s.chWriteEvent <- struct{}{}:
 	default:
 	}
-}
-
-func (s *UDPStream) fillMsg(buf []byte, remote net.Addr) (msg ipv4.Message) {
-	bts := xmitBuf.Get().([]byte)[:len(buf)]
-	copy(bts, buf)
-	msg.Buffers = [][]byte{bts}
-	msg.Addr = remote
-	return
 }
 
 func (s *UDPStream) readSyn(data []byte) error {
