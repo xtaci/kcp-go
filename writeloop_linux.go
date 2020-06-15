@@ -36,7 +36,6 @@ func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 				}
 			}
 			t.notifyWriteError(errors.WithStack(err))
-			break
 		}
 	}
 

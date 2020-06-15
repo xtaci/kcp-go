@@ -102,9 +102,9 @@ func (t *UDPTunnel) Close() error {
 	}
 
 	// maybe leak, but that's ok
-	// 1. Write before append t.txqueues
+	// 1. before pushMsgs
 	// 2. Close
-	// 3. Write append
+	// 3. pushMsgs
 	close(t.die)
 	msgss := t.popMsgss()
 	t.releaseMsgss(msgss)
@@ -191,10 +191,8 @@ func (t *UDPTunnel) notifyFlush() {
 
 func (t *UDPTunnel) notifyReadError(err error) {
 	Logf(WARN, "UDPTunnel::notifyReadError localAddr:%v err:%v", t.lUDPAddr, err)
-	//read错误，有可能需要直接Close
 }
 
 func (t *UDPTunnel) notifyWriteError(err error) {
 	Logf(WARN, "UDPTunnel::notifyWriteError localAddr:%v err:%v", t.lUDPAddr, err)
-	//得确认是目标的问题，还是自身的问题
 }

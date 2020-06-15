@@ -16,7 +16,6 @@ func (t *UDPTunnel) writeSingle(msgs []ipv4.Message) {
 			npkts++
 		} else {
 			t.notifyWriteError(errors.WithStack(err))
-			break
 		}
 	}
 
