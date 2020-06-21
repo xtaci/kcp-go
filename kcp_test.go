@@ -16,12 +16,11 @@ type TunnelPoll struct {
 	idx     uint32
 }
 
-func (poll *TunnelPoll) AddTunnel(tunnel *UDPTunnel) {
+func (poll *TunnelPoll) Add(tunnel *UDPTunnel) {
 	poll.tunnels = append(poll.tunnels, tunnel)
-	poll.idx = uint32(len(poll.tunnels))
 }
 
-func (poll *TunnelPoll) PickTunnel() (tunnel *UDPTunnel) {
+func (poll *TunnelPoll) Pick() (tunnel *UDPTunnel) {
 	idx := atomic.AddUint32(&poll.idx, 1) % uint32(len(poll.tunnels))
 	return poll.tunnels[idx]
 }
@@ -47,8 +46,8 @@ func NewTestSelector(remotes []string) (*TestSelector, error) {
 	}, nil
 }
 
-func (sel *TestSelector) AddTunnel(tunnel *UDPTunnel) {
-	localIp := tunnel.LocalIp()
+func (sel *TestSelector) Add(tunnel *UDPTunnel) {
+	localIp := tunnel.LocalAddr().IP.String()
 	poll, ok := sel.tunnelIPM[localIp]
 	if !ok {
 		poll = &TunnelPoll{
@@ -56,22 +55,29 @@ func (sel *TestSelector) AddTunnel(tunnel *UDPTunnel) {
 		}
 		sel.tunnelIPM[localIp] = poll
 	}
-	poll.AddTunnel(tunnel)
+	poll.Add(tunnel)
 }
 
-func (sel *TestSelector) Pick(remoteIps []string) (tunnels []*UDPTunnel, remotes []net.Addr) {
+func (sel *TestSelector) PickRemotes(count int) (remotes []string) {
+	for i := 0; i < count; i++ {
+		idx := atomic.AddUint32(&sel.remoteIdx, 1) % uint32(len(sel.remoteAddrs))
+		remotes = append(remotes, sel.remoteAddrs[idx].String())
+	}
+	return remotes
+}
+
+func (sel *TestSelector) Pick(remotes []string) (tunnels []*UDPTunnel) {
 	tunnels = make([]*UDPTunnel, 0)
-	for _, remoteIp := range remoteIps {
-		tunnelPoll, ok := sel.tunnelIPM[remoteIp]
-		if ok {
-			tunnels = append(tunnels, tunnelPoll.PickTunnel())
+	for _, remote := range remotes {
+		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
+		if err == nil {
+			tunnelPoll, ok := sel.tunnelIPM[remoteAddr.IP.String()]
+			if ok {
+				tunnels = append(tunnels, tunnelPoll.Pick())
+			}
 		}
 	}
-	for i := 0; i < len(tunnels); i++ {
-		idx := atomic.AddUint32(&sel.remoteIdx, 1) % uint32(len(sel.remoteAddrs))
-		remotes = append(remotes, sel.remoteAddrs[idx])
-	}
-	return tunnels, remotes
+	return tunnels
 }
 
 var lPortStart = 7001
@@ -88,10 +94,11 @@ var ipsCount = 2
 // var rAddrs = []string{"127.0.0.1:18001"}
 // var remoteIps = []string{"127.0.0.1"}
 
-var serverTransport *UDPTransport
+var clientSel *TestSelector
 var clientTransport *UDPTransport
 var clientStream *UDPStream
 var clientTunnels []*UDPTunnel
+var serverTransport *UDPTransport
 var serverStream *UDPStream
 var serverTunnels []*UDPTunnel
 
@@ -116,11 +123,12 @@ func init() {
 	Logf(INFO, "init")
 	DefaultDialTimeout = time.Second * 2
 
-	clientSel, err := NewTestSelector(rAddrs)
+	var err error
+	clientSel, err = NewTestSelector(rAddrs)
 	if err != nil {
 		panic("NewTestSelector")
 	}
-	clientTransport, err = NewUDPTransport(clientSel, nil, false)
+	clientTransport, err = NewUDPTransport(clientSel, nil)
 	if err != nil {
 		panic("NewUDPTransport")
 	}
@@ -129,7 +137,6 @@ func init() {
 		if err != nil {
 			panic("NewTunnel")
 		}
-		clientSel.AddTunnel(tunnel)
 		clientTunnels = append(clientTunnels, tunnel)
 	}
 
@@ -137,7 +144,7 @@ func init() {
 	if err != nil {
 		panic("NewTestSelector")
 	}
-	serverTransport, err = NewUDPTransport(serverSel, nil, true)
+	serverTransport, err = NewUDPTransport(serverSel, nil)
 	if err != nil {
 		panic("NewUDPTransport")
 	}
@@ -146,11 +153,10 @@ func init() {
 		if err != nil {
 			panic("NewTunnel")
 		}
-		serverSel.AddTunnel(tunnel)
 		serverTunnels = append(serverTunnels, tunnel)
 	}
 
-	clientStream, err = clientTransport.Open(remoteIps)
+	clientStream, err = clientTransport.Open(clientSel.PickRemotes(len(remoteIps)))
 	if err != nil {
 		panic("clientTransport Open")
 	}
@@ -224,25 +230,25 @@ func testlink(t *testing.T, loss float64, delayMin, delayMax int, nodelay, inter
 	client(t, loss, delayMin, delayMax, nodelay, interval, resend, nc)
 }
 
-func TestLossyConn1(t *testing.T) {
+func testLossyConn1(t *testing.T) {
 	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
 	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
 	testlink(t, 0.1, 10, 20, 1, 10, 2, 1)
 }
 
-func TestLossyConn2(t *testing.T) {
+func testLossyConn2(t *testing.T) {
 	Logf(INFO, "testing loss rate 0.2, rtt 20-40ms")
 	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
 	testlink(t, 0.2, 10, 20, 1, 10, 2, 1)
 }
 
-func TestLossyConn3(t *testing.T) {
+func testLossyConn3(t *testing.T) {
 	Logf(INFO, "testing loss rate 0.3, rtt 20-40ms")
 	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
 	testlink(t, 0.3, 10, 20, 1, 10, 2, 1)
 }
 
-func TestLossyConn4(t *testing.T) {
+func testLossyConn4(t *testing.T) {
 	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
 	Logf(INFO, "testing link with nodelay parameters:1 10 2 0")
 	testlink(t, 0.1, 10, 20, 1, 10, 2, 0)
@@ -265,7 +271,7 @@ func BenchmarkFlush(b *testing.B) {
 	}
 }
 
-func TestTimeout(t *testing.T) {
+func testTimeout(t *testing.T) {
 	buf := make([]byte, 10)
 	//timeout
 	clientStream.SetDeadline(time.Now().Add(time.Second))
@@ -278,7 +284,7 @@ func TestTimeout(t *testing.T) {
 	Logf(INFO, "TestTimeout err:%v", err)
 }
 
-func TestSendRecv(t *testing.T) {
+func testSendRecv(t *testing.T) {
 	go server(t, 0.1, 10, 20, 1, 10, 2, 0)
 	clientStream.SetWriteDelay(true)
 
@@ -311,7 +317,7 @@ func tinyRecvServer(t *testing.T, loss float64, delayMin, delayMax int, nodelay,
 	}
 }
 
-func TestTinyBufferReceiver(t *testing.T) {
+func testTinyBufferReceiver(t *testing.T) {
 	go tinyRecvServer(t, 0.1, 10, 20, 1, 10, 2, 0)
 
 	const N = 100
@@ -348,7 +354,7 @@ func TestTinyBufferReceiver(t *testing.T) {
 	}
 }
 
-func TestClose(t *testing.T) {
+func testClose(t *testing.T) {
 	var n int
 	var err error
 
@@ -495,7 +501,7 @@ func sinkTester(stream *UDPStream, msglen, msgcount int) error {
 }
 
 func echoClient(nbytes, N int) error {
-	stream, err := clientTransport.Open(remoteIps)
+	stream, err := clientTransport.Open(clientSel.PickRemotes(len(remoteIps)))
 	if err != nil {
 		return err
 	}
@@ -517,7 +523,7 @@ func echoClient(nbytes, N int) error {
 }
 
 func sinkClient(nbytes, N int) error {
-	stream, err := clientTransport.Open(remoteIps)
+	stream, err := clientTransport.Open(clientSel.PickRemotes(len(remoteIps)))
 	if err != nil {
 		return err
 	}
@@ -547,7 +553,7 @@ func parallelClient(t *testing.T, wg *sync.WaitGroup) (err error) {
 	return
 }
 
-func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
+func testParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	go echoServer()
 
 	var wg sync.WaitGroup
@@ -559,7 +565,7 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	wg.Wait()
 }
 
-func TestSNMP(t *testing.T) {
+func testSNMP(t *testing.T) {
 	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
 	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
 	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
@@ -589,6 +595,38 @@ func sinkSpeed(b *testing.B, bytes int) {
 	go sinkServer()
 	sinkClient(bytes, b.N)
 	b.SetBytes(int64(bytes))
+}
+
+func TestKCP(t *testing.T) {
+	Logf(INFO, "TestKCP.testLossyConn1")
+	testLossyConn1(t)
+
+	Logf(INFO, "TestKCP.testLossyConn2")
+	testLossyConn2(t)
+
+	Logf(INFO, "TestKCP.testLossyConn3")
+	testLossyConn3(t)
+
+	Logf(INFO, "TestKCP.testLossyConn4")
+	testLossyConn4(t)
+
+	Logf(INFO, "TestKCP.testTimeout")
+	testTimeout(t)
+
+	Logf(INFO, "TestKCP.testSendRecv")
+	testSendRecv(t)
+
+	Logf(INFO, "TestKCP.testTinyBufferReceiver")
+	testTinyBufferReceiver(t)
+
+	Logf(INFO, "TestKCP.testClose")
+	testClose(t)
+
+	Logf(INFO, "TestKCP.testParallel1024CLIENT_64BMSG_64CNT")
+	testParallel1024CLIENT_64BMSG_64CNT(t)
+
+	Logf(INFO, "TestKCP.testSNMP")
+	testSNMP(t)
 }
 
 func BenchmarkEchoSpeed128B(b *testing.B) {

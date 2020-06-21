@@ -80,11 +80,11 @@ type TunnelPoll struct {
 	idx     uint32
 }
 
-func (poll *TunnelPoll) AddTunnel(tunnel *kcp.UDPTunnel) {
+func (poll *TunnelPoll) Add(tunnel *kcp.UDPTunnel) {
 	poll.tunnels = append(poll.tunnels, tunnel)
 }
 
-func (poll *TunnelPoll) PickTunnel() (tunnel *kcp.UDPTunnel) {
+func (poll *TunnelPoll) Pick() (tunnel *kcp.UDPTunnel) {
 	idx := atomic.AddUint32(&poll.idx, 1) % uint32(len(poll.tunnels))
 	return poll.tunnels[idx]
 }
@@ -94,22 +94,14 @@ type TestSelector struct {
 	remoteAddrs []net.Addr
 }
 
-func NewTestSelector(remoteIp string, remotePortS, remotePortE int) (*TestSelector, error) {
-	remoteAddrs := make([]net.Addr, remotePortE-remotePortS+1)
-	for portS := remotePortS; portS <= remotePortE; portS++ {
-		addr, err := net.ResolveUDPAddr("udp", remoteIp+":"+strconv.Itoa(portS))
-		checkError(err)
-		remoteAddrs[portS-remotePortS] = addr
-	}
-
+func NewTestSelector() (*TestSelector, error) {
 	return &TestSelector{
-		tunnelIPM:   make(map[string]*TunnelPoll),
-		remoteAddrs: remoteAddrs,
+		tunnelIPM: make(map[string]*TunnelPoll),
 	}, nil
 }
 
-func (sel *TestSelector) AddTunnel(tunnel *kcp.UDPTunnel) {
-	localIp := tunnel.LocalIp()
+func (sel *TestSelector) Add(tunnel *kcp.UDPTunnel) {
+	localIp := tunnel.LocalAddr().IP.String()
 	poll, ok := sel.tunnelIPM[localIp]
 	if !ok {
 		poll = &TunnelPoll{
@@ -117,18 +109,21 @@ func (sel *TestSelector) AddTunnel(tunnel *kcp.UDPTunnel) {
 		}
 		sel.tunnelIPM[localIp] = poll
 	}
-	poll.AddTunnel(tunnel)
+	poll.Add(tunnel)
 }
 
-func (sel *TestSelector) Pick(remoteIps []string) (tunnels []*kcp.UDPTunnel, remotes []net.Addr) {
+func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
 	tunnels = make([]*kcp.UDPTunnel, 0)
-	for _, remoteIp := range remoteIps {
-		tunnelPoll, ok := sel.tunnelIPM[remoteIp]
-		if ok {
-			tunnels = append(tunnels, tunnelPoll.PickTunnel())
+	for _, remote := range remotes {
+		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
+		if err == nil {
+			tunnelPoll, ok := sel.tunnelIPM[remoteAddr.IP.String()]
+			if ok {
+				tunnels = append(tunnels, tunnelPoll.Pick())
+			}
 		}
 	}
-	return tunnels, sel.remoteAddrs[:int(len(tunnels))]
+	return tunnels
 }
 
 // handleClient aggregates connection p1 on mux with 'writeLock'
@@ -250,19 +245,13 @@ func main() {
 		kcp.Logf(kcp.INFO, "Action remotePortE:%v", remotePortE)
 		kcp.Logf(kcp.INFO, "Action transmitTuns:%v", transmitTuns)
 
-		sel, err := NewTestSelector(remoteIp, remotePortS, remotePortE)
+		sel, err := NewTestSelector()
 		checkError(err)
-		transport, err := kcp.NewUDPTransport(sel, nil, true)
+		transport, err := kcp.NewUDPTransport(sel, nil)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
-			tunnel, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), nil)
+			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), nil)
 			checkError(err)
-			sel.AddTunnel(tunnel)
-		}
-
-		remoteIps := []string{}
-		for i := 0; i < transmitTuns; i++ {
-			remoteIps = append(remoteIps, remoteIp)
 		}
 
 		for {

@@ -106,11 +106,11 @@ type TunnelPoll struct {
 	idx     uint32
 }
 
-func (poll *TunnelPoll) AddTunnel(tunnel *kcp.UDPTunnel) {
+func (poll *TunnelPoll) Add(tunnel *kcp.UDPTunnel) {
 	poll.tunnels = append(poll.tunnels, tunnel)
 }
 
-func (poll *TunnelPoll) PickTunnel() (tunnel *kcp.UDPTunnel) {
+func (poll *TunnelPoll) Pick() (tunnel *kcp.UDPTunnel) {
 	idx := atomic.AddUint32(&poll.idx, 1) % uint32(len(poll.tunnels))
 	return poll.tunnels[idx]
 }
@@ -120,23 +120,14 @@ type TestSelector struct {
 	remoteAddrs []net.Addr
 }
 
-func NewTestSelector(remotes []string) (*TestSelector, error) {
-	remoteAddrs := make([]net.Addr, len(remotes))
-	for i := 0; i < len(remotes); i++ {
-		addr, err := net.ResolveUDPAddr("udp", remotes[i])
-		if err != nil {
-			return nil, err
-		}
-		remoteAddrs[i] = addr
-	}
+func NewTestSelector() (*TestSelector, error) {
 	return &TestSelector{
-		tunnelIPM:   make(map[string]*TunnelPoll),
-		remoteAddrs: remoteAddrs,
+		tunnelIPM: make(map[string]*TunnelPoll),
 	}, nil
 }
 
-func (sel *TestSelector) AddTunnel(tunnel *kcp.UDPTunnel) {
-	localIp := tunnel.LocalIp()
+func (sel *TestSelector) Add(tunnel *kcp.UDPTunnel) {
+	localIp := tunnel.LocalAddr().IP.String()
 	poll, ok := sel.tunnelIPM[localIp]
 	if !ok {
 		poll = &TunnelPoll{
@@ -144,18 +135,21 @@ func (sel *TestSelector) AddTunnel(tunnel *kcp.UDPTunnel) {
 		}
 		sel.tunnelIPM[localIp] = poll
 	}
-	poll.AddTunnel(tunnel)
+	poll.Add(tunnel)
 }
 
-func (sel *TestSelector) Pick(remoteIps []string) (tunnels []*kcp.UDPTunnel, remotes []net.Addr) {
+func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
 	tunnels = make([]*kcp.UDPTunnel, 0)
-	for _, remoteIp := range remoteIps {
-		tunnelPoll, ok := sel.tunnelIPM[remoteIp]
-		if ok {
-			tunnels = append(tunnels, tunnelPoll.PickTunnel())
+	for _, remote := range remotes {
+		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
+		if err == nil {
+			tunnelPoll, ok := sel.tunnelIPM[remoteAddr.IP.String()]
+			if ok {
+				tunnels = append(tunnels, tunnelPoll.Pick())
+			}
 		}
 	}
-	return tunnels, sel.remoteAddrs[:int(len(tunnels))]
+	return tunnels
 }
 
 var lAddrs = []string{"127.0.0.1:7001", "127.0.0.1:7002"}
@@ -167,12 +161,12 @@ var rFile = "./file/rFile"
 var lFileSave = "./file/lFileSave"
 
 func Client() {
-	sel, err := NewTestSelector(rAddrs)
+	sel, err := NewTestSelector()
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Client NewTestSelector err:%v", err)
 		return
 	}
-	transport, err := kcp.NewUDPTransport(sel, kcp.DefaultKCPOption, false)
+	transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Client NewUDPTransport err:%v", err)
 		return
@@ -183,13 +177,12 @@ func Client() {
 		if err != nil {
 			panic("NewTunnel")
 		}
-		sel.AddTunnel(tunnel)
 		tunnel.Simulate(0.2, 10, 100)
 		if closeTunnel == nil {
 			closeTunnel = tunnel
 		}
 	}
-	stream, err := transport.Open([]string{"127.0.0.1", "127.0.0.1"})
+	stream, err := transport.Open(rAddrs)
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Client transport open err:%v", err)
 		return
@@ -230,13 +223,13 @@ func ServeClientStream(stream *kcp.UDPStream) {
 }
 
 func Server() {
-	sel, err := NewTestSelector(lAddrs)
+	sel, err := NewTestSelector()
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Server NewTestSelector err:%v", err)
 		return
 	}
 
-	transport, err := kcp.NewUDPTransport(sel, kcp.DefaultKCPOption, true)
+	transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Server transport open err:%v", err)
 		return
@@ -247,7 +240,6 @@ func Server() {
 		if err != nil {
 			panic("NewTunnel")
 		}
-		sel.AddTunnel(tunnel)
 		tunnel.Simulate(0.2, 10, 100)
 	}
 

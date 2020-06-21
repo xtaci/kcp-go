@@ -20,10 +20,10 @@ type input_callback func(data []byte, addr net.Addr)
 type (
 	// UDPTunnel defines a session implemented by UDP
 	UDPTunnel struct {
-		conn     *net.UDPConn // the underlying packet connection
-		lUDPAddr *net.UDPAddr
-		mu       sync.Mutex
-		inputcb  input_callback
+		conn    *net.UDPConn // the underlying packet connection
+		addr    *net.UDPAddr
+		mu      sync.Mutex
+		inputcb input_callback
 
 		// notifications
 		die     chan struct{} // notify tunnel has Closed
@@ -46,16 +46,16 @@ type (
 // newUDPSession create a new udp session for client or server
 func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err error) {
 	// network type detection
-	lUDPAddr, err := net.ResolveUDPAddr("udp", laddr)
+	addr, err := net.ResolveUDPAddr("udp", laddr)
 	if err != nil {
 		return nil, err
 	}
 	network := "udp4"
-	if lUDPAddr.IP.To4() == nil {
+	if addr.IP.To4() == nil {
 		network = "udp"
 	}
 
-	conn, err := net.ListenUDP(network, lUDPAddr)
+	conn, err := net.ListenUDP(network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -63,12 +63,12 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	tunnel = new(UDPTunnel)
 	tunnel.conn = conn
 	tunnel.inputcb = inputcb
-	tunnel.lUDPAddr = lUDPAddr
+	tunnel.addr = addr
 	tunnel.die = make(chan struct{})
 	tunnel.chFlush = make(chan struct{}, 1)
 
 	// cast to writebatch conn
-	if lUDPAddr.IP.To4() != nil {
+	if addr.IP.To4() != nil {
 		tunnel.xconn = ipv4.NewPacketConn(conn)
 	} else {
 		tunnel.xconn = ipv6.NewPacketConn(conn)
@@ -77,7 +77,7 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	go tunnel.readLoop()
 	go tunnel.writeLoop()
 
-	Logf(INFO, "NewUDPTunnel localAddr:%v", lUDPAddr)
+	Logf(INFO, "NewUDPTunnel addr:%v", addr)
 	return tunnel, nil
 }
 
@@ -90,7 +90,7 @@ func (t *UDPTunnel) SetWriteBuffer(bytes int) error {
 }
 
 func (t *UDPTunnel) Close() error {
-	Logf(INFO, "UDPTunnel::Close localAddr:%v", t.lUDPAddr)
+	Logf(INFO, "UDPTunnel::Close addr:%v", t.addr)
 
 	var once bool
 	t.dieOnce.Do(func() {
@@ -112,13 +112,13 @@ func (t *UDPTunnel) Close() error {
 	return nil
 }
 
-func (t *UDPTunnel) LocalIp() (ip string) {
-	return t.lUDPAddr.IP.String()
+func (t *UDPTunnel) LocalAddr() (addr *net.UDPAddr) {
+	return t.addr
 }
 
 // for test
 func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
-	Logf(INFO, "UDPTunnel::Simulate localAddr:%v loss:%v delayMin:%v delayMax:%v", t.lUDPAddr, loss, delayMin, delayMax)
+	Logf(INFO, "UDPTunnel::Simulate addr:%v loss:%v delayMin:%v delayMax:%v", t.addr, loss, delayMin, delayMax)
 
 	t.loss = int(loss * 100)
 	t.delayMin = delayMin
@@ -190,9 +190,9 @@ func (t *UDPTunnel) notifyFlush() {
 }
 
 func (t *UDPTunnel) notifyReadError(err error) {
-	Logf(WARN, "UDPTunnel::notifyReadError localAddr:%v err:%v", t.lUDPAddr, err)
+	Logf(WARN, "UDPTunnel::notifyReadError addr:%v err:%v", t.addr, err)
 }
 
 func (t *UDPTunnel) notifyWriteError(err error) {
-	Logf(WARN, "UDPTunnel::notifyWriteError localAddr:%v err:%v", t.lUDPAddr, err)
+	Logf(WARN, "UDPTunnel::notifyWriteError addr:%v err:%v", t.addr, err)
 }

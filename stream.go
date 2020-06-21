@@ -14,10 +14,11 @@ import (
 )
 
 var (
-	errTimeout    = errors.New("timeout")
-	errRemoteIps  = errors.New("err remote ips")
-	errStreamFlag = errors.New("err stream flag")
-	errSynInfo    = errors.New("err syn info")
+	errTimeout      = errors.New("timeout")
+	errTunnelPick   = errors.New("err tunnel pick")
+	errStreamFlag   = errors.New("err stream flag")
+	errSynInfo      = errors.New("err syn info")
+	errRemoteStream = errors.New("err remote stream")
 )
 
 const (
@@ -45,14 +46,13 @@ type clean_callback func(uuid gouuid.UUID)
 type (
 	// UDPStream defines a KCP session
 	UDPStream struct {
-		uuid      gouuid.UUID
-		sel       RouteSelector
-		kcp       *KCP     // KCP ARQ protocol
-		remoteIps []string //remoteips
-		tunnels   []*UDPTunnel
-		remotes   []net.Addr
-		accepted  bool
-		cleancb   clean_callback
+		uuid     gouuid.UUID
+		sel      TunnelSelector
+		kcp      *KCP // KCP ARQ protocol
+		tunnels  []*UDPTunnel
+		remotes  []net.Addr
+		accepted bool
+		cleancb  clean_callback
 
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
@@ -93,10 +93,19 @@ type (
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel RouteSelector, cleancb clean_callback) (stream *UDPStream, err error) {
-	tunnels, remotes := sel.Pick(remoteIps)
+func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
+	tunnels := sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
-		return nil, errRemoteIps
+		return nil, errTunnelPick
+	}
+
+	remoteAddrs := make([]net.Addr, len(remotes))
+	for i, remote := range remotes {
+		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
+		if err != nil {
+			return nil, err
+		}
+		remoteAddrs[i] = remoteAddr
 	}
 
 	stream = new(UDPStream)
@@ -115,9 +124,8 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	stream.headerSize = gouuid.Size
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
-	stream.remoteIps = remoteIps
 	stream.tunnels = tunnels
-	stream.remotes = remotes
+	stream.remotes = remoteAddrs
 	stream.hrtTime = time.Now().Add(HeartbeatInterval)
 	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
@@ -138,6 +146,20 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remoteIps []string, sel Route
 	SystemTimedSched.Put(stream.update, time.Now())
 	Logf(INFO, "NewUDPStream uuid:%v accepted:%v remotes:%v", uuid, accepted, remotes)
 	return stream, nil
+}
+
+// LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
+func (s *UDPStream) LocalAddr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.tunnels[0].LocalAddr()
+}
+
+// RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
+func (s *UDPStream) RemoteAddr() net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.remotes[0]
 }
 
 // SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
@@ -391,11 +413,11 @@ func (s *UDPStream) Dial(timeout time.Duration) error {
 	if s.accepted {
 		return nil
 	}
-	localIps := make([]string, len(s.tunnels))
+	localAddrs := make([]string, len(s.tunnels))
 	for i := 0; i < len(s.tunnels); i++ {
-		localIps[i] = s.tunnels[i].LocalIp()
+		localAddrs[i] = s.tunnels[i].LocalAddr().String()
 	}
-	s.WriteFlag(SYN, []byte(strings.Join(localIps, ":")))
+	s.WriteFlag(SYN, []byte(strings.Join(localAddrs, " ")))
 	s.flush(true)
 
 	checkTime := int(timeout/DefaultDialCheckInterval) + 1
@@ -409,6 +431,38 @@ func (s *UDPStream) Dial(timeout time.Duration) error {
 		}
 	}
 	return errTimeout
+}
+
+func (s *UDPStream) Accept() (err error) {
+	Logf(INFO, "UDPStream::Accept uuid:%v accepted:%v", s.uuid, s.accepted)
+
+	select {
+	case <-s.chClose:
+		return io.ErrClosedPipe
+	case <-s.chRst:
+		return io.ErrUnexpectedEOF
+	case <-s.chRecvFinEvent:
+		return io.EOF
+	default:
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	size := s.kcp.PeekSize()
+	if size <= 0 {
+		return errRemoteStream
+	}
+
+	// resize the length of recvbuf to correspond to data size
+	s.recvbuf = s.recvbuf[:size]
+	s.kcp.Recv(s.recvbuf)
+	flag := s.recvbuf[0]
+	if flag != SYN {
+		return errRemoteStream
+	}
+	_, err = s.recvSyn(s.recvbuf[1:])
+	return err
 }
 
 // Close closes the connection.
@@ -568,13 +622,12 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 	}
 }
 
-func (s *UDPStream) input(data []byte) error {
+func (s *UDPStream) input(data []byte) {
 	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 
 	s.mu.Lock()
-	synPacket := s.kcp.rcv_nxt == 0
 	if ret := s.kcp.Input(data[gouuid.Size:], true, s.ackNoDelay); ret != 0 {
 		kcpInErrors++
 	}
@@ -591,12 +644,6 @@ func (s *UDPStream) input(data []byte) error {
 	if kcpInErrors > 0 {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 	}
-
-	//first packet must by syn
-	if synPacket && s.accepted {
-		return s.readSyn(data)
-	}
-	return nil
 }
 
 func (s *UDPStream) notifyReadEvent() {
@@ -611,19 +658,6 @@ func (s *UDPStream) notifyWriteEvent() {
 	case s.chWriteEvent <- struct{}{}:
 	default:
 	}
-}
-
-func (s *UDPStream) readSyn(data []byte) error {
-	if len(data) <= FlagOffset || data[FlagOffset] != SYN {
-		s.Close()
-		return io.ErrClosedPipe
-	}
-	//must be syn
-	if n, err := s.Read(nil); n != 0 || err != nil {
-		s.Close()
-		return io.ErrClosedPipe
-	}
-	return nil
 }
 
 func (s *UDPStream) cmdRead(flag byte, data []byte, b []byte) (n int, err error) {
@@ -659,17 +693,24 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 	}
 
 	endpointInfo := string(data)
-	remoteIps := strings.Split(endpointInfo, ":")
-	if len(remoteIps) == 0 {
+	remotes := strings.Split(endpointInfo, " ")
+	if len(remotes) == 0 {
 		return len(data), errSynInfo
 	}
-	tunnels, remotes := s.sel.Pick(remoteIps)
+	tunnels := s.sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return len(data), errSynInfo
 	}
-	s.remoteIps = remoteIps
+	remoteAddrs := make([]net.Addr, len(remotes))
+	for i, remote := range remotes {
+		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
+		if err != nil {
+			return len(data), err
+		}
+		remoteAddrs[i] = remoteAddr
+	}
 	s.tunnels = tunnels
-	s.remotes = remotes
+	s.remotes = remoteAddrs
 
 	Logf(INFO, "UDPStream::recvSyn uuid:%v accepted:%v remotes:%v", s.uuid, s.accepted, remotes)
 	return len(data), nil
