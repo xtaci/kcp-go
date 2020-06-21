@@ -193,17 +193,19 @@ func (t *UDPTransport) handleInput(data []byte, rAddr net.Addr) {
 	copy(uuid[:], data)
 
 	stream, new := t.handleOpen(uuid, rAddr)
-	if stream != nil {
-		stream.input(data)
-		if new {
-			select {
-			case t.acceptChan <- stream:
-				break
-			default:
-				//maybe we can just ignore the stream in the future
-				stream.Close()
-			}
-		}
+	if stream == nil {
+		return
+	}
+	stream.input(data)
+	if !new {
+		return
+	}
+	select {
+	case t.acceptChan <- stream:
+		break
+	default:
+		//todo, we can just ignore the stream in the future, so client will retry syn
+		stream.Close()
 	}
 }
 

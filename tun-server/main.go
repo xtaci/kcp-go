@@ -115,9 +115,9 @@ func (sel *TestSelector) Add(tunnel *kcp.UDPTunnel) {
 func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
 	tunnels = make([]*kcp.UDPTunnel, 0)
 	for _, remote := range remotes {
-		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
+		ip, _, err := net.SplitHostPort(remote)
 		if err == nil {
-			tunnelPoll, ok := sel.tunnelIPM[remoteAddr.IP.String()]
+			tunnelPoll, ok := sel.tunnelIPM[ip]
 			if ok {
 				tunnels = append(tunnels, tunnelPoll.Pick())
 			}
