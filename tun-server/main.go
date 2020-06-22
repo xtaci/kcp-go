@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/urfave/cli"
-	kcp "github.com/xtaci/kcp-go/v5"
+	kcp "github.com/ldcsoftware/kcp-go"
 )
 
 func init() {

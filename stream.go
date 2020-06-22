@@ -7,8 +7,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"errors"
 
-	"github.com/pkg/errors"
 	gouuid "github.com/satori/go.uuid"
 	"golang.org/x/net/ipv4"
 )

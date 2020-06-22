@@ -7,7 +7,6 @@ import (
 	"time"
 
 	cmap "github.com/1ucio/concurrent-map"
-	"github.com/pkg/errors"
 	gouuid "github.com/satori/go.uuid"
 )
 
@@ -123,13 +122,13 @@ func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel 
 	})
 	if err != nil {
 		Logf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	err = t.InitTunnel(tunnel, tunOption)
 	if err != nil {
 		Logf(ERROR, "UDPTransport::NewTunnel InitTunnel lAddr:%v err:%v", lAddr, err)
 		tunnel.Close()
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 
 	t.sel.Add(tunnel)
@@ -161,7 +160,7 @@ func (t *UDPTransport) Open(remotes []string) (stream *UDPStream, err error) {
 	stream, err = t.NewStream(uuid, false, remotes)
 	if err != nil {
 		Logf(ERROR, "UDPTransport::Open uuid:%v remotes:%v err:%v", uuid, remotes, err)
-		return nil, errors.WithStack(err)
+		return nil, err
 	}
 	t.streamm.Set(uuid.String(), stream)
 	err = stream.Dial(DefaultDialTimeout)
@@ -184,7 +183,7 @@ func (t *UDPTransport) Accept() (stream *UDPStream, err error) {
 		Logf(INFO, "UDPTransport::Accept uuid:%v", stream.GetUUID())
 		return stream, nil
 	case <-t.die:
-		return nil, errors.WithStack(io.ErrClosedPipe)
+		return nil, io.ErrClosedPipe
 	}
 }
 

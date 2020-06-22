@@ -3,7 +3,6 @@ package kcp
 import (
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	gouuid "github.com/satori/go.uuid"
 )
 
@@ -17,7 +16,7 @@ func (t *UDPTunnel) defaultReadLoop() {
 				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			}
 		} else {
-			t.notifyReadError(errors.WithStack(err))
+			t.notifyReadError(err)
 		}
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	gouuid "github.com/satori/go.uuid"
 	"golang.org/x/net/ipv4"
 )
@@ -48,7 +47,7 @@ func (t *UDPTunnel) readLoop() {
 					}
 				}
 			}
-			t.notifyReadError(errors.WithStack(err))
+			t.notifyReadError(err)
 		}
 	}
 }

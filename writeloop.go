@@ -3,7 +3,6 @@ package kcp
 import (
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 )
 
@@ -15,7 +14,7 @@ func (t *UDPTunnel) writeSingle(msgs []ipv4.Message) {
 			nbytes += n
 			npkts++
 		} else {
-			t.notifyWriteError(errors.WithStack(err))
+			t.notifyWriteError(err)
 		}
 	}
 
