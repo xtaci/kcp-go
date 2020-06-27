@@ -182,6 +182,7 @@ func (t *UDPTransport) Accept() (stream *UDPStream, err error) {
 	case stream = <-t.acceptChan:
 		err := stream.Accept()
 		if err != nil {
+			stream.Close()
 			Logf(WARN, "UDPTransport::Accept uuid:%v err:%v", stream.GetUUID(), err)
 			return nil, err
 		}
