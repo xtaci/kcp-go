@@ -182,7 +182,7 @@ func Client() {
 			closeTunnel = tunnel
 		}
 	}
-	stream, err := transport.Open(rAddrs)
+	stream, err := transport.Open(lAddrs, rAddrs)
 	if err != nil {
 		kcp.Logf(kcp.ERROR, "Client transport open err:%v", err)
 		return

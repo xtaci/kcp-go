@@ -10,8 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/urfave/cli"
 	kcp "github.com/ldcsoftware/kcp-go"
+	"github.com/urfave/cli"
 )
 
 func init() {
@@ -259,6 +259,11 @@ func main() {
 			checkError(errors.New("invliad transmitTuns"))
 		}
 
+		locals := []string{}
+		for i := 0; i < transmitTuns; i++ {
+			locals = append(locals, localIp+":"+strconv.Itoa(localPortS+i))
+		}
+
 		remotes := []string{}
 		for i := 0; i < transmitTuns; i++ {
 			remotes = append(remotes, remoteIp+":"+strconv.Itoa(remotePortS+i))
@@ -272,7 +277,7 @@ func main() {
 		for {
 			conn, err := listener.AcceptTCP()
 			checkError(err)
-			stream, err := transport.Open(remotes)
+			stream, err := transport.Open(locals, remotes)
 			checkError(err)
 			go handleClient(stream, conn)
 		}

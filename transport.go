@@ -153,24 +153,24 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 }
 
 //interface
-func (t *UDPTransport) Open(remotes []string) (stream *UDPStream, err error) {
-	Logf(INFO, "UDPTransport::Open remotes:%v", remotes)
+func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err error) {
+	Logf(INFO, "UDPTransport::Open locals:%v remotes:%v", locals, remotes)
 
 	uuid, err := gouuid.NewV1()
 	if err != nil {
-		Logf(ERROR, "UDPTransport::Open NewV1 failed. remotes:%v err:%v", remotes, err)
+		Logf(ERROR, "UDPTransport::Open NewV1 failed. locals:%v remotes:%v err:%v", locals, remotes, err)
 		return nil, err
 	}
 
 	stream, err = t.NewStream(uuid, false, remotes)
 	if err != nil {
-		Logf(ERROR, "UDPTransport::Open NewStream failed. uuid:%v remotes:%v err:%v", uuid, remotes, err)
+		Logf(ERROR, "UDPTransport::Open NewStream failed. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
 		return nil, err
 	}
 	t.streamm.Set(uuid.String(), stream)
-	err = stream.Dial(DefaultDialTimeout)
+	err = stream.Dial(locals, DefaultDialTimeout)
 	if err != nil {
-		Logf(WARN, "UDPTransport::Open Dial timeout. uuid:%v remotes:%v err:%v", uuid, remotes, err)
+		Logf(WARN, "UDPTransport::Open Dial timeout. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
 		stream.Close()
 		return nil, err
 	}

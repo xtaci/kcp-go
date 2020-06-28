@@ -1,23 +1,24 @@
 package kcp
 
 import (
+	"errors"
 	"io"
 	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-	"errors"
 
 	gouuid "github.com/satori/go.uuid"
 	"golang.org/x/net/ipv4"
 )
 
 var (
-	errTimeout      = errors.New("timeout")
+	errTimeout      = errors.New("err timeout")
 	errTunnelPick   = errors.New("err tunnel pick")
 	errStreamFlag   = errors.New("err stream flag")
 	errSynInfo      = errors.New("err syn info")
+	errDialParam    = errors.New("err dial param")
 	errRemoteStream = errors.New("err remote stream")
 )
 
@@ -407,17 +408,16 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 	}
 }
 
-func (s *UDPStream) Dial(timeout time.Duration) error {
-	Logf(INFO, "UDPStream::Dial uuid:%v accepted:%v", s.uuid, s.accepted)
+func (s *UDPStream) Dial(locals []string, timeout time.Duration) error {
+	Logf(INFO, "UDPStream::Dial uuid:%v accepted:%v locals:%v timeout:%v", s.uuid, s.accepted, locals, timeout)
 
 	if s.accepted {
 		return nil
+	} else if len(locals) == 0 {
+		return errDialParam
 	}
-	localAddrs := make([]string, len(s.tunnels))
-	for i := 0; i < len(s.tunnels); i++ {
-		localAddrs[i] = s.tunnels[i].LocalAddr().String()
-	}
-	s.WriteFlag(SYN, []byte(strings.Join(localAddrs, " ")))
+
+	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
 	s.flush(true)
 
 	checkTime := int(timeout/DefaultDialCheckInterval) + 1

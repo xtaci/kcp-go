@@ -27,11 +27,22 @@ func (poll *TunnelPoll) Pick() (tunnel *UDPTunnel) {
 
 type TestSelector struct {
 	tunnelIPM   map[string]*TunnelPoll
+	localAddrs  []net.Addr
+	localIdx    uint32
 	remoteAddrs []net.Addr
 	remoteIdx   uint32
 }
 
-func NewTestSelector(remotes []string) (*TestSelector, error) {
+func NewTestSelector(locals, remotes []string) (*TestSelector, error) {
+	localAddrs := make([]net.Addr, len(locals))
+	for i := 0; i < len(locals); i++ {
+		addr, err := net.ResolveUDPAddr("udp", locals[i])
+		if err != nil {
+			return nil, err
+		}
+		localAddrs[i] = addr
+	}
+
 	remoteAddrs := make([]net.Addr, len(remotes))
 	for i := 0; i < len(remotes); i++ {
 		addr, err := net.ResolveUDPAddr("udp", remotes[i])
@@ -42,6 +53,7 @@ func NewTestSelector(remotes []string) (*TestSelector, error) {
 	}
 	return &TestSelector{
 		tunnelIPM:   make(map[string]*TunnelPoll),
+		localAddrs:  localAddrs,
 		remoteAddrs: remoteAddrs,
 	}, nil
 }
@@ -58,12 +70,16 @@ func (sel *TestSelector) Add(tunnel *UDPTunnel) {
 	poll.Add(tunnel)
 }
 
-func (sel *TestSelector) PickRemotes(count int) (remotes []string) {
+func (sel *TestSelector) PickAddrs(count int) (locals, remotes []string) {
+	for i := 0; i < count; i++ {
+		idx := atomic.AddUint32(&sel.localIdx, 1) % uint32(len(sel.localAddrs))
+		locals = append(locals, sel.localAddrs[idx].String())
+	}
 	for i := 0; i < count; i++ {
 		idx := atomic.AddUint32(&sel.remoteIdx, 1) % uint32(len(sel.remoteAddrs))
 		remotes = append(remotes, sel.remoteAddrs[idx].String())
 	}
-	return remotes
+	return locals, remotes
 }
 
 func (sel *TestSelector) Pick(remotes []string) (tunnels []*UDPTunnel) {
@@ -102,12 +118,12 @@ var serverTransport *UDPTransport
 var serverStream *UDPStream
 var serverTunnels []*UDPTunnel
 
-func init() {
+func Init(l LogLevel) {
 	Logf = func(lvl LogLevel, f string, args ...interface{}) {
-		if lvl < INFO {
+		if lvl < l {
 			return
 		}
-		// fmt.Printf(f+"\n", args...)
+		fmt.Printf(f+"\n", args...)
 	}
 
 	for i := 0; i < lPortCount; i++ {
@@ -124,7 +140,7 @@ func init() {
 	DefaultDialTimeout = time.Second * 2
 
 	var err error
-	clientSel, err = NewTestSelector(rAddrs)
+	clientSel, err = NewTestSelector(lAddrs, rAddrs)
 	if err != nil {
 		panic("NewTestSelector")
 	}
@@ -135,12 +151,12 @@ func init() {
 	for _, lAddr := range lAddrs {
 		tunnel, err := clientTransport.NewTunnel(lAddr, nil)
 		if err != nil {
-			panic("NewTunnel")
+			panic("NewTunnel" + err.Error())
 		}
 		clientTunnels = append(clientTunnels, tunnel)
 	}
 
-	serverSel, err := NewTestSelector(lAddrs)
+	serverSel, err := NewTestSelector(rAddrs, lAddrs)
 	if err != nil {
 		panic("NewTestSelector")
 	}
@@ -156,7 +172,7 @@ func init() {
 		serverTunnels = append(serverTunnels, tunnel)
 	}
 
-	clientStream, err = clientTransport.Open(clientSel.PickRemotes(len(remoteIps)))
+	clientStream, err = clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		panic("clientTransport Open")
 	}
@@ -389,6 +405,10 @@ func parallelServer(t *testing.T, loss float64, delayMin, delayMax int, nodelay,
 
 	for {
 		stream, err := serverTransport.Accept()
+		if err != nil {
+			Logf(ERROR, "parallelServer accept err:%v", err)
+			continue
+		}
 		stream.SetNoDelay(nodelay, interval, resend, nc)
 		checkError(t, err)
 		go handleServerStream(stream)
@@ -451,14 +471,22 @@ func handleSinkClient(stream *UDPStream) {
 
 func echoServer() {
 	for {
-		stream, _ := serverTransport.Accept()
+		stream, err := serverTransport.Accept()
+		if err != nil {
+			Logf(ERROR, "echoServer accept err:%v", err)
+			continue
+		}
 		go handleEchoClient(stream)
 	}
 }
 
 func sinkServer() {
 	for {
-		stream, _ := serverTransport.Accept()
+		stream, err := serverTransport.Accept()
+		if err != nil {
+			Logf(ERROR, "sinkServer accept err:%v", err)
+			continue
+		}
 		go handleSinkClient(stream)
 	}
 }
@@ -501,7 +529,7 @@ func sinkTester(stream *UDPStream, msglen, msgcount int) error {
 }
 
 func echoClient(nbytes, N int) error {
-	stream, err := clientTransport.Open(clientSel.PickRemotes(len(remoteIps)))
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		return err
 	}
@@ -523,7 +551,7 @@ func echoClient(nbytes, N int) error {
 }
 
 func sinkClient(nbytes, N int) error {
-	stream, err := clientTransport.Open(clientSel.PickRemotes(len(remoteIps)))
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		return err
 	}
@@ -574,6 +602,8 @@ func testSNMP(t *testing.T) {
 }
 
 func echoSpeed(b *testing.B, bytes int) {
+	Init(FATAL)
+
 	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
 	if err != nil {
 		b.Fatal("echoSpeed setTunnelBuffer", err)
@@ -598,6 +628,8 @@ func sinkSpeed(b *testing.B, bytes int) {
 }
 
 func TestKCP(t *testing.T) {
+	Init(INFO)
+
 	Logf(INFO, "TestKCP.testLossyConn1")
 	testLossyConn1(t)
 
