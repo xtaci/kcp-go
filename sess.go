@@ -604,6 +604,13 @@ func (s *UDPSession) update() {
 // GetConv gets conversation id of a session
 func (s *UDPSession) GetConv() uint32 { return s.kcp.conv }
 
+// GetRTO gets current rto of the session
+func (s *UDPSession) GetRTO() uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.kcp.rx_rto
+}
+
 func (s *UDPSession) notifyReadEvent() {
 	select {
 	case s.chReadEvent <- struct{}{}:
