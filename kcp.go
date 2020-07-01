@@ -441,7 +441,7 @@ func (kcp *KCP) parse_fastack(sn, ts uint32) {
 	}
 }
 
-func (kcp *KCP) parse_una(una uint32) {
+func (kcp *KCP) parse_una(una uint32) int {
 	count := 0
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
@@ -455,6 +455,7 @@ func (kcp *KCP) parse_una(una uint32) {
 	if count > 0 {
 		kcp.snd_buf = kcp.remove_front(kcp.snd_buf, count)
 	}
+	return count
 }
 
 // ack append
@@ -534,6 +535,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	var latest uint32 // the latest ack packet
 	var flag int
 	var inSegs uint64
+	var windowSlides bool
 
 	for {
 		var ts, sn, length, una, conv uint32
@@ -569,7 +571,9 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		if regular {
 			kcp.rmt_wnd = uint32(wnd)
 		}
-		kcp.parse_una(una)
+		if kcp.parse_una(una) > 0 {
+			windowSlides = true
+		}
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
@@ -648,6 +652,10 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 				}
 			}
 		}
+	}
+
+	if windowSlides { // if window has slided, flush
+		kcp.flush(false)
 	}
 
 	if ackNoDelay && len(kcp.acklist) > 0 { // ack immediately
