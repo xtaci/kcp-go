@@ -7,7 +7,6 @@ import (
 	"os"
 	"sync/atomic"
 
-	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 )
 
@@ -35,7 +34,7 @@ func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 					}
 				}
 			}
-			t.notifyWriteError(errors.WithStack(err))
+			t.notifyWriteError(err)
 		}
 	}
 
