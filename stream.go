@@ -349,7 +349,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 	default:
 	}
 
-	start := time.Now()
+	// start := time.Now()
 
 	for {
 		s.mu.Lock()
@@ -378,8 +378,8 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			}
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 
-			cost := time.Since(start)
-			Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
+			// cost := time.Since(start)
+			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
 			return len(b), nil
 		}
 		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
@@ -415,10 +415,10 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 }
 
 func (s *UDPStream) Dial(locals []string, timeout time.Duration) error {
-	start := time.Now()
-	defer func() {
-		Logf(INFO, "UDPStream::Dial cost uuid:%v accepted:%v locals:%v timeout:%v cost:%v", s.uuid, s.accepted, locals, timeout, time.Since(start))
-	}()
+	// start := time.Now()
+	// defer func() {
+	// 	Logf(INFO, "UDPStream::Dial cost uuid:%v accepted:%v locals:%v timeout:%v cost:%v", s.uuid, s.accepted, locals, timeout, time.Since(start))
+	// }()
 	Logf(INFO, "UDPStream::Dial uuid:%v accepted:%v locals:%v timeout:%v", s.uuid, s.accepted, locals, timeout)
 
 	if s.accepted {
@@ -592,7 +592,7 @@ func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 		s.notifyWriteEvent()
 	}
 
-	Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v msgss:%v notifyWrite:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(msgss), notifyWrite)
+	// Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v msgss:%v notifyWrite:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(msgss), notifyWrite)
 
 	//if tunnel output failure, can change tunnel or else ?
 	for i, msgs := range msgss {
@@ -637,7 +637,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 

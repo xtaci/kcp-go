@@ -122,13 +122,17 @@ var serverTransport *UDPTransport
 var serverStream *UDPStream
 var serverTunnels []*UDPTunnel
 
-func Init(l LogLevel) {
+func InitLog(l LogLevel) {
 	Logf = func(lvl LogLevel, f string, args ...interface{}) {
 		if lvl < l {
 			return
 		}
 		fmt.Printf(f+"\n", args...)
 	}
+}
+
+func Init(l LogLevel) {
+	InitLog(l)
 
 	for i := 0; i < lPortCount; i++ {
 		lAddrs = append(lAddrs, "127.0.0.1:"+strconv.Itoa(lPortStart+i))
@@ -474,25 +478,19 @@ func handleSinkClient(stream *UDPStream) {
 }
 
 func echoServer() {
-	for {
-		stream, err := serverTransport.Accept()
-		if err != nil {
-			Logf(ERROR, "echoServer accept err:%v", err)
-			continue
-		}
-		go handleEchoClient(stream)
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		Logf(ERROR, "echoServer accept err:%v", err)
 	}
+	go handleEchoClient(stream)
 }
 
 func sinkServer() {
-	for {
-		stream, err := serverTransport.Accept()
-		if err != nil {
-			Logf(ERROR, "sinkServer accept err:%v", err)
-			continue
-		}
-		go handleSinkClient(stream)
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		Logf(ERROR, "sinkServer accept err:%v", err)
 	}
+	go handleSinkClient(stream)
 }
 
 func echoTester(stream *UDPStream, msglen, msgcount int) error {
@@ -586,12 +584,11 @@ func parallelClient(t *testing.T, wg *sync.WaitGroup) (err error) {
 }
 
 func testParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
-	go echoServer()
-
 	var wg sync.WaitGroup
 	N := 1000
 	wg.Add(N)
 	for i := 0; i < N; i++ {
+		go echoServer()
 		go parallelClient(t, &wg)
 	}
 	wg.Wait()
@@ -606,8 +603,6 @@ func testSNMP(t *testing.T) {
 }
 
 func echoSpeed(b *testing.B, bytes int) {
-	Init(FATAL)
-
 	err := setTunnelBuffer(4*1024*1024, 4*1024*1024)
 	if err != nil {
 		b.Fatal("echoSpeed setTunnelBuffer", err)
@@ -631,9 +626,11 @@ func sinkSpeed(b *testing.B, bytes int) {
 	b.SetBytes(int64(bytes))
 }
 
-func TestKCP(t *testing.T) {
+func init() {
 	Init(INFO)
+}
 
+func TestKCP(t *testing.T) {
 	Logf(INFO, "TestKCP.testFileTransfer")
 	testFileTransfer(t)
 
@@ -832,29 +829,36 @@ func testFileTransfer(t *testing.T) {
 }
 
 func BenchmarkEchoSpeed128B(b *testing.B) {
+	InitLog(FATAL)
 	echoSpeed(b, 128)
 }
 
 func BenchmarkEchoSpeed1K(b *testing.B) {
+	InitLog(FATAL)
 	echoSpeed(b, 1024)
 }
 
 func BenchmarkEchoSpeed4K(b *testing.B) {
+	InitLog(FATAL)
 	echoSpeed(b, 4096)
 }
 
 func BenchmarkEchoSpeed64K(b *testing.B) {
+	InitLog(FATAL)
 	echoSpeed(b, 65536)
 }
 
 func BenchmarkEchoSpeed512K(b *testing.B) {
+	InitLog(FATAL)
 	echoSpeed(b, 524288)
 }
 
 func BenchmarkEchoSpeed1M(b *testing.B) {
+	InitLog(FATAL)
 	echoSpeed(b, 1048576)
 }
 
 func BenchmarkSinkSpeed1K(b *testing.B) {
+	InitLog(FATAL)
 	sinkSpeed(b, 1024)
 }
