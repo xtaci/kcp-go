@@ -53,6 +53,8 @@ type KCPOption struct {
 	interval int
 	resend   int
 	nc       int
+
+	ackNoDelay bool
 }
 
 type TunnelOption struct {
@@ -61,10 +63,11 @@ type TunnelOption struct {
 }
 
 var FastKCPOption = &KCPOption{
-	nodelay:  1,
-	interval: 20,
-	resend:   2,
-	nc:       1,
+	nodelay:    1,
+	interval:   20,
+	resend:     2,
+	nc:         1,
+	ackNoDelay: true,
 }
 
 var DefaultTunOption = &TunnelOption{
@@ -148,6 +151,7 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 	}
 	if t.kcpOption != nil {
 		stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
+		stream.SetACKNoDelay(t.kcpOption.ackNoDelay)
 	}
 	return stream, err
 }

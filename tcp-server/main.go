@@ -37,12 +37,12 @@ func handleEcho(conn *net.TCPConn) {
 }
 
 func main() {
-	addr, err := net.ResolveTCPAddr("tcp", "127.0.0.1:7891")
+	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:7900")
 	checkError(err)
 	listener, err := net.ListenTCP("tcp", addr)
 	checkError(err)
 
-	fmt.Println("server start")
+	fmt.Println("server start", addr)
 	for {
 		conn, err := listener.AcceptTCP()
 		checkError(err)

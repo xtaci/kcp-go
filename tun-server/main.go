@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -9,9 +10,11 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/urfave/cli"
 	kcp "github.com/ldcsoftware/kcp-go"
+	"github.com/urfave/cli"
 )
+
+var logs [5]*log.Logger
 
 func init() {
 	Debug := log.New(os.Stdout,
@@ -34,11 +37,7 @@ func init() {
 		"FATAL: ",
 		log.Ldate|log.Lmicroseconds)
 
-	logs := [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
-
-	kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
-		logs[lvl-1].Printf(f+"\n", args...)
-	}
+	logs = [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
 }
 
 var bufPool = sync.Pool{
@@ -90,38 +89,26 @@ func (poll *TunnelPoll) Pick() (tunnel *kcp.UDPTunnel) {
 }
 
 type TestSelector struct {
-	tunnelIPM   map[string]*TunnelPoll
 	remoteAddrs []net.Addr
+	tunnels     []*kcp.UDPTunnel
+	idx         uint32
 }
 
 func NewTestSelector() (*TestSelector, error) {
 	return &TestSelector{
-		tunnelIPM: make(map[string]*TunnelPoll),
+		tunnels: make([]*kcp.UDPTunnel, 0),
 	}, nil
 }
 
 func (sel *TestSelector) Add(tunnel *kcp.UDPTunnel) {
-	localIp := tunnel.LocalAddr().IP.String()
-	poll, ok := sel.tunnelIPM[localIp]
-	if !ok {
-		poll = &TunnelPoll{
-			tunnels: make([]*kcp.UDPTunnel, 0),
-		}
-		sel.tunnelIPM[localIp] = poll
-	}
-	poll.Add(tunnel)
+	sel.tunnels = append(sel.tunnels, tunnel)
 }
 
 func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
-	tunnels = make([]*kcp.UDPTunnel, 0)
-	for _, remote := range remotes {
-		ip, _, err := net.SplitHostPort(remote)
-		if err == nil {
-			tunnelPoll, ok := sel.tunnelIPM[ip]
-			if ok {
-				tunnels = append(tunnels, tunnelPoll.Pick())
-			}
-		}
+	for i := 0; i < len(remotes); i++ {
+		idx := sel.idx % uint32(len(sel.tunnels))
+		atomic.AddUint32(&sel.idx, 1)
+		tunnels = append(tunnels, sel.tunnels[idx])
 	}
 	return tunnels
 }
@@ -169,7 +156,7 @@ func main() {
 	myApp.Flags = []cli.Flag{
 		cli.StringFlag{
 			Name:  "targetAddr",
-			Value: "127.0.0.1:7891",
+			Value: "127.0.0.1:7900",
 			Usage: "target address",
 		},
 		cli.StringFlag{
@@ -212,6 +199,20 @@ func main() {
 			Value: "fast",
 			Usage: "profiles: fast3, fast2, fast, normal, manual",
 		},
+		cli.IntFlag{
+			Name:  "logLevel",
+			Value: 2,
+			Usage: "kcp log level",
+		},
+		cli.IntFlag{
+			Name:  "wndSize",
+			Value: 128,
+			Usage: "kcp send/recv wndSize",
+		},
+		cli.BoolFlag{
+			Name:  "ackNoDelay",
+			Usage: "stream ackNoDelay",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		targetAddr := c.String("targetAddr")
@@ -236,18 +237,29 @@ func main() {
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
 		checkError(err)
 
-		kcp.Logf(kcp.INFO, "Action targetAddr:%v", targetAddr)
-		kcp.Logf(kcp.INFO, "Action localIp:%v", localIp)
-		kcp.Logf(kcp.INFO, "Action localPortS:%v", localPortS)
-		kcp.Logf(kcp.INFO, "Action localPortE:%v", localPortE)
-		kcp.Logf(kcp.INFO, "Action remoteIp:%v", remoteIp)
-		kcp.Logf(kcp.INFO, "Action remotePortS:%v", remotePortS)
-		kcp.Logf(kcp.INFO, "Action remotePortE:%v", remotePortE)
-		kcp.Logf(kcp.INFO, "Action transmitTuns:%v", transmitTuns)
+		logLevel := c.Int("logLevel")
+		wndSize := c.Int("wndSize")
+
+		fmt.Printf("Action targetAddr:%v\n", targetAddr)
+		fmt.Printf("Action localIp:%v\n", localIp)
+		fmt.Printf("Action localPortS:%v\n", localPortS)
+		fmt.Printf("Action localPortE:%v\n", localPortE)
+		fmt.Printf("Action remoteIp:%v\n", remoteIp)
+		fmt.Printf("Action remotePortS:%v\n", remotePortS)
+		fmt.Printf("Action remotePortE:%v\n", remotePortE)
+		fmt.Printf("Action transmitTuns:%v\n", transmitTuns)
+		fmt.Printf("Action logLevel:%v\n", logLevel)
+		fmt.Printf("Action wndSize:%v\n", wndSize)
+
+		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
+			if int(lvl) >= logLevel {
+				logs[lvl-1].Printf(f+"\n", args...)
+			}
+		}
 
 		sel, err := NewTestSelector()
 		checkError(err)
-		transport, err := kcp.NewUDPTransport(sel, nil)
+		transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
 			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), nil)
@@ -255,12 +267,13 @@ func main() {
 		}
 
 		for {
-			s, err := transport.Accept()
+			stream, err := transport.Accept()
 			checkError(err)
+			stream.SetWindowSize(wndSize, wndSize)
 			conn, err := net.Dial("tcp", targetAddr)
 			checkError(err)
 			tcpConn := conn.(*net.TCPConn)
-			go handleClient(s, tcpConn)
+			go handleClient(stream, tcpConn)
 		}
 		return nil
 	}

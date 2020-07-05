@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net"
@@ -9,10 +10,13 @@ import (
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	kcp "github.com/ldcsoftware/kcp-go"
 	"github.com/urfave/cli"
 )
+
+var logs [5]*log.Logger
 
 func init() {
 	Debug := log.New(os.Stdout,
@@ -35,11 +39,9 @@ func init() {
 		"FATAL: ",
 		log.Ldate|log.Lmicroseconds)
 
-	logs := [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
+	logs = [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
 
-	kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
-		logs[lvl-1].Printf(f+"\n", args...)
-	}
+	kcp.DefaultDialTimeout = time.Second
 }
 
 var bufPool = sync.Pool{
@@ -56,24 +58,29 @@ func checkError(err error) {
 	}
 }
 
-func iobridge(dst io.Writer, src io.Reader) error {
+func iobridge(dst io.Writer, src io.Reader) (wcount int, wcost float64, err error) {
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
-			kcp.Logf(kcp.INFO, "iobridge reading err:%v n:%v", err, n)
-			return err
+			kcp.Logf(kcp.ERROR, "iobridge reading err:%v n:%v", err, n)
+			return wcount, wcost, err
 		}
+		kcp.Logf(kcp.INFO, "iobridge reading n:%v", n)
 
+		wstart := time.Now()
 		_, err = dst.Write((*buf)[:n])
+		wcosttmp := time.Since(wstart)
+		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
+		wcount += 1
 		if err != nil {
-			kcp.Logf(kcp.INFO, "iobridge writing err:%v", err)
-			return err
+			kcp.Logf(kcp.ERROR, "iobridge writing err:%v", err)
+			return wcount, wcost, err
 		}
 	}
-	return nil
+	return wcount, wcost, nil
 }
 
 type TunnelPoll struct {
@@ -91,38 +98,26 @@ func (poll *TunnelPoll) Pick() (tunnel *kcp.UDPTunnel) {
 }
 
 type TestSelector struct {
-	tunnelIPM   map[string]*TunnelPoll
 	remoteAddrs []net.Addr
+	tunnels     []*kcp.UDPTunnel
+	idx         uint32
 }
 
 func NewTestSelector() (*TestSelector, error) {
 	return &TestSelector{
-		tunnelIPM: make(map[string]*TunnelPoll),
+		tunnels: make([]*kcp.UDPTunnel, 0),
 	}, nil
 }
 
 func (sel *TestSelector) Add(tunnel *kcp.UDPTunnel) {
-	localIp := tunnel.LocalAddr().IP.String()
-	poll, ok := sel.tunnelIPM[localIp]
-	if !ok {
-		poll = &TunnelPoll{
-			tunnels: make([]*kcp.UDPTunnel, 0),
-		}
-		sel.tunnelIPM[localIp] = poll
-	}
-	poll.Add(tunnel)
+	sel.tunnels = append(sel.tunnels, tunnel)
 }
 
 func (sel *TestSelector) Pick(remotes []string) (tunnels []*kcp.UDPTunnel) {
-	tunnels = make([]*kcp.UDPTunnel, 0)
-	for _, remote := range remotes {
-		ip, _, err := net.SplitHostPort(remote)
-		if err == nil {
-			tunnelPoll, ok := sel.tunnelIPM[ip]
-			if ok {
-				tunnels = append(tunnels, tunnelPoll.Pick())
-			}
-		}
+	for i := 0; i < len(remotes); i++ {
+		idx := sel.idx % uint32(len(sel.tunnels))
+		atomic.AddUint32(&sel.idx, 1)
+		tunnels = append(tunnels, sel.tunnels[idx])
 	}
 	return tunnels
 }
@@ -139,7 +134,8 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 
 	// start tunnel & wait for tunnel termination
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
-		err := iobridge(s, conn)
+		wcount, wcost, err := iobridge(s, conn)
+		fmt.Printf("handleClient wcount:%v wcost:%v remote:%v\n", wcount, wcost, conn.RemoteAddr())
 		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
 		if err == io.EOF {
 			s.CloseWrite()
@@ -148,7 +144,7 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 	}
 
 	toTCPStream := func(conn *net.TCPConn, s *kcp.UDPStream, shutdown chan struct{}) {
-		err := iobridge(conn, s)
+		_, _, err := iobridge(conn, s)
 		kcp.Logf(kcp.INFO, "toTCPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
 		if err == io.EOF {
 			conn.CloseWrite()
@@ -160,6 +156,28 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 	toTCPStream(conn, s, shutdown)
 
 	<-shutdown
+	<-shutdown
+}
+
+// handleRawClient aggregates connection p1 on mux with 'writeLock'
+func handleRawClient(targetConn *net.TCPConn, conn *net.TCPConn) {
+	kcp.Logf(kcp.INFO, "handleRawClient start remote:%v", conn.RemoteAddr())
+	defer kcp.Logf(kcp.INFO, "handleRawClient end remote:%v", conn.RemoteAddr())
+
+	defer conn.Close()
+	defer targetConn.Close()
+
+	shutdown := make(chan struct{}, 2)
+
+	// start tunnel & wait for tunnel termination
+	shutdownIobridge := func(dst io.Writer, src io.Reader, shutdown chan struct{}) {
+		iobridge(dst, src)
+		shutdown <- struct{}{}
+	}
+
+	go shutdownIobridge(conn, targetConn, shutdown)
+	shutdownIobridge(targetConn, conn, shutdown)
+
 	<-shutdown
 }
 
@@ -213,9 +231,35 @@ func main() {
 			Value: "fast",
 			Usage: "profiles: fast3, fast2, fast, normal, manual",
 		},
+		cli.StringFlag{
+			Name:  "listenAddrD",
+			Value: "127.0.0.1:7891",
+			Usage: "local listen address, direct connect target addr",
+		},
+		cli.StringFlag{
+			Name:  "targetAddr",
+			Value: "127.0.0.1:7900",
+			Usage: "target address",
+		},
+		cli.IntFlag{
+			Name:  "logLevel",
+			Value: 2,
+			Usage: "kcp log level",
+		},
+		cli.IntFlag{
+			Name:  "wndSize",
+			Value: 128,
+			Usage: "kcp send/recv wndSize",
+		},
+		cli.BoolFlag{
+			Name:  "ackNoDelay",
+			Usage: "stream ackNoDelay",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		listenAddr := c.String("listenAddr")
+		listenAddrD := c.String("listenAddrD")
+		targetAddr := c.String("targetAddr")
 
 		localIp := c.String("localIp")
 		lPortS := c.String("localPortS")
@@ -233,22 +277,35 @@ func main() {
 		remotePortE, err := strconv.Atoi(rPortE)
 		checkError(err)
 
+		logLevel := c.Int("logLevel")
+		wndSize := c.Int("wndSize")
+
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
 		checkError(err)
 
-		kcp.Logf(kcp.INFO, "Action listenAddr:%v", listenAddr)
-		kcp.Logf(kcp.INFO, "Action localIp:%v", localIp)
-		kcp.Logf(kcp.INFO, "Action localPortS:%v", localPortS)
-		kcp.Logf(kcp.INFO, "Action localPortE:%v", localPortE)
-		kcp.Logf(kcp.INFO, "Action remoteIp:%v", remoteIp)
-		kcp.Logf(kcp.INFO, "Action remotePortS:%v", remotePortS)
-		kcp.Logf(kcp.INFO, "Action remotePortE:%v", remotePortE)
-		kcp.Logf(kcp.INFO, "Action transmitTuns:%v", transmitTuns)
+		fmt.Printf("Action listenAddr:%v\n", listenAddr)
+		fmt.Printf("Action listenAddrD:%v\n", listenAddrD)
+		fmt.Printf("Action targetAddr:%v\n", targetAddr)
+		fmt.Printf("Action localIp:%v\n", localIp)
+		fmt.Printf("Action localPortS:%v\n", localPortS)
+		fmt.Printf("Action localPortE:%v\n", localPortE)
+		fmt.Printf("Action remoteIp:%v\n", remoteIp)
+		fmt.Printf("Action remotePortS:%v\n", remotePortS)
+		fmt.Printf("Action remotePortE:%v\n", remotePortE)
+		fmt.Printf("Action transmitTuns:%v\n", transmitTuns)
+		fmt.Printf("Action logLevel:%v\n", logLevel)
+		fmt.Printf("Action wndSize:%v\n", wndSize)
+
+		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
+			if int(lvl) >= logLevel {
+				logs[lvl-1].Printf(f+"\n", args...)
+			}
+		}
 
 		sel, err := NewTestSelector()
 		checkError(err)
-		transport, err := kcp.NewUDPTransport(sel, nil)
+		transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
 			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), nil)
@@ -274,10 +331,26 @@ func main() {
 		listener, err := net.ListenTCP("tcp", addr)
 		checkError(err)
 
+		addrD, err := net.ResolveTCPAddr("tcp", listenAddrD)
+		checkError(err)
+		listenerD, err := net.ListenTCP("tcp", addrD)
+		checkError(err)
+
+		go func() {
+			for {
+				conn, err := listenerD.AcceptTCP()
+				checkError(err)
+				targetConn, err := net.Dial("tcp", targetAddr)
+				checkError(err)
+				go handleRawClient(targetConn.(*net.TCPConn), conn)
+			}
+		}()
+
 		for {
 			conn, err := listener.AcceptTCP()
 			checkError(err)
 			stream, err := transport.Open(locals, remotes)
+			stream.SetWindowSize(wndSize, wndSize)
 			checkError(err)
 			go handleClient(stream, conn)
 		}

@@ -37,9 +37,8 @@ const (
 )
 
 var (
-	DefaultDialCheckInterval = time.Millisecond * 20
-	DefaultParallelXmit      = 5
-	DefaultParallelTime      = time.Second * 60
+	DefaultParallelXmit = 5
+	DefaultParallelTime = time.Second * 60
 )
 
 type clean_callback func(uuid gouuid.UUID)
@@ -80,6 +79,7 @@ type (
 		closeOnce      sync.Once
 		chClose        chan struct{} // notify stream has Closed
 		chClean        chan struct{} // notify stream has cleand
+		chDialEvent    chan struct{} // notify Dial() has finished
 		chReadEvent    chan struct{} // notify Read() can be called without blocking
 		chWriteEvent   chan struct{} // notify Write() can be called without blocking
 
@@ -115,6 +115,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.chSendFinEvent = make(chan struct{})
 	stream.chRecvFinEvent = make(chan struct{})
 	stream.chClean = make(chan struct{})
+	stream.chDialEvent = make(chan struct{}, 1)
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
 	stream.sendbuf = make([]byte, mtuLimit)
@@ -348,6 +349,8 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 	default:
 	}
 
+	start := time.Now()
+
 	for {
 		s.mu.Lock()
 		// make sure write do not overflow the max sliding window on both side
@@ -374,6 +377,9 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 				s.flush(true)
 			}
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
+
+			cost := time.Since(start)
+			Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
 			return len(b), nil
 		}
 		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
@@ -409,6 +415,10 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 }
 
 func (s *UDPStream) Dial(locals []string, timeout time.Duration) error {
+	start := time.Now()
+	defer func() {
+		Logf(INFO, "UDPStream::Dial cost uuid:%v accepted:%v locals:%v timeout:%v cost:%v", s.uuid, s.accepted, locals, timeout, time.Since(start))
+	}()
 	Logf(INFO, "UDPStream::Dial uuid:%v accepted:%v locals:%v timeout:%v", s.uuid, s.accepted, locals, timeout)
 
 	if s.accepted {
@@ -420,17 +430,21 @@ func (s *UDPStream) Dial(locals []string, timeout time.Duration) error {
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
 	s.flush(true)
 
-	checkTime := int(timeout/DefaultDialCheckInterval) + 1
-	for i := 0; i < checkTime; i++ {
-		time.Sleep(DefaultDialCheckInterval)
-		s.mu.Lock()
-		snd_una := s.kcp.snd_una
-		s.mu.Unlock()
-		if snd_una > 0 {
-			return nil
-		}
+	dialTimer := time.NewTimer(timeout)
+	defer dialTimer.Stop()
+
+	select {
+	case <-s.chClose:
+		return io.ErrClosedPipe
+	case <-s.chRst:
+		return io.ErrUnexpectedEOF
+	case <-s.chRecvFinEvent:
+		return io.EOF
+	case <-s.chDialEvent:
+		return nil
+	case <-dialTimer.C:
+		return errTimeout
 	}
-	return errTimeout
 }
 
 func (s *UDPStream) Accept() (err error) {
@@ -578,7 +592,7 @@ func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
 		s.notifyWriteEvent()
 	}
 
-	// Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v msgss:%v", s.uuid, s.accepted, len(msgss))
+	Logf(DEBUG, "UDPStream::flush uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v msgss:%v notifyWrite:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(msgss), notifyWrite)
 
 	//if tunnel output failure, can change tunnel or else ?
 	for i, msgs := range msgss {
@@ -623,7 +637,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
+	Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
 
 	var kcpInErrors uint64
 
@@ -635,14 +649,27 @@ func (s *UDPStream) input(data []byte) {
 	if n := s.kcp.PeekSize(); n > 0 {
 		s.notifyReadEvent()
 	}
+
+	if !s.accepted && s.kcp.snd_una == 1 {
+		s.notifyDialEvent()
+	}
+
+	kcpFlush := !s.writeDelay && len(s.kcp.snd_queue) != 0 && (s.kcp.snd_nxt < s.kcp.snd_una+s.kcp.calc_cwnd())
 	s.mu.Unlock()
 
-	s.flush(false)
+	s.flush(kcpFlush)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
 	if kcpInErrors > 0 {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
+	}
+}
+
+func (s *UDPStream) notifyDialEvent() {
+	select {
+	case s.chDialEvent <- struct{}{}:
+	default:
 	}
 }
 

@@ -1,10 +1,14 @@
 package kcp
 
 import (
+	"bytes"
+	"crypto/md5"
 	"fmt"
 	"io"
+	"math/rand"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -630,6 +634,9 @@ func sinkSpeed(b *testing.B, bytes int) {
 func TestKCP(t *testing.T) {
 	Init(INFO)
 
+	Logf(INFO, "TestKCP.testFileTransfer")
+	testFileTransfer(t)
+
 	Logf(INFO, "TestKCP.testLossyConn1")
 	testLossyConn1(t)
 
@@ -659,6 +666,169 @@ func TestKCP(t *testing.T) {
 
 	Logf(INFO, "TestKCP.testSNMP")
 	testSNMP(t)
+}
+
+var bufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+func iobridge(src io.Reader, dst io.Writer) {
+	buf := bufPool.Get().(*[]byte)
+	for {
+		n, err := src.Read(*buf)
+		if err != nil {
+			Logf(INFO, "iobridge reading err:%v n:%v", err, n)
+			break
+		}
+
+		_, err = dst.Write((*buf)[:n])
+		if err != nil {
+			Logf(INFO, "iobridge writing err:%v", err)
+			break
+		}
+	}
+	bufPool.Put(buf)
+
+	Logf(INFO, "iobridge end")
+}
+
+type fileToStream struct {
+	src    io.Reader
+	stream *UDPStream
+}
+
+func (fs *fileToStream) Read(b []byte) (n int, err error) {
+	n, err = fs.src.Read(b)
+	if err == io.EOF {
+		fs.stream.CloseWrite()
+	}
+	return n, err
+}
+
+func FileTransferClient(t *testing.T, lf io.Reader, rFileHash []byte) error {
+	Logf(INFO, "FileTransferClient start")
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("clientTransport open stream %v", err)
+	}
+	defer stream.Close()
+
+	// bridge connection
+	shutdown := make(chan bool, 2)
+
+	go func() {
+		fs := &fileToStream{lf, stream}
+		iobridge(fs, stream)
+		shutdown <- true
+
+		Logf(INFO, "FileTransferClient file send finish")
+	}()
+
+	go func() {
+		h := md5.New()
+		iobridge(stream, h)
+		recvHash := h.Sum(nil)
+		if !bytes.Equal(rFileHash, recvHash) {
+			t.Fatalf("client recv hash not equal fileHash:%v recvHash:%v", rFileHash, recvHash)
+		}
+		shutdown <- true
+
+		Logf(INFO, "FileTransferClient file recv finish")
+	}()
+
+	<-shutdown
+	<-shutdown
+	return nil
+}
+
+func FileTransferServer(t *testing.T, rf io.Reader, lFileHash []byte) error {
+	Logf(INFO, "FileTransferServer start")
+
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		t.Fatalf("server Accept stream %v", err)
+	}
+	defer stream.Close()
+
+	// bridge connection
+	shutdown := make(chan struct{}, 2)
+
+	go func() {
+		h := md5.New()
+		iobridge(stream, h)
+		recvHash := h.Sum(nil)
+		if !bytes.Equal(lFileHash, recvHash) {
+			t.Fatalf("server recv hash not equal fileHash:%v recvHash:%v", lFileHash, recvHash)
+		}
+		shutdown <- struct{}{}
+
+		Logf(INFO, "FileTransferServer file recv finish")
+	}()
+
+	go func() {
+		fs := &fileToStream{rf, stream}
+		iobridge(fs, stream)
+		shutdown <- struct{}{}
+
+		Logf(INFO, "FileTransferServer file send finish")
+	}()
+
+	<-shutdown
+	<-shutdown
+	return nil
+}
+
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func randString(n int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
+}
+
+func testFileTransfer(t *testing.T) {
+	DefaultDialTimeout = time.Millisecond * 2000
+
+	lFile := randString(1024 * 512)
+	lReader := strings.NewReader(lFile)
+	rFile := randString(1024 * 1024)
+	rReader := strings.NewReader(rFile)
+
+	lh := md5.New()
+	_, err := io.Copy(lh, lReader)
+	lFileHash := lh.Sum(nil)
+	Logf(INFO, "file:%v hash:%v err:%v", lFile, lFileHash, err)
+
+	rh := md5.New()
+	_, err = io.Copy(rh, rReader)
+	rFileHash := rh.Sum(nil)
+	Logf(INFO, "file:%v hash:%v err:%v", rFile, rFileHash, err)
+
+	lReader.Seek(0, io.SeekStart)
+	rReader.Seek(0, io.SeekStart)
+
+	finish := make(chan struct{}, 2)
+	go func() {
+		FileTransferServer(t, rReader, lFileHash)
+		finish <- struct{}{}
+	}()
+
+	time.Sleep(time.Millisecond * 300)
+
+	go func() {
+		FileTransferClient(t, lReader, rFileHash)
+		finish <- struct{}{}
+	}()
+
+	<-finish
+	<-finish
 }
 
 func BenchmarkEchoSpeed128B(b *testing.B) {

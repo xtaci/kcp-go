@@ -682,6 +682,14 @@ func (kcp *KCP) wnd_unused() uint16 {
 	return 0
 }
 
+func (kcp *KCP) calc_cwnd() uint32 {
+	cwnd := _imin_(kcp.snd_wnd, kcp.rmt_wnd)
+	if kcp.nocwnd == 0 {
+		cwnd = _imin_(kcp.cwnd, cwnd)
+	}
+	return cwnd
+}
+
 // flush pending data
 func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var seg segment
@@ -771,10 +779,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	kcp.probe = 0
 
 	// calculate window size
-	cwnd := _imin_(kcp.snd_wnd, kcp.rmt_wnd)
-	if kcp.nocwnd == 0 {
-		cwnd = _imin_(kcp.cwnd, cwnd)
-	}
+	cwnd := kcp.calc_cwnd()
 
 	// sliding window, controlled by snd_nxt && sna_una+cwnd
 	newSegsCount := 0
