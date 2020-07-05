@@ -61,7 +61,9 @@ type (
 		bufptr  []byte
 
 		// settings
-		hrtTime    time.Time // flush time
+		flushTimer *time.Timer  // flush timer
+		hrtTick    *time.Ticker // heart beat ticker
+		chClean    <-chan time.Time
 		rd         time.Time // read deadline
 		wd         time.Time // write deadline
 		headerSize int       // the header size additional to a KCP frame
@@ -78,7 +80,6 @@ type (
 		chRst          chan struct{} // notify current stream reset
 		closeOnce      sync.Once
 		chClose        chan struct{} // notify stream has Closed
-		chClean        chan struct{} // notify stream has cleand
 		chDialEvent    chan struct{} // notify Dial() has finished
 		chReadEvent    chan struct{} // notify Read() can be called without blocking
 		chWriteEvent   chan struct{} // notify Write() can be called without blocking
@@ -114,7 +115,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.chRst = make(chan struct{})
 	stream.chSendFinEvent = make(chan struct{})
 	stream.chRecvFinEvent = make(chan struct{})
-	stream.chClean = make(chan struct{})
 	stream.chDialEvent = make(chan struct{}, 1)
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
@@ -128,7 +128,8 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.accepted = accepted
 	stream.tunnels = tunnels
 	stream.remotes = remoteAddrs
-	stream.hrtTime = time.Now().Add(HeartbeatInterval)
+	stream.hrtTick = time.NewTicker(HeartbeatInterval)
+	stream.flushTimer = time.NewTimer(time.Duration(IKCP_RTO_NDL) * time.Millisecond)
 	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
 
@@ -145,7 +146,8 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
 	}
 
-	SystemTimedSched.Put(stream.update, time.Now())
+	go stream.update()
+
 	Logf(INFO, "NewUDPStream uuid:%v accepted:%v remotes:%v", uuid, accepted, remotes)
 	return stream, nil
 }
@@ -493,9 +495,10 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+	s.hrtTick.Stop()
+	s.chClean = time.NewTimer(CleanTimeout).C
 
-	SystemTimedSched.Put(s.clean, time.Now().Add(CleanTimeout))
+	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	return nil
 }
 
@@ -503,11 +506,14 @@ func (s *UDPStream) CloseWrite() error {
 	var once bool
 	s.sendFinOnce.Do(func() {
 		once = true
-		s.WriteFlag(FIN, nil)
-		close(s.chSendFinEvent)
 	})
-
 	Logf(INFO, "UDPStream::CloseWrite uuid:%v accepted:%v once:%v", s.uuid, s.accepted, once)
+	if !once {
+		return nil
+	}
+
+	s.WriteFlag(FIN, nil)
+	close(s.chSendFinEvent)
 	return nil
 }
 
@@ -515,67 +521,59 @@ func (s *UDPStream) reset() {
 	var once bool
 	s.rstOnce.Do(func() {
 		once = true
-		close(s.chRst)
-		s.kcp.ReleaseTX()
 	})
 
 	Logf(INFO, "UDPStream::reset uuid:%v accepted:%v once:%v", s.uuid, s.accepted, once)
-}
-
-func (s *UDPStream) clean() {
-	Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
-	close(s.chClean)
-}
-
-func (s *UDPStream) heartBeat(now time.Time) {
-	if now.Before(s.hrtTime) {
+	if !once {
 		return
 	}
-	Logf(INFO, "UDPStream::heartBeat uuid:%v accepted:%v", s.uuid, s.accepted)
 
-	s.hrtTime = now.Add(HeartbeatInterval)
-	s.WriteFlag(HRT, nil)
+	s.hrtTick.Stop()
+	close(s.chRst)
+	s.kcp.ReleaseTX()
 }
 
 // sess update to trigger protocol
 func (s *UDPStream) update() {
-	select {
-	case <-s.chClean:
-		s.mu.Lock()
-		s.kcp.ReleaseTX()
-		s.mu.Unlock()
-		s.cleancb(s.uuid)
-	default:
-		s.mu.Lock()
-		if s.kcp.state == 0xFFFFFFFF {
-			s.reset()
+	for {
+		select {
+		case <-s.chClean:
+			Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
+
+			s.mu.Lock()
+			s.kcp.ReleaseTX()
 			s.mu.Unlock()
+			s.flushTimer.Stop()
+
+			s.cleancb(s.uuid)
 			return
-		}
-		s.mu.Unlock()
-		notifyWrite, interval := s.flush(true)
-
-		// self-synchronized timed scheduling
-		now := time.Now()
-		SystemTimedSched.Put(s.update, now.Add(time.Duration(interval)*time.Millisecond))
-
-		//block? maybe change heartBeat place some day
-		if notifyWrite {
-			s.heartBeat(now)
+		case <-s.hrtTick.C:
+			Logf(INFO, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
+			s.WriteFlag(HRT, nil)
+		case <-s.flushTimer.C:
+			s.mu.Lock()
+			if s.kcp.state == 0xFFFFFFFF {
+				s.reset()
+				s.mu.Unlock()
+				return
+			}
+			s.mu.Unlock()
+			interval := s.flush(true)
+			s.flushTimer.Reset(time.Duration(interval) * time.Millisecond)
 		}
 	}
 }
 
 // flush sends data in txqueue if there is any
 // return if interval means next flush interval
-func (s *UDPStream) flush(kcpFlush bool) (notifyWrite bool, interval uint32) {
+func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 	s.mu.Lock()
 	if kcpFlush {
 		interval = s.kcp.flush(false)
 	}
 
 	waitsnd := s.kcp.WaitSnd()
-	notifyWrite = waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd)
+	notifyWrite := waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd)
 
 	if len(s.msgss) == 0 {
 		s.mu.Unlock()

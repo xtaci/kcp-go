@@ -127,25 +127,18 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
 		err := iobridge(s, conn)
 		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
-		if err == io.EOF {
-			s.CloseWrite()
-		}
 		shutdown <- struct{}{}
 	}
 
 	toTCPStream := func(conn *net.TCPConn, s *kcp.UDPStream, shutdown chan struct{}) {
 		err := iobridge(conn, s)
 		kcp.Logf(kcp.INFO, "toTCPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
-		if err == io.EOF {
-			conn.CloseWrite()
-		}
 		shutdown <- struct{}{}
 	}
 
 	go toUDPStream(s, conn, shutdown)
-	toTCPStream(conn, s, shutdown)
+	go toTCPStream(conn, s, shutdown)
 
-	<-shutdown
 	<-shutdown
 }
 

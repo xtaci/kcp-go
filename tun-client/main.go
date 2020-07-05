@@ -68,7 +68,6 @@ func iobridge(dst io.Writer, src io.Reader) (wcount int, wcost float64, err erro
 			kcp.Logf(kcp.ERROR, "iobridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
-		kcp.Logf(kcp.INFO, "iobridge reading n:%v", n)
 
 		wstart := time.Now()
 		_, err = dst.Write((*buf)[:n])
@@ -135,27 +134,19 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 	// start tunnel & wait for tunnel termination
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
 		wcount, wcost, err := iobridge(s, conn)
-		fmt.Printf("handleClient wcount:%v wcost:%v remote:%v\n", wcount, wcost, conn.RemoteAddr())
-		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
-		if err == io.EOF {
-			s.CloseWrite()
-		}
+		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v wcount:%v wcost:%v err:%v", s.GetUUID(), conn.RemoteAddr(), wcount, wcost, err)
 		shutdown <- struct{}{}
 	}
 
 	toTCPStream := func(conn *net.TCPConn, s *kcp.UDPStream, shutdown chan struct{}) {
 		_, _, err := iobridge(conn, s)
 		kcp.Logf(kcp.INFO, "toTCPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
-		if err == io.EOF {
-			conn.CloseWrite()
-		}
 		shutdown <- struct{}{}
 	}
 
 	go toUDPStream(s, conn, shutdown)
-	toTCPStream(conn, s, shutdown)
+	go toTCPStream(conn, s, shutdown)
 
-	<-shutdown
 	<-shutdown
 }
 

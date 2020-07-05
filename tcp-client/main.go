@@ -77,6 +77,7 @@ func TestClientEcho(clientnum, msgcount, msglen int, remoteAddr string, finish *
 	for _, c := range clients {
 		avgCostA += (c.cost / float64(c.count))
 		echocount += c.count
+		c.Close()
 	}
 	avgCost := avgCostA / float64(len(clients))
 
