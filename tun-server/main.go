@@ -2,19 +2,20 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net"
 	"os"
 	"strconv"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	kcp "github.com/ldcsoftware/kcp-go"
 	"github.com/urfave/cli"
 )
 
 var logs [5]*log.Logger
+var msgLen int
 
 func init() {
 	Debug := log.New(os.Stdout,
@@ -54,24 +55,52 @@ func checkError(err error) {
 	}
 }
 
-func iobridge(dst io.Writer, src io.Reader) error {
+func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost float64, err error) {
 	buf := bufPool.Get().(*[]byte)
 	defer bufPool.Put(buf)
 
 	for {
 		n, err := src.Read(*buf)
 		if err != nil {
-			kcp.Logf(kcp.INFO, "iobridge reading err:%v n:%v", err, n)
-			return err
+			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
+			return wcount, wcost, err
 		}
 
+		wstart := time.Now()
 		_, err = dst.Write((*buf)[:n])
+		wcosttmp := time.Since(wstart)
+		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
+		wcount += 1
 		if err != nil {
-			kcp.Logf(kcp.INFO, "iobridge writing err:%v", err)
-			return err
+			kcp.Logf(kcp.ERROR, "toUdpStreamBridge writing err:%v", err)
+			return wcount, wcost, err
 		}
 	}
-	return nil
+	return wcount, wcost, nil
+}
+
+func toTcpStreamBridge(dst *net.TCPConn, src *kcp.UDPStream) (wcount int, wcost float64, err error) {
+	buf := bufPool.Get().(*[]byte)
+	defer bufPool.Put(buf)
+
+	for {
+		n, err := src.Read(*buf)
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
+			return wcount, wcost, err
+		}
+
+		wstart := time.Now()
+		_, err = dst.Write((*buf)[:n])
+		wcosttmp := time.Since(wstart)
+		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
+		wcount += 1
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toTcpStreamBridge writing err:%v", err)
+			return wcount, wcost, err
+		}
+	}
+	return wcount, wcost, nil
 }
 
 type TunnelPoll struct {
@@ -125,13 +154,13 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 
 	// start tunnel & wait for tunnel termination
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
-		err := iobridge(s, conn)
+		_, _, err := toUdpStreamBridge(s, conn)
 		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
 		shutdown <- struct{}{}
 	}
 
 	toTCPStream := func(conn *net.TCPConn, s *kcp.UDPStream, shutdown chan struct{}) {
-		err := iobridge(conn, s)
+		_, _, err := toTcpStreamBridge(conn, s)
 		kcp.Logf(kcp.INFO, "toTCPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
 		shutdown <- struct{}{}
 	}
@@ -206,6 +235,11 @@ func main() {
 			Name:  "ackNoDelay",
 			Usage: "stream ackNoDelay",
 		},
+		cli.IntFlag{
+			Name:  "msgLen",
+			Value: 0,
+			Usage: "test echo msgLen",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		targetAddr := c.String("targetAddr")
@@ -232,6 +266,7 @@ func main() {
 
 		logLevel := c.Int("logLevel")
 		wndSize := c.Int("wndSize")
+		msgLen = c.Int("msgLen")
 
 		fmt.Printf("Action targetAddr:%v\n", targetAddr)
 		fmt.Printf("Action localIp:%v\n", localIp)
@@ -243,6 +278,7 @@ func main() {
 		fmt.Printf("Action transmitTuns:%v\n", transmitTuns)
 		fmt.Printf("Action logLevel:%v\n", logLevel)
 		fmt.Printf("Action wndSize:%v\n", wndSize)
+		fmt.Printf("Action msgLen:%v\n", msgLen)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {

@@ -323,7 +323,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 
 // Write implements net.Conn
 func (s *UDPStream) Write(b []byte) (n int, err error) {
-	n, err = s.WriteBuffer(PSH, b)
+	n, err = s.WriteBuffer(PSH, b, false)
 	if err != nil {
 		Logf(WARN, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
 	}
@@ -332,7 +332,7 @@ func (s *UDPStream) Write(b []byte) (n int, err error) {
 
 // Write implements net.Conn
 func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
-	n, err = s.WriteBuffer(flag, b)
+	n, err = s.WriteBuffer(flag, b, flag == HRT)
 	if err != nil {
 		Logf(WARN, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
 	}
@@ -340,7 +340,7 @@ func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
 }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
-func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
+func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err error) {
 	select {
 	case <-s.chClose:
 		return 0, io.ErrClosedPipe
@@ -352,6 +352,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 	}
 
 	// start := time.Now()
+	// randId := rand.Intn(10000)
 
 	for {
 		s.mu.Lock()
@@ -381,10 +382,13 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte) (n int, err error) {
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
 
 			// cost := time.Since(start)
-			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
+			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
+			return len(b), nil
+		} else if heartbeat {
+			s.mu.Unlock()
 			return len(b), nil
 		}
-		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
+		// Logf(DEBUG, "UDPStream::Write block uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue))
 
 		var timeout *time.Timer
 		var c <-chan time.Time

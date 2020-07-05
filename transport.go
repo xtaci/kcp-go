@@ -12,7 +12,7 @@ import (
 
 var (
 	DefaultAcceptBacklog = 1024
-	DefaultDialTimeout   = time.Millisecond * 200
+	DefaultDialTimeout   = time.Millisecond * 2000
 )
 
 type LogLevel int

@@ -17,6 +17,7 @@ import (
 )
 
 var logs [5]*log.Logger
+var msgLen int
 
 func init() {
 	Debug := log.New(os.Stdout,
@@ -54,6 +55,54 @@ func checkError(err error) {
 		kcp.Logf(kcp.ERROR, "checkError: %+v\n", err)
 		os.Exit(-1)
 	}
+}
+
+func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost float64, err error) {
+	buf := bufPool.Get().(*[]byte)
+	defer bufPool.Put(buf)
+
+	for {
+		n, err := src.Read(*buf)
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
+			return wcount, wcost, err
+		}
+
+		wstart := time.Now()
+		_, err = dst.Write((*buf)[:n])
+		wcosttmp := time.Since(wstart)
+		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
+		wcount += 1
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toUdpStreamBridge writing err:%v", err)
+			return wcount, wcost, err
+		}
+	}
+	return wcount, wcost, nil
+}
+
+func toTcpStreamBridge(dst *net.TCPConn, src *kcp.UDPStream) (wcount int, wcost float64, err error) {
+	buf := bufPool.Get().(*[]byte)
+	defer bufPool.Put(buf)
+
+	for {
+		n, err := src.Read(*buf)
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
+			return wcount, wcost, err
+		}
+
+		wstart := time.Now()
+		_, err = dst.Write((*buf)[:n])
+		wcosttmp := time.Since(wstart)
+		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
+		wcount += 1
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toTcpStreamBridge writing err:%v", err)
+			return wcount, wcost, err
+		}
+	}
+	return wcount, wcost, nil
 }
 
 func iobridge(dst io.Writer, src io.Reader) (wcount int, wcost float64, err error) {
@@ -131,13 +180,13 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 
 	// start tunnel & wait for tunnel termination
 	toUDPStream := func(s *kcp.UDPStream, conn *net.TCPConn, shutdown chan struct{}) {
-		wcount, wcost, err := iobridge(s, conn)
+		wcount, wcost, err := toUdpStreamBridge(s, conn)
 		kcp.Logf(kcp.INFO, "toUDPStream stream:%v remote:%v wcount:%v wcost:%v err:%v", s.GetUUID(), conn.RemoteAddr(), wcount, wcost, err)
 		shutdown <- struct{}{}
 	}
 
 	toTCPStream := func(conn *net.TCPConn, s *kcp.UDPStream, shutdown chan struct{}) {
-		_, _, err := iobridge(conn, s)
+		_, _, err := toTcpStreamBridge(conn, s)
 		kcp.Logf(kcp.INFO, "toTCPStream stream:%v remote:%v err:%v", s.GetUUID(), conn.RemoteAddr(), err)
 		shutdown <- struct{}{}
 	}
@@ -244,6 +293,11 @@ func main() {
 			Name:  "ackNoDelay",
 			Usage: "stream ackNoDelay",
 		},
+		cli.IntFlag{
+			Name:  "msgLen",
+			Value: 0,
+			Usage: "test echo msgLen",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		listenAddr := c.String("listenAddr")
@@ -268,6 +322,7 @@ func main() {
 
 		logLevel := c.Int("logLevel")
 		wndSize := c.Int("wndSize")
+		msgLen = c.Int("msgLen")
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -285,6 +340,7 @@ func main() {
 		fmt.Printf("Action transmitTuns:%v\n", transmitTuns)
 		fmt.Printf("Action logLevel:%v\n", logLevel)
 		fmt.Printf("Action wndSize:%v\n", wndSize)
+		fmt.Printf("Action msgLen:%v\n", msgLen)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
