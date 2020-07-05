@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"sync"
@@ -66,6 +67,7 @@ func TestClientEcho(clientnum, msgcount, msglen int, remoteAddr string, finish *
 		}
 		clients[i] = c
 		go func(j int) {
+			time.Sleep(time.Duration(rand.Intn(2000)) * time.Millisecond)
 			echoTester(c, msglen, msgcount)
 			wg.Done()
 		}(i)
@@ -106,9 +108,9 @@ func main() {
 	var finish sync.WaitGroup
 	finish.Add(3)
 
-	go TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
-	go TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
-	go TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
+	TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
+	TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
+	TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
 
 	finish.Wait()
 }

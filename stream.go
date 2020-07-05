@@ -495,7 +495,6 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	s.hrtTick.Stop()
 	s.chClean = time.NewTimer(CleanTimeout).C
 
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
@@ -528,7 +527,6 @@ func (s *UDPStream) reset() {
 		return
 	}
 
-	s.hrtTick.Stop()
 	close(s.chRst)
 	s.kcp.ReleaseTX()
 }
@@ -543,9 +541,11 @@ func (s *UDPStream) update() {
 			s.mu.Lock()
 			s.kcp.ReleaseTX()
 			s.mu.Unlock()
-			s.flushTimer.Stop()
 
+			s.hrtTick.Stop()
+			s.flushTimer.Stop()
 			s.cleancb(s.uuid)
+
 			return
 		case <-s.hrtTick.C:
 			Logf(INFO, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)

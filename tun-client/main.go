@@ -40,8 +40,6 @@ func init() {
 		log.Ldate|log.Lmicroseconds)
 
 	logs = [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
-
-	kcp.DefaultDialTimeout = time.Second
 }
 
 var bufPool = sync.Pool{
