@@ -49,30 +49,30 @@ type TunnelSelector interface {
 }
 
 type KCPOption struct {
-	nodelay  int
-	interval int
-	resend   int
-	nc       int
+	Nodelay  int
+	Interval int
+	Resend   int
+	Nc       int
 
-	ackNoDelay bool
+	AckNoDelay bool
 }
 
 type TunnelOption struct {
-	readBuffer  int
-	writeBuffer int
+	ReadBuffer  int
+	WriteBuffer int
 }
 
 var FastKCPOption = &KCPOption{
-	nodelay:    1,
-	interval:   20,
-	resend:     2,
-	nc:         1,
-	ackNoDelay: true,
+	Nodelay:    1,
+	Interval:   20,
+	Resend:     2,
+	Nc:         1,
+	AckNoDelay: true,
 }
 
 var DefaultTunOption = &TunnelOption{
-	readBuffer:  4 * 1024 * 1024,
-	writeBuffer: 4 * 1024 * 1024,
+	ReadBuffer:  4 * 1024 * 1024,
+	WriteBuffer: 4 * 1024 * 1024,
 }
 
 type UDPTransport struct {
@@ -103,10 +103,10 @@ func (t *UDPTransport) InitTunnel(tunnel *UDPTunnel, option *TunnelOption) error
 	if option == nil {
 		return nil
 	}
-	if err := tunnel.SetReadBuffer(option.readBuffer); err != nil {
+	if err := tunnel.SetReadBuffer(option.ReadBuffer); err != nil {
 		return err
 	}
-	if err := tunnel.SetWriteBuffer(option.writeBuffer); err != nil {
+	if err := tunnel.SetWriteBuffer(option.WriteBuffer); err != nil {
 		return err
 	}
 	return nil
@@ -150,8 +150,8 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 		return nil, err
 	}
 	if t.kcpOption != nil {
-		stream.SetNoDelay(t.kcpOption.nodelay, t.kcpOption.interval, t.kcpOption.resend, t.kcpOption.nc)
-		stream.SetACKNoDelay(t.kcpOption.ackNoDelay)
+		stream.SetNoDelay(t.kcpOption.Nodelay, t.kcpOption.Interval, t.kcpOption.Resend, t.kcpOption.Nc)
+		stream.SetACKNoDelay(t.kcpOption.AckNoDelay)
 	}
 	return stream, err
 }
