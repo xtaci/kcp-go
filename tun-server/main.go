@@ -60,6 +60,7 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 	defer bufPool.Put(buf)
 
 	for {
+		start := 0
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
@@ -67,7 +68,7 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 		}
 
 		wstart := time.Now()
-		_, err = dst.Write((*buf)[:n])
+		_, err = dst.Write((*buf)[start:n])
 		wcosttmp := time.Since(wstart)
 		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
 		wcount += 1
@@ -291,7 +292,7 @@ func main() {
 		transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
-			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), nil)
+			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), kcp.DefaultTunOption)
 			checkError(err)
 		}
 

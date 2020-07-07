@@ -71,8 +71,8 @@ var FastKCPOption = &KCPOption{
 }
 
 var DefaultTunOption = &TunnelOption{
-	readBuffer:  16 * 1024 * 1024,
-	writeBuffer: 16 * 1024 * 1024,
+	readBuffer:  4 * 1024 * 1024,
+	writeBuffer: 4 * 1024 * 1024,
 }
 
 type UDPTransport struct {

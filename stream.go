@@ -655,11 +655,9 @@ func (s *UDPStream) input(data []byte) {
 	if !s.accepted && s.kcp.snd_una == 1 {
 		s.notifyDialEvent()
 	}
-
-	kcpFlush := !s.writeDelay && len(s.kcp.snd_queue) != 0 && (s.kcp.snd_nxt < s.kcp.snd_una+s.kcp.calc_cwnd())
 	s.mu.Unlock()
 
-	s.flush(kcpFlush)
+	s.flush(false)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))

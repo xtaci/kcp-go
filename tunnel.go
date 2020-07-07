@@ -1,11 +1,11 @@
 package kcp
 
 import (
+	"errors"
 	"io"
 	"net"
 	"sync"
 	"time"
-	"errors"
 
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -82,10 +82,12 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 }
 
 func (t *UDPTunnel) SetReadBuffer(bytes int) error {
+	Logf(INFO, "UDPTunnel::SetReadBuffer addr:%v bytes:%v", t.addr, bytes)
 	return t.conn.SetReadBuffer(bytes)
 }
 
 func (t *UDPTunnel) SetWriteBuffer(bytes int) error {
+	Logf(INFO, "UDPTunnel::SetWriteBuffer addr:%v bytes:%v", t.addr, bytes)
 	return t.conn.SetWriteBuffer(bytes)
 }
 

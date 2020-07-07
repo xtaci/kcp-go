@@ -62,6 +62,7 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 	defer bufPool.Put(buf)
 
 	for {
+		start := 0
 		n, err := src.Read(*buf)
 		if err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
@@ -69,7 +70,7 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 		}
 
 		wstart := time.Now()
-		_, err = dst.Write((*buf)[:n])
+		_, err = dst.Write((*buf)[start:n])
 		wcosttmp := time.Since(wstart)
 		wcost += float64(wcosttmp.Nanoseconds()) / (1000 * 1000)
 		wcount += 1
@@ -353,7 +354,7 @@ func main() {
 		transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
-			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), nil)
+			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), kcp.DefaultTunOption)
 			checkError(err)
 		}
 
@@ -362,13 +363,13 @@ func main() {
 		}
 
 		locals := []string{}
-		for i := 0; i < transmitTuns; i++ {
-			locals = append(locals, localIp+":"+strconv.Itoa(localPortS+i))
+		for portS := localPortS; portS <= localPortE; portS++ {
+			locals = append(locals, localIp+":"+strconv.Itoa(portS))
 		}
 
 		remotes := []string{}
-		for i := 0; i < transmitTuns; i++ {
-			remotes = append(remotes, remoteIp+":"+strconv.Itoa(remotePortS+i))
+		for portS := remotePortS; portS <= remotePortE; portS++ {
+			remotes = append(remotes, remoteIp+":"+strconv.Itoa(portS))
 		}
 
 		addr, err := net.ResolveTCPAddr("tcp", listenAddr)
@@ -391,10 +392,24 @@ func main() {
 			}
 		}()
 
+		localIdx := 0
+		remoteIdx := 0
+
 		for {
 			conn, err := listener.AcceptTCP()
 			checkError(err)
-			stream, err := transport.Open(locals, remotes)
+
+			tunLocals := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunLocals = append(tunLocals, locals[localIdx%len(locals)])
+				localIdx++
+			}
+			tunRemotes := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
+				remoteIdx++
+			}
+			stream, err := transport.Open(tunLocals, tunRemotes)
 			stream.SetWindowSize(wndSize, wndSize)
 			checkError(err)
 			go handleClient(stream, conn)
