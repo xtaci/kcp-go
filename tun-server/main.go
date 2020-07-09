@@ -296,6 +296,19 @@ func main() {
 			checkError(err)
 		}
 
+		go func() {
+			for {
+				time.Sleep(time.Second * 10)
+				headers := kcp.DefaultSnmp.Header()
+				values := kcp.DefaultSnmp.ToSlice()
+				fmt.Printf("------------- snmp result -------------\n")
+				for i := 0; i < len(headers); i++ {
+					fmt.Printf("snmp header:%v value:%v \n", headers[i], values[i])
+				}
+				fmt.Printf("------------- snmp result -------------\n\n")
+			}
+		}()
+
 		for {
 			stream, err := transport.Accept()
 			checkError(err)

@@ -281,7 +281,7 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 			n, err := s.cmdRead(flag, s.recvbuf[1:], b)
 			s.bufptr = s.recvbuf[n+1:]
 			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n+1))
+			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
 			if flag != PSH {
 				n = 0
 			}
@@ -359,6 +359,7 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 		// make sure write do not overflow the max sliding window on both side
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
+			n := len(b)
 			for {
 				if len(b) < int(s.kcp.mss) {
 					s.sendbuf[0] = flag
@@ -379,11 +380,11 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			if needFlush {
 				s.flush(true)
 			}
-			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(len(b)))
+			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 
 			// cost := time.Since(start)
-			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, len(b))
-			return len(b), nil
+			// Logf(DEBUG, "UDPStream::Write finish uuid:%v accepted:%v randId:%v waitsnd:%v snd_wnd:%v rmt_wnd:%v snd_buf:%v snd_queue:%v cost:%v len:%v", s.uuid, s.accepted, randId, waitsnd, s.kcp.snd_wnd, s.kcp.rmt_wnd, len(s.kcp.snd_buf), len(s.kcp.snd_queue), cost, n)
+			return n, nil
 		} else if heartbeat {
 			s.mu.Unlock()
 			return len(b), nil
