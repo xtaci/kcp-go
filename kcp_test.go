@@ -101,9 +101,9 @@ func (sel *TestSelector) Pick(remotes []string) (tunnels []*UDPTunnel) {
 }
 
 var lPortStart = 7001
-var lPortCount = 10
+var lPortCount = 3
 var rPortStart = 17001
-var rPortCount = 10
+var rPortCount = 3
 
 var lAddrs = []string{}
 var rAddrs = []string{}
@@ -180,15 +180,24 @@ func Init(l LogLevel) {
 		serverTunnels = append(serverTunnels, tunnel)
 	}
 
+	streamEstablish := make(chan struct{})
+	go func() {
+		serverStream, err = serverTransport.Accept()
+		if err != nil {
+			panic("serverTransport Accept")
+		}
+		streamEstablish <- struct{}{}
+	}()
+
 	clientStream, err = clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		panic("clientTransport Open")
 	}
+	<-streamEstablish
+}
 
-	serverStream, err = serverTransport.Accept()
-	if err != nil {
-		panic("serverTransport Accept")
-	}
+func init() {
+	Init(DEBUG)
 }
 
 func setTunnelBuffer(sendBuffer, recvBuffer int) error {
@@ -217,7 +226,9 @@ func checkError(t *testing.T, err error) {
 
 func server(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
 	serverStream.SetNoDelay(nodelay, interval, resend, nc)
-	serverTunnels[0].Simulate(loss, delayMin, delayMax)
+	for _, serverTunnel := range serverTunnels {
+		serverTunnel.Simulate(loss, delayMin, delayMax)
+	}
 
 	buf := make([]byte, 65536)
 	for {
@@ -231,7 +242,9 @@ func server(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interva
 
 func client(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
 	clientStream.SetNoDelay(nodelay, interval, resend, nc)
-	clientTunnels[0].Simulate(loss, delayMin, delayMax)
+	for _, clientTunnel := range clientTunnels {
+		clientTunnel.Simulate(loss, delayMin, delayMax)
+	}
 
 	buf := make([]byte, 64)
 	var rtt time.Duration
@@ -278,24 +291,29 @@ func testLossyConn4(t *testing.T) {
 	testlink(t, 0.1, 10, 20, 1, 10, 2, 0)
 }
 
-func BenchmarkFlush(b *testing.B) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
-	kcp.snd_buf = make([]segment, 1024)
-	for k := range kcp.snd_buf {
-		kcp.snd_buf[k].xmit = 1
-		kcp.snd_buf[k].resendts = currentMs() + 10000
+func TestLossyConn(t *testing.T) {
+	Logf(INFO, "TestKCP.testLossyConn1")
+	testLossyConn1(t)
+
+	Logf(INFO, "TestKCP.testLossyConn2")
+	testLossyConn2(t)
+
+	Logf(INFO, "TestKCP.testLossyConn3")
+	testLossyConn3(t)
+
+	Logf(INFO, "TestKCP.testLossyConn4")
+	testLossyConn4(t)
+
+	for _, clientTunnel := range clientTunnels {
+		clientTunnel.Simulate(0, 0, 0)
 	}
-	b.ResetTimer()
-	b.ReportAllocs()
-	var mu sync.Mutex
-	for i := 0; i < b.N; i++ {
-		mu.Lock()
-		kcp.flush(false)
-		mu.Unlock()
+
+	for _, serverTunnel := range serverTunnels {
+		serverTunnel.Simulate(0, 0, 0)
 	}
 }
 
-func testTimeout(t *testing.T) {
+func TestTimeout(t *testing.T) {
 	buf := make([]byte, 10)
 	//timeout
 	clientStream.SetDeadline(time.Now().Add(time.Second))
@@ -308,7 +326,7 @@ func testTimeout(t *testing.T) {
 	Logf(INFO, "TestTimeout err:%v", err)
 }
 
-func testSendRecv(t *testing.T) {
+func TestSendRecv(t *testing.T) {
 	go server(t, 0.1, 10, 20, 1, 10, 2, 0)
 	clientStream.SetWriteDelay(true)
 
@@ -341,7 +359,7 @@ func tinyRecvServer(t *testing.T, loss float64, delayMin, delayMax int, nodelay,
 	}
 }
 
-func testTinyBufferReceiver(t *testing.T) {
+func TestTinyBufferReceiver(t *testing.T) {
 	go tinyRecvServer(t, 0.1, 10, 20, 1, 10, 2, 0)
 
 	const N = 100
@@ -378,7 +396,7 @@ func testTinyBufferReceiver(t *testing.T) {
 	}
 }
 
-func testClose(t *testing.T) {
+func TestClose(t *testing.T) {
 	var n int
 	var err error
 
@@ -583,18 +601,49 @@ func parallelClient(t *testing.T, wg *sync.WaitGroup) (err error) {
 	return
 }
 
-func testParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
+func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
 	N := 1000
 	wg.Add(N)
+	go func() {
+		for i := 0; i < N; i++ {
+			echoServer()
+		}
+	}()
+
 	for i := 0; i < N; i++ {
-		go echoServer()
 		go parallelClient(t, &wg)
 	}
 	wg.Wait()
 }
 
-func testSNMP(t *testing.T) {
+func TestAcceptBackuplog(t *testing.T) {
+	serverTransport.preAcceptChan = make(chan chan *UDPStream, 30)
+	var wg sync.WaitGroup
+	N := 1000
+	wg.Add(N)
+	go func() {
+		for i := 0; i < N; i++ {
+			_, err := serverTransport.Accept()
+			if err != nil {
+				t.Fatal("Accept failed", err)
+			}
+		}
+	}()
+
+	for i := 0; i < N; i++ {
+		go func() {
+			_, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+			if err != nil {
+				t.Fatal("Open failed", err)
+			}
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+}
+
+func TestSNMP(t *testing.T) {
 	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
 	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
 	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
@@ -624,45 +673,6 @@ func sinkSpeed(b *testing.B, bytes int) {
 	go sinkServer()
 	sinkClient(bytes, b.N)
 	b.SetBytes(int64(bytes))
-}
-
-func init() {
-	Init(INFO)
-}
-
-func TestKCP(t *testing.T) {
-	Logf(INFO, "TestKCP.testFileTransfer")
-	testFileTransfer(t)
-
-	Logf(INFO, "TestKCP.testLossyConn1")
-	testLossyConn1(t)
-
-	Logf(INFO, "TestKCP.testLossyConn2")
-	testLossyConn2(t)
-
-	Logf(INFO, "TestKCP.testLossyConn3")
-	testLossyConn3(t)
-
-	Logf(INFO, "TestKCP.testLossyConn4")
-	testLossyConn4(t)
-
-	Logf(INFO, "TestKCP.testTimeout")
-	testTimeout(t)
-
-	Logf(INFO, "TestKCP.testSendRecv")
-	testSendRecv(t)
-
-	Logf(INFO, "TestKCP.testTinyBufferReceiver")
-	testTinyBufferReceiver(t)
-
-	Logf(INFO, "TestKCP.testClose")
-	testClose(t)
-
-	Logf(INFO, "TestKCP.testParallel1024CLIENT_64BMSG_64CNT")
-	testParallel1024CLIENT_64BMSG_64CNT(t)
-
-	Logf(INFO, "TestKCP.testSNMP")
-	testSNMP(t)
 }
 
 var bufPool = sync.Pool{
@@ -790,7 +800,7 @@ func randString(n int) string {
 	return string(b)
 }
 
-func testFileTransfer(t *testing.T) {
+func TestFileTransfer(t *testing.T) {
 	DefaultDialTimeout = time.Millisecond * 2000
 
 	lFile := randString(1024 * 512)
@@ -826,6 +836,23 @@ func testFileTransfer(t *testing.T) {
 
 	<-finish
 	<-finish
+}
+
+func BenchmarkFlush(b *testing.B) {
+	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp.snd_buf = make([]segment, 1024)
+	for k := range kcp.snd_buf {
+		kcp.snd_buf[k].xmit = 1
+		kcp.snd_buf[k].resendts = currentMs() + 10000
+	}
+	b.ResetTimer()
+	b.ReportAllocs()
+	var mu sync.Mutex
+	for i := 0; i < b.N; i++ {
+		mu.Lock()
+		kcp.flush(false)
+		mu.Unlock()
+	}
 }
 
 func BenchmarkEchoSpeed128B(b *testing.B) {

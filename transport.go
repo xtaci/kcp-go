@@ -73,24 +73,24 @@ var DefaultTunOption = &TunnelOption{
 }
 
 type UDPTransport struct {
-	kcpOption      *KCPOption
-	streamm        ConcurrentMap
-	startAccept    int32
-	preAacceptChan chan chan *UDPStream
-	tunnelHostM    map[string]*UDPTunnel
-	sel            TunnelSelector
-	die            chan struct{} // notify the listener has closed
-	dieOnce        sync.Once
+	kcpOption     *KCPOption
+	streamm       ConcurrentMap
+	startAccept   int32
+	preAcceptChan chan chan *UDPStream
+	tunnelHostM   map[string]*UDPTunnel
+	sel           TunnelSelector
+	die           chan struct{} // notify the listener has closed
+	dieOnce       sync.Once
 }
 
 func NewUDPTransport(sel TunnelSelector, option *KCPOption) (t *UDPTransport, err error) {
 	t = &UDPTransport{
-		kcpOption:      option,
-		streamm:        NewConcurrentMap(),
-		preAacceptChan: make(chan chan *UDPStream, DefaultAcceptBacklog),
-		tunnelHostM:    make(map[string]*UDPTunnel),
-		sel:            sel,
-		die:            make(chan struct{}),
+		kcpOption:     option,
+		streamm:       NewConcurrentMap(),
+		preAcceptChan: make(chan chan *UDPStream, DefaultAcceptBacklog),
+		tunnelHostM:   make(map[string]*UDPTunnel),
+		sel:           sel,
+		die:           make(chan struct{}),
 	}
 	return t, nil
 }
@@ -178,10 +178,9 @@ func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err er
 
 func (t *UDPTransport) Accept() (*UDPStream, error) {
 	atomic.StoreInt32(&t.startAccept, 1)
-
 	for {
 		select {
-		case acceptChan := <-t.preAacceptChan:
+		case acceptChan := <-t.preAcceptChan:
 			stream := <-acceptChan
 			if stream != nil {
 				Logf(INFO, "UDPTransport::Accept uuid:%v", stream.GetUUID())
@@ -208,7 +207,7 @@ func (t *UDPTransport) handleInput(data []byte, rAddr net.Addr) {
 
 	acceptChan := make(chan *UDPStream, 1)
 	select {
-	case t.preAacceptChan <- acceptChan:
+	case t.preAcceptChan <- acceptChan:
 		break
 	default:
 		return
@@ -231,6 +230,7 @@ func (t *UDPTransport) handleOpen(uuid gouuid.UUID, remotes []string, data []byt
 	if stream != nil {
 		stream.input(data)
 		if err := stream.accept(); err != nil {
+			Logf(INFO, "UDPTransport::handleOpen failed. uuid:%v err:%v", stream.GetUUID(), err)
 			stream.Close()
 			return nil
 		}
