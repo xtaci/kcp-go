@@ -421,71 +421,6 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 	}
 }
 
-func (s *UDPStream) Dial(locals []string, timeout time.Duration) error {
-	// start := time.Now()
-	// defer func() {
-	// 	Logf(INFO, "UDPStream::Dial cost uuid:%v accepted:%v locals:%v timeout:%v cost:%v", s.uuid, s.accepted, locals, timeout, time.Since(start))
-	// }()
-	Logf(INFO, "UDPStream::Dial uuid:%v accepted:%v locals:%v timeout:%v", s.uuid, s.accepted, locals, timeout)
-
-	if s.accepted {
-		return nil
-	} else if len(locals) == 0 {
-		return errDialParam
-	}
-
-	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
-	s.flush(true)
-
-	dialTimer := time.NewTimer(timeout)
-	defer dialTimer.Stop()
-
-	select {
-	case <-s.chClose:
-		return io.ErrClosedPipe
-	case <-s.chRst:
-		return io.ErrUnexpectedEOF
-	case <-s.chRecvFinEvent:
-		return io.EOF
-	case <-s.chDialEvent:
-		return nil
-	case <-dialTimer.C:
-		return errTimeout
-	}
-}
-
-func (s *UDPStream) Accept() (err error) {
-	Logf(INFO, "UDPStream::Accept uuid:%v accepted:%v", s.uuid, s.accepted)
-
-	select {
-	case <-s.chClose:
-		return io.ErrClosedPipe
-	case <-s.chRst:
-		return io.ErrUnexpectedEOF
-	case <-s.chRecvFinEvent:
-		return io.EOF
-	default:
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	size := s.kcp.PeekSize()
-	if size <= 0 {
-		return errRemoteStream
-	}
-
-	// resize the length of recvbuf to correspond to data size
-	s.recvbuf = s.recvbuf[:size]
-	s.kcp.Recv(s.recvbuf)
-	flag := s.recvbuf[0]
-	if flag != SYN {
-		return errRemoteStream
-	}
-	_, err = s.recvSyn(s.recvbuf[1:])
-	return err
-}
-
 // Close closes the connection.
 func (s *UDPStream) Close() error {
 	var once bool
@@ -519,6 +454,76 @@ func (s *UDPStream) CloseWrite() error {
 	s.WriteFlag(FIN, nil)
 	close(s.chSendFinEvent)
 	return nil
+}
+
+func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
+	// start := time.Now()
+	// defer func() {
+	// 	Logf(INFO, "UDPStream::dial cost uuid:%v accepted:%v locals:%v timeout:%v cost:%v", s.uuid, s.accepted, locals, timeout, time.Since(start))
+	// }()
+	Logf(INFO, "UDPStream::dial uuid:%v accepted:%v locals:%v timeout:%v", s.uuid, s.accepted, locals, timeout)
+
+	if s.accepted {
+		return nil
+	} else if len(locals) == 0 {
+		return errDialParam
+	}
+
+	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
+	s.flush(true)
+
+	dialTimer := time.NewTimer(timeout)
+	defer dialTimer.Stop()
+
+	select {
+	case <-s.chClose:
+		return io.ErrClosedPipe
+	case <-s.chRst:
+		return io.ErrUnexpectedEOF
+	case <-s.chRecvFinEvent:
+		return io.EOF
+	case <-s.chDialEvent:
+		return nil
+	case <-dialTimer.C:
+		return errTimeout
+	}
+}
+
+func (s *UDPStream) accept() (err error) {
+	Logf(INFO, "UDPStream::accept uuid:%v accepted:%v", s.uuid, s.accepted)
+
+	select {
+	case <-s.chClose:
+		return io.ErrClosedPipe
+	case <-s.chRst:
+		return io.ErrUnexpectedEOF
+	case <-s.chRecvFinEvent:
+		return io.EOF
+	default:
+	}
+
+	s.mu.Lock()
+	size := s.kcp.PeekSize()
+	if size <= 0 {
+		s.mu.Unlock()
+		return errRemoteStream
+	}
+
+	// resize the length of recvbuf to correspond to data size
+	s.recvbuf = s.recvbuf[:size]
+	s.kcp.Recv(s.recvbuf)
+	flag := s.recvbuf[0]
+	if flag != SYN {
+		s.mu.Unlock()
+		return errRemoteStream
+	}
+	_, err = s.recvSyn(s.recvbuf[1:])
+	s.mu.Unlock()
+
+	if err == nil {
+		s.flush(false)
+	}
+	return err
 }
 
 func (s *UDPStream) reset() {

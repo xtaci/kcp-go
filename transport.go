@@ -4,15 +4,15 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	cmap "github.com/1ucio/concurrent-map"
 	gouuid "github.com/satori/go.uuid"
 )
 
 var (
-	DefaultAcceptBacklog = 1024
-	DefaultDialTimeout   = time.Millisecond * 2000
+	DefaultAcceptBacklog = 256
+	DefaultDialTimeout   = time.Millisecond * 500
 )
 
 type LogLevel int
@@ -53,8 +53,6 @@ type KCPOption struct {
 	Interval int
 	Resend   int
 	Nc       int
-
-	AckNoDelay bool
 }
 
 type TunnelOption struct {
@@ -63,11 +61,10 @@ type TunnelOption struct {
 }
 
 var FastKCPOption = &KCPOption{
-	Nodelay:    1,
-	Interval:   20,
-	Resend:     2,
-	Nc:         1,
-	AckNoDelay: true,
+	Nodelay:  1,
+	Interval: 20,
+	Resend:   2,
+	Nc:       1,
 }
 
 var DefaultTunOption = &TunnelOption{
@@ -76,25 +73,24 @@ var DefaultTunOption = &TunnelOption{
 }
 
 type UDPTransport struct {
-	kcpOption  *KCPOption
-	streamm    cmap.ConcurrentMap
-	acceptChan chan *UDPStream
-
-	tunnelHostM map[string]*UDPTunnel
-	sel         TunnelSelector
-
-	die     chan struct{} // notify the listener has closed
-	dieOnce sync.Once
+	kcpOption      *KCPOption
+	streamm        ConcurrentMap
+	startAccept    int32
+	preAacceptChan chan chan *UDPStream
+	tunnelHostM    map[string]*UDPTunnel
+	sel            TunnelSelector
+	die            chan struct{} // notify the listener has closed
+	dieOnce        sync.Once
 }
 
 func NewUDPTransport(sel TunnelSelector, option *KCPOption) (t *UDPTransport, err error) {
 	t = &UDPTransport{
-		kcpOption:   option,
-		streamm:     cmap.New(),
-		acceptChan:  make(chan *UDPStream, DefaultAcceptBacklog),
-		tunnelHostM: make(map[string]*UDPTunnel),
-		sel:         sel,
-		die:         make(chan struct{}),
+		kcpOption:      option,
+		streamm:        NewConcurrentMap(),
+		preAacceptChan: make(chan chan *UDPStream, DefaultAcceptBacklog),
+		tunnelHostM:    make(map[string]*UDPTunnel),
+		sel:            sel,
+		die:            make(chan struct{}),
 	}
 	return t, nil
 }
@@ -151,7 +147,6 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 	}
 	if t.kcpOption != nil {
 		stream.SetNoDelay(t.kcpOption.Nodelay, t.kcpOption.Interval, t.kcpOption.Resend, t.kcpOption.Nc)
-		stream.SetACKNoDelay(t.kcpOption.AckNoDelay)
 	}
 	return stream, err
 }
@@ -171,29 +166,30 @@ func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err er
 		Logf(ERROR, "UDPTransport::Open NewStream failed. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
 		return nil, err
 	}
-	t.streamm.Set(uuid.String(), stream)
-	err = stream.Dial(locals, DefaultDialTimeout)
+	t.streamm.Set(uuid, stream)
+	err = stream.dial(locals, DefaultDialTimeout)
 	if err != nil {
-		Logf(WARN, "UDPTransport::Open Dial timeout. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
+		Logf(WARN, "UDPTransport::Open dial timeout. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
 		stream.Close()
 		return nil, err
 	}
 	return stream, nil
 }
 
-func (t *UDPTransport) Accept() (stream *UDPStream, err error) {
-	select {
-	case stream = <-t.acceptChan:
-		err := stream.Accept()
-		if err != nil {
-			stream.Close()
-			Logf(WARN, "UDPTransport::Accept uuid:%v err:%v", stream.GetUUID(), err)
-			return nil, err
+func (t *UDPTransport) Accept() (*UDPStream, error) {
+	atomic.StoreInt32(&t.startAccept, 1)
+
+	for {
+		select {
+		case acceptChan := <-t.preAacceptChan:
+			stream := <-acceptChan
+			if stream != nil {
+				Logf(INFO, "UDPTransport::Accept uuid:%v", stream.GetUUID())
+				return stream, nil
+			}
+		case <-t.die:
+			return nil, io.ErrClosedPipe
 		}
-		Logf(INFO, "UDPTransport::Accept uuid:%v", stream.GetUUID())
-		return stream, nil
-	case <-t.die:
-		return nil, io.ErrClosedPipe
 	}
 }
 
@@ -201,42 +197,47 @@ func (t *UDPTransport) handleInput(data []byte, rAddr net.Addr) {
 	var uuid gouuid.UUID
 	copy(uuid[:], data)
 
-	stream, new := t.handleOpen(uuid, rAddr)
-	if stream == nil {
+	s, ok := t.streamm.Get(uuid)
+	if ok {
+		s.(*UDPStream).input(data)
 		return
 	}
-	stream.input(data)
-	if !new {
+	if atomic.LoadInt32(&t.startAccept) == 0 {
 		return
 	}
+
+	acceptChan := make(chan *UDPStream, 1)
 	select {
-	case t.acceptChan <- stream:
+	case t.preAacceptChan <- acceptChan:
 		break
 	default:
-		//todo, we can just ignore the stream in the future, so client will retry syn
-		stream.Close()
+		return
 	}
+	stream := t.handleOpen(uuid, []string{rAddr.String()}, data)
+	acceptChan <- stream
 }
 
-func (t *UDPTransport) handleOpen(uuid gouuid.UUID, rAddr net.Addr) (stream *UDPStream, new bool) {
-	s, ok := t.streamm.Get(uuid.String())
-	if ok {
-		return s.(*UDPStream), false
-	}
-	s = t.streamm.Upsert(uuid.String(), nil, func(exist bool, valueInMap interface{}, newValue interface{}) interface{} {
-		if exist {
-			return valueInMap
-		}
-		s, err := t.NewStream(uuid, true, []string{rAddr.String()})
+func (t *UDPTransport) handleOpen(uuid gouuid.UUID, remotes []string, data []byte) *UDPStream {
+	var stream *UDPStream
+	t.streamm.SetIfAbsent(uuid, func() (interface{}, bool) {
+		s, err := t.NewStream(uuid, true, remotes)
 		if err != nil {
+			return nil, false
+		}
+		stream = s
+		return stream, true
+	})
+	// ignore conflict stream
+	if stream != nil {
+		stream.input(data)
+		if err := stream.accept(); err != nil {
+			stream.Close()
 			return nil
 		}
-		new = true
-		return s
-	})
-	return s.(*UDPStream), new
+	}
+	return stream
 }
 
 func (t *UDPTransport) handleClose(uuid gouuid.UUID) {
-	t.streamm.Remove(uuid.String())
+	t.streamm.Remove(uuid)
 }
