@@ -17,12 +17,17 @@ var (
 
 type input_callback func(data []byte, addr net.Addr)
 
+type MsgQueue struct {
+	msgs []ipv4.Message
+	mu   sync.Mutex
+}
+
 type (
 	// UDPTunnel defines a session implemented by UDP
 	UDPTunnel struct {
 		conn    *net.UDPConn // the underlying packet connection
 		addr    *net.UDPAddr
-		mu      sync.Mutex
+		mu      sync.RWMutex
 		inputcb input_callback
 
 		// notifications
@@ -32,6 +37,7 @@ type (
 		chFlush chan struct{} // notify Write
 
 		// packets waiting to be sent on wire
+		msgsm           map[string]*MsgQueue
 		msgss           [][]ipv4.Message
 		xconn           batchConn // for x/net
 		xconnWriteError error
@@ -66,6 +72,8 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	tunnel.addr = addr
 	tunnel.die = make(chan struct{})
 	tunnel.chFlush = make(chan struct{}, 1)
+	tunnel.msgss = make([][]ipv4.Message, 0)
+	tunnel.msgsm = make(map[string]*MsgQueue)
 
 	// cast to writebatch conn
 	if addr.IP.To4() != nil {
@@ -128,17 +136,49 @@ func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
 }
 
 func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
-	t.mu.Lock()
-	t.msgss = append(t.msgss, msgs)
-	t.mu.Unlock()
+	target := msgs[0].Addr.String()
+
+	t.mu.RLock()
+	msgq, ok := t.msgsm[target]
+	t.mu.RUnlock()
+
+	if !ok {
+		t.mu.Lock()
+		msgq, ok = t.msgsm[target]
+		if !ok {
+			t.msgsm[target] = &MsgQueue{msgs: msgs}
+			t.mu.Unlock()
+			return
+		}
+		t.mu.Unlock()
+	}
+
+	msgq.mu.Lock()
+	msgq.msgs = append(msgq.msgs, msgs...)
+	msgq.mu.Unlock()
 	t.notifyFlush()
+
+	// t.mu.Lock()
+	// t.msgss = append(t.msgss, msgs)
+	// t.mu.Unlock()
+	// t.notifyFlush()
 }
 
 func (t *UDPTunnel) popMsgss() (msgss [][]ipv4.Message) {
-	t.mu.Lock()
-	msgss = t.msgss
-	t.msgss = make([][]ipv4.Message, 0)
-	t.mu.Unlock()
+	t.mu.RLock()
+	for _, msgq := range t.msgsm {
+		msgq.mu.Lock()
+		msgs := msgq.msgs
+		msgq.msgs = make([]ipv4.Message, 0)
+		msgq.mu.Unlock()
+		msgss = append(msgss, msgs)
+	}
+	t.mu.RUnlock()
+
+	// t.mu.Lock()
+	// msgss = t.msgss
+	// t.msgss = make([][]ipv4.Message, 0)
+	// t.mu.Unlock()
 	return msgss
 }
 
