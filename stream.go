@@ -521,7 +521,7 @@ func (s *UDPStream) accept() (err error) {
 	s.mu.Unlock()
 
 	if err == nil {
-		s.flush(false)
+		s.flush(true)
 	}
 	return err
 }

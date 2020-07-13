@@ -67,7 +67,7 @@ func TestClientEcho(clientnum, msgcount, msglen int, remoteAddr string, finish *
 		}
 		clients[i] = c
 		go func(j int) {
-			time.Sleep(time.Duration(rand.Intn(2000)) * time.Millisecond)
+			time.Sleep(time.Duration(rand.Intn(clientnum)+1000) * time.Millisecond)
 			echoTester(c, msglen, msgcount)
 			wg.Done()
 		}(i)

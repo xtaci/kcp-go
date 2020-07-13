@@ -11,7 +11,7 @@ import (
 )
 
 var (
-	DefaultAcceptBacklog = 256
+	DefaultAcceptBacklog = 1024
 	DefaultDialTimeout   = time.Millisecond * 500
 )
 

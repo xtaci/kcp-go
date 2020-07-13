@@ -408,24 +408,30 @@ func main() {
 		localIdx := 0
 		remoteIdx := 0
 
+		kcp.DefaultDialTimeout = time.Second * 10
+
 		for {
 			conn, err := listener.AcceptTCP()
 			checkError(err)
 
-			tunLocals := []string{}
-			for i := 0; i < transmitTuns; i++ {
-				tunLocals = append(tunLocals, locals[localIdx%len(locals)])
-				localIdx++
-			}
-			tunRemotes := []string{}
-			for i := 0; i < transmitTuns; i++ {
-				tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
-				remoteIdx++
-			}
-			stream, err := transport.Open(tunLocals, tunRemotes)
-			stream.SetWindowSize(wndSize, wndSize)
-			checkError(err)
-			go handleClient(stream, conn)
+			go func() {
+				tunLocals := []string{}
+				for i := 0; i < transmitTuns; i++ {
+					tunLocals = append(tunLocals, locals[localIdx%len(locals)])
+					localIdx++
+				}
+				tunRemotes := []string{}
+				for i := 0; i < transmitTuns; i++ {
+					tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
+					remoteIdx++
+				}
+				start := time.Now()
+				stream, err := transport.Open(tunLocals, tunRemotes)
+				fmt.Println("Open Stream cost:%v", time.Since(start))
+				checkError(err)
+				stream.SetWindowSize(wndSize, wndSize)
+				go handleClient(stream, conn)
+			}()
 		}
 		return nil
 	}
