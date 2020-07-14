@@ -17,7 +17,6 @@ import (
 )
 
 var logs [5]*log.Logger
-var msgLen int
 
 func init() {
 	Debug := log.New(os.Stdout,
@@ -295,9 +294,9 @@ func main() {
 			Usage: "stream ackNoDelay",
 		},
 		cli.IntFlag{
-			Name:  "msgLen",
-			Value: 0,
-			Usage: "test echo msgLen",
+			Name:  "interval",
+			Value: 20,
+			Usage: "kcp interval",
 		},
 	}
 	myApp.Action = func(c *cli.Context) error {
@@ -323,7 +322,7 @@ func main() {
 
 		logLevel := c.Int("logLevel")
 		wndSize := c.Int("wndSize")
-		msgLen = c.Int("msgLen")
+		interval := c.Int("interval")
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -341,13 +340,17 @@ func main() {
 		fmt.Printf("Action transmitTuns:%v\n", transmitTuns)
 		fmt.Printf("Action logLevel:%v\n", logLevel)
 		fmt.Printf("Action wndSize:%v\n", wndSize)
-		fmt.Printf("Action msgLen:%v\n", msgLen)
+		fmt.Printf("Action interval:%v\n", interval)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
 				logs[lvl-1].Printf(f+"\n", args...)
 			}
 		}
+
+		kcp.DefaultTunOption.ReadBuffer = 16 * 1024 * 1024
+		kcp.DefaultTunOption.WriteBuffer = 16 * 1024 * 1024
+		kcp.FastKCPOption.Interval = interval
 
 		sel, err := NewTestSelector()
 		checkError(err)
@@ -399,16 +402,23 @@ func main() {
 			for {
 				conn, err := listenerD.AcceptTCP()
 				checkError(err)
-				targetConn, err := net.Dial("tcp", targetAddr)
-				checkError(err)
-				go handleRawClient(targetConn.(*net.TCPConn), conn)
+				go func() {
+					start := time.Now()
+					targetConn, err := net.Dial("tcp", targetAddr)
+					fmt.Println("Open TCPStream cost:", time.Since(start))
+					if err != nil {
+						fmt.Println("Open TCPStream err", err)
+						panic("transport Open")
+					}
+					go handleRawClient(targetConn.(*net.TCPConn), conn)
+				}()
 			}
 		}()
 
 		localIdx := 0
 		remoteIdx := 0
 
-		kcp.DefaultDialTimeout = time.Second * 10
+		kcp.DefaultDialTimeout = time.Second * 60
 
 		for {
 			conn, err := listener.AcceptTCP()
@@ -427,8 +437,11 @@ func main() {
 				}
 				start := time.Now()
 				stream, err := transport.Open(tunLocals, tunRemotes)
-				fmt.Println("Open Stream cost:%v", time.Since(start))
-				checkError(err)
+				fmt.Println("Open UDPStream cost:", time.Since(start))
+				if err != nil {
+					fmt.Println("Open UDPStream err", err)
+					panic("Open UDPStream failed")
+				}
 				stream.SetWindowSize(wndSize, wndSize)
 				go handleClient(stream, conn)
 			}()

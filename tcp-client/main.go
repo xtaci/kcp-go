@@ -94,6 +94,7 @@ var msglen = flag.Int("msglen", 100, "input msg length")
 var targetAddr = flag.String("targetAddr", "127.0.0.1:7900", "input target address")
 var proxyAddr = flag.String("proxyAddr", "127.0.0.1:7890", "input proxy address")
 var proxyAddrD = flag.String("proxyAddrD", "127.0.0.1:7891", "input proxy address direct")
+var connectWay = flag.Int("connectWay", 0, "udp proxy, tcp proxy, direct")
 
 func main() {
 	flag.Parse()
@@ -104,13 +105,20 @@ func main() {
 	fmt.Printf("targetAddr:%v\n", *targetAddr)
 	fmt.Printf("proxyAddr:%v\n", *proxyAddr)
 	fmt.Printf("proxyAddrD:%v\n", *proxyAddrD)
+	fmt.Printf("connectWay:%v\n", *connectWay)
 
 	var finish sync.WaitGroup
-	finish.Add(3)
-
-	TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
-	TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
-	TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
-
-	finish.Wait()
+	if *connectWay == 1 {
+		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
+	} else if *connectWay == 2 {
+		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
+	} else if *connectWay == 3 {
+		TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
+	} else {
+		finish.Add(3)
+		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
+		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
+		TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
+		finish.Wait()
+	}
 }
