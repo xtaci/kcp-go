@@ -309,9 +309,9 @@ func main() {
 			Usage: "transport inputQueueCount",
 		},
 		cli.IntFlag{
-			Name:  "inputProcessorCount",
-			Value: 128,
-			Usage: "transport inputProcessorCount",
+			Name:  "tunnelProcessorCount",
+			Value: 10,
+			Usage: "transport tunnelProcessorCount",
 		},
 		cli.IntFlag{
 			Name:  "noResend",
@@ -345,7 +345,7 @@ func main() {
 		bufferSize := c.Int("bufferSize")
 		interval := c.Int("interval")
 		inputQueueCount := c.Int("inputQueueCount")
-		inputProcessorCount := c.Int("inputProcessorCount")
+		tunnelProcessorCount := c.Int("tunnelProcessorCount")
 		noResend := c.Int("noResend")
 
 		transmitTunsS := c.String("transmitTuns")
@@ -367,7 +367,7 @@ func main() {
 		fmt.Printf("Action bufferSize:%v\n", bufferSize)
 		fmt.Printf("Action interval:%v\n", interval)
 		fmt.Printf("Action inputQueueCount:%v\n", inputQueueCount)
-		fmt.Printf("Action inputProcessorCount:%v\n", inputProcessorCount)
+		fmt.Printf("Action tunnelProcessorCount:%v\n", tunnelProcessorCount)
 		fmt.Printf("Action noResend:%v\n", noResend)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
@@ -380,7 +380,7 @@ func main() {
 		kcp.DefaultTunOption.ReadBuffer = bufferSize
 		kcp.DefaultTunOption.WriteBuffer = bufferSize
 		kcp.DefaultInputQueue = inputQueueCount
-		kcp.DefaultInputProcessor = inputProcessorCount
+		kcp.DefaultTunnelProcessor = tunnelProcessorCount
 		kcp.FastKCPOption.Interval = interval
 
 		sel, err := NewTestSelector()
