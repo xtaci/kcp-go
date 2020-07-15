@@ -27,7 +27,7 @@ func echoTester(c *client, msglen, msgcount int) (err error) {
 	start := time.Now()
 	fmt.Printf("echoTester start c:%v msglen:%v msgcount:%v start:%v\n", c.LocalAddr(), msglen, msgcount, start)
 	defer func() {
-		fmt.Printf("echoTester end c:%v msglen:%v msgcount:%v count:%v cost:%v elasp:%v\n err:%v", c.LocalAddr(), msglen, msgcount, c.count, c.cost, time.Since(start), err)
+		fmt.Printf("echoTester end c:%v msglen:%v msgcount:%v count:%v cost:%v elasp:%v err:%v \n", c.LocalAddr(), msglen, msgcount, c.count, c.cost, time.Since(start), err)
 	}()
 
 	buf := make([]byte, msglen)
