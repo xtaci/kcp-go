@@ -137,7 +137,7 @@ func InitLog(l LogLevel) {
 func Init(l LogLevel) {
 	InitLog(l)
 
-	DefaultDialTimeout = time.Second * 10
+	DefaultDialTimeout = time.Second * 2
 
 	for i := 0; i < lPortCount; i++ {
 		lAddrs = append(lAddrs, "127.0.0.1:"+strconv.Itoa(lPortStart+i))
@@ -623,6 +623,7 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 }
 
 func TestAcceptBackuplog(t *testing.T) {
+	DefaultDialTimeout = time.Second * 10
 	serverTransport.preAcceptChan = make(chan chan *UDPStream, 30)
 	var wg sync.WaitGroup
 	N := 1000

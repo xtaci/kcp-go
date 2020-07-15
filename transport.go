@@ -11,11 +11,10 @@ import (
 )
 
 var (
-	DefaultAcceptBacklog  = 512
-	DefaultDialTimeout    = time.Millisecond * 500
-	DefaultInputQueue     = 128
-	DefaultInputProcessor = 128
-	DefaultInputTryTimes  = 3
+	DefaultAcceptBacklog   = 512
+	DefaultDialTimeout     = time.Millisecond * 500
+	DefaultInputQueue      = 128
+	DefaultTunnelProcessor = 10
 )
 
 type LogLevel int
@@ -80,6 +79,11 @@ type inputMsg struct {
 	addr net.Addr
 }
 
+type inputTest struct {
+	t    time.Time
+	addr net.Addr
+}
+
 type UDPTransport struct {
 	kcpOption     *KCPOption
 	streamm       ConcurrentMap
@@ -93,7 +97,6 @@ type UDPTransport struct {
 }
 
 func NewUDPTransport(sel TunnelSelector, option *KCPOption) (t *UDPTransport, err error) {
-	inputQueues := make([]chan *inputMsg, DefaultInputProcessor)
 	t = &UDPTransport{
 		kcpOption:     option,
 		streamm:       NewConcurrentMap(),
@@ -101,12 +104,7 @@ func NewUDPTransport(sel TunnelSelector, option *KCPOption) (t *UDPTransport, er
 		tunnelHostM:   make(map[string]*UDPTunnel),
 		sel:           sel,
 		die:           make(chan struct{}),
-		inputQueues:   inputQueues,
-	}
-
-	for i := 0; i < DefaultInputProcessor; i++ {
-		inputQueues[i] = make(chan *inputMsg, DefaultInputQueue)
-		go t.processInput(i)
+		inputQueues:   make([]chan *inputMsg, 0),
 	}
 	return t, nil
 }
@@ -132,30 +130,20 @@ func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel 
 		return tunnel, nil
 	}
 
-	// outputTime := time.Now()
+	tunnelIdx := len(t.inputQueues)
+	for i := 0; i < DefaultTunnelProcessor; i++ {
+		t.inputQueues = append(t.inputQueues, make(chan *inputMsg, DefaultInputQueue))
+		go t.processInput(tunnelIdx + i)
+	}
 
 	inputPoll := 0
-	tunnel, err = NewUDPTunnel(lAddr, func(data []byte, addr net.Addr) {
+	tunnel, err = NewUDPTunnel(lAddr, func(tun *UDPTunnel, data []byte, addr net.Addr) {
 		msg := &inputMsg{data: data, addr: addr}
-		for i := 0; i < DefaultInputTryTimes; i++ {
-			idx := inputPoll % len(t.inputQueues)
-			inputPoll++
-
-			// now := time.Now()
-			// if now.Sub(outputTime) > time.Second*10 {
-			// 	Logf(DEBUG, "UDPTransport::tunnelInput inputQueue queue:%v len:%v", idx, len(t.inputQueues[idx]))
-			// 	outputTime = now
-			// }
-
-			select {
-			case t.inputQueues[idx] <- msg:
-				return
-			default:
-				// Logf(DEBUG, "UDPTransport::tunnelInput inputQueue is full lAddr:%v queue:%v", lAddr, idx)
-			}
-		}
-		t.inputQueues[inputPoll%len(t.inputQueues)] <- msg
+		idx := inputPoll%DefaultTunnelProcessor + tunnelIdx
+		inputPoll++
+		t.inputQueues[idx] <- msg
 	})
+
 	if err != nil {
 		Logf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)
 		return nil, err
@@ -230,24 +218,12 @@ func (t *UDPTransport) Accept() (*UDPStream, error) {
 }
 
 func (t *UDPTransport) processInput(queue int) {
-	// currHandleCount := 0
-	// outputTime := time.Now()
-	// lastHandleCount := 0
+	Logf(INFO, "UDPTransport::processInput queue:%v", queue)
 
 	for {
-		// now := time.Now()
-		// if now.Sub(outputTime) > time.Second*10 {
-		// 	Logf(DEBUG, "UDPTransport::processInput inputQueue queue:%v processCnt:%v len:%v", queue, currHandleCount-lastHandleCount, len(t.inputQueues[queue]))
-		// 	outputTime = now
-		// 	lastHandleCount = currHandleCount
-		// }
-
-		select {
-		case msg := <-t.inputQueues[queue]:
-			t.handleInput(msg.data, msg.addr)
-			xmitBuf.Put(msg.data)
-			// currHandleCount++
-		}
+		msg := <-t.inputQueues[queue]
+		t.handleInput(msg.data, msg.addr)
+		xmitBuf.Put(msg.data)
 	}
 }
 
@@ -277,8 +253,8 @@ func (t *UDPTransport) handleInput(data []byte, rAddr net.Addr) {
 
 func (t *UDPTransport) handleOpen(uuid gouuid.UUID, remotes []string, data []byte) *UDPStream {
 	// start := time.Now()
-	// Logf(INFO, "UDPTransport::handleOpen start uuid:%v remotes:%v", uuid, remotes)
 	// defer Logf(INFO, "UDPTransport::handleOpen cost uuid:%v remotes:%v cost:%v", uuid, remotes, time.Since(start))
+	Logf(INFO, "UDPTransport::handleOpen start uuid:%v remotes:%v", uuid, remotes)
 
 	var stream *UDPStream
 	t.streamm.SetIfAbsent(uuid, func() (interface{}, bool) {

@@ -91,3 +91,22 @@ func fnv32(key gouuid.UUID) uint32 {
 	}
 	return hash
 }
+
+// Iterator callback,called for every key,value found in
+// maps. RLock is held for all calls for a given shard
+// therefore callback sess consistent view of a shard,
+// but not across the shards
+type IterCb func(key gouuid.UUID, v interface{})
+
+// Callback based iterator, cheapest way to read
+// all elements in a map.
+func (m ConcurrentMap) IterCb(fn IterCb) {
+	for idx := range m {
+		shard := (m)[idx]
+		shard.RLock()
+		for key, value := range shard.items {
+			fn(key, value)
+		}
+		shard.RUnlock()
+	}
+}

@@ -15,7 +15,7 @@ var (
 	errInvalidOperation = errors.New("invalid operation")
 )
 
-type input_callback func(data []byte, addr net.Addr)
+type input_callback func(tunnel *UDPTunnel, data []byte, addr net.Addr)
 
 type MsgQueue struct {
 	msgs []ipv4.Message
@@ -222,7 +222,7 @@ func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {
 }
 
 func (t *UDPTunnel) input(data []byte, addr net.Addr) {
-	t.inputcb(data, addr)
+	t.inputcb(t, data, addr)
 }
 
 func (t *UDPTunnel) notifyFlush() {
