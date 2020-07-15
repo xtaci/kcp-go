@@ -5,8 +5,10 @@ import (
 	"crypto/md5"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +16,8 @@ import (
 	"testing"
 	"time"
 )
+
+var logs [5]*log.Logger
 
 type TunnelPoll struct {
 	tunnels []*UDPTunnel
@@ -124,15 +128,16 @@ var serverTunnels []*UDPTunnel
 
 func InitLog(l LogLevel) {
 	Logf = func(lvl LogLevel, f string, args ...interface{}) {
-		if lvl < l {
-			return
+		if lvl >= l {
+			logs[lvl-1].Printf(f+"\n", args...)
 		}
-		fmt.Printf(f+"\n", args...)
 	}
 }
 
 func Init(l LogLevel) {
 	InitLog(l)
+
+	DefaultDialTimeout = time.Second * 10
 
 	for i := 0; i < lPortCount; i++ {
 		lAddrs = append(lAddrs, "127.0.0.1:"+strconv.Itoa(lPortStart+i))
@@ -145,7 +150,6 @@ func Init(l LogLevel) {
 	}
 
 	Logf(INFO, "init")
-	DefaultDialTimeout = time.Second * 2
 
 	var err error
 	clientSel, err = NewTestSelector(lAddrs, rAddrs)
@@ -197,6 +201,28 @@ func Init(l LogLevel) {
 }
 
 func init() {
+	Debug := log.New(os.Stdout,
+		"DEBUG: ",
+		log.Ldate|log.Lmicroseconds)
+
+	Info := log.New(os.Stdout,
+		"INFO : ",
+		log.Ldate|log.Lmicroseconds)
+
+	Warning := log.New(os.Stdout,
+		"WARN : ",
+		log.Ldate|log.Lmicroseconds)
+
+	Error := log.New(os.Stdout,
+		"ERROR: ",
+		log.Ldate|log.Lmicroseconds)
+
+	Fatal := log.New(os.Stdout,
+		"FATAL: ",
+		log.Ldate|log.Lmicroseconds)
+
+	logs = [int(FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
+
 	Init(DEBUG)
 }
 
@@ -224,11 +250,15 @@ func checkError(t *testing.T, err error) {
 	}
 }
 
+func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) {
+	for _, tunnel := range tunnels {
+		tunnel.Simulate(loss, delayMin, delayMax)
+	}
+}
+
 func server(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
 	serverStream.SetNoDelay(nodelay, interval, resend, nc)
-	for _, serverTunnel := range serverTunnels {
-		serverTunnel.Simulate(loss, delayMin, delayMax)
-	}
+	tunnelSimulate(serverTunnels, loss, delayMin, delayMax)
 
 	buf := make([]byte, 65536)
 	for {
@@ -242,9 +272,7 @@ func server(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interva
 
 func client(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
 	clientStream.SetNoDelay(nodelay, interval, resend, nc)
-	for _, clientTunnel := range clientTunnels {
-		clientTunnel.Simulate(loss, delayMin, delayMax)
-	}
+	tunnelSimulate(clientTunnels, loss, delayMin, delayMax)
 
 	buf := make([]byte, 64)
 	var rtt time.Duration
@@ -304,13 +332,8 @@ func TestLossyConn(t *testing.T) {
 	Logf(INFO, "TestKCP.testLossyConn4")
 	testLossyConn4(t)
 
-	for _, clientTunnel := range clientTunnels {
-		clientTunnel.Simulate(0, 0, 0)
-	}
-
-	for _, serverTunnel := range serverTunnels {
-		serverTunnel.Simulate(0, 0, 0)
-	}
+	tunnelSimulate(clientTunnels, 0, 0, 0)
+	tunnelSimulate(serverTunnels, 0, 0, 0)
 }
 
 func TestTimeout(t *testing.T) {
@@ -345,10 +368,7 @@ func TestSendRecv(t *testing.T) {
 	}
 }
 
-func tinyRecvServer(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
-	serverStream.SetNoDelay(nodelay, interval, resend, nc)
-	serverTunnels[0].Simulate(loss, delayMin, delayMax)
-
+func tinyRecvServer(t *testing.T) {
 	buf := make([]byte, 2)
 	for {
 		n, err := serverStream.Read(buf)
@@ -360,7 +380,7 @@ func tinyRecvServer(t *testing.T, loss float64, delayMin, delayMax int, nodelay,
 }
 
 func TestTinyBufferReceiver(t *testing.T) {
-	go tinyRecvServer(t, 0.1, 10, 20, 1, 10, 2, 0)
+	go tinyRecvServer(t)
 
 	const N = 100
 	snd := byte(0)
@@ -423,21 +443,6 @@ func TestClose(t *testing.T) {
 	err = clientStream.Close()
 	if err != io.ErrClosedPipe {
 		t.Fatal("Close after Close misbehavior")
-	}
-}
-
-func parallelServer(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
-	serverTunnels[0].Simulate(loss, delayMin, delayMax)
-
-	for {
-		stream, err := serverTransport.Accept()
-		if err != nil {
-			Logf(ERROR, "parallelServer accept err:%v", err)
-			continue
-		}
-		stream.SetNoDelay(nodelay, interval, resend, nc)
-		checkError(t, err)
-		go handleServerStream(stream)
 	}
 }
 
@@ -801,8 +806,6 @@ func randString(n int) string {
 }
 
 func TestFileTransfer(t *testing.T) {
-	DefaultDialTimeout = time.Millisecond * 2000
-
 	lFile := randString(1024 * 512)
 	lReader := strings.NewReader(lFile)
 	rFile := randString(1024 * 1024)
