@@ -14,6 +14,7 @@ func (t *UDPTunnel) writeBatch(msgs []ipv4.Message) {
 	// x/net version
 	nbytes := 0
 	npkts := 0
+
 	for len(msgs) > 0 {
 		if n, err := t.xconn.WriteBatch(msgs, 0); err == nil {
 			for k := range msgs[:n] {

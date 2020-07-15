@@ -23,20 +23,27 @@ type client struct {
 	cost  float64
 }
 
-func echoTester(c *client, msglen, msgcount int) error {
+func echoTester(c *client, msglen, msgcount int) (err error) {
+	start := time.Now()
+	fmt.Printf("echoTester start c:%v msglen:%v msgcount:%v start:%v\n", c.LocalAddr(), msglen, msgcount, start)
+	defer func() {
+		fmt.Printf("echoTester end c:%v msglen:%v msgcount:%v count:%v cost:%v elasp:%v\n err:%v", c.LocalAddr(), msglen, msgcount, c.count, c.cost, time.Since(start), err)
+	}()
+
 	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {
 		// send packet
 		start := time.Now()
-		_, err := c.Write(buf)
+		_, err = c.Write(buf)
 		if err != nil {
 			return err
 		}
 
 		// receive packet
 		nrecv := 0
+		var n int
 		for {
-			n, err := c.Read(buf)
+			n, err = c.Read(buf)
 			if err != nil {
 				return err
 			}
@@ -77,15 +84,19 @@ func TestClientEcho(clientnum, msgcount, msglen int, remoteAddr string, finish *
 	var avgCostA float64
 	echocount := 0
 	for _, c := range clients {
-		avgCostA += (c.cost / float64(c.count))
-		echocount += c.count
+		if c.count != 0 {
+			avgCostA += (c.cost / float64(c.count))
+			echocount += c.count
+		}
 		c.Close()
 	}
 	avgCost := avgCostA / float64(len(clients))
 
 	fmt.Printf("TestClientEcho clientnum:%d msgcount:%v msglen:%v echocount:%v remoteAddr:%v avgCost:%v \n", clientnum, msgcount, msglen, echocount, remoteAddr, avgCost)
 
-	finish.Done()
+	if finish != nil {
+		finish.Done()
+	}
 }
 
 var clientnum = flag.Int("clientnum", 50, "input client number")
@@ -107,17 +118,19 @@ func main() {
 	fmt.Printf("proxyAddrD:%v\n", *proxyAddrD)
 	fmt.Printf("connectWay:%v\n", *connectWay)
 
-	var finish sync.WaitGroup
 	if *connectWay == 1 {
-		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
+		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, nil)
 	} else if *connectWay == 2 {
-		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
+		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, nil)
 	} else if *connectWay == 3 {
-		TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
+		TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, nil)
 	} else {
+		var finish sync.WaitGroup
 		finish.Add(3)
 		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, &finish)
+		time.Sleep(time.Second * 5)
 		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddrD, &finish)
+		time.Sleep(time.Second * 5)
 		TestClientEcho(*clientnum, *msgcount, *msglen, *targetAddr, &finish)
 		finish.Wait()
 	}

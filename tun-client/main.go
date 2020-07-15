@@ -294,9 +294,29 @@ func main() {
 			Usage: "stream ackNoDelay",
 		},
 		cli.IntFlag{
+			Name:  "bufferSize",
+			Value: 4 * 1024 * 1024,
+			Usage: "kcp bufferSize",
+		},
+		cli.IntFlag{
 			Name:  "interval",
 			Value: 20,
 			Usage: "kcp interval",
+		},
+		cli.IntFlag{
+			Name:  "inputQueueCount",
+			Value: 128,
+			Usage: "transport inputQueueCount",
+		},
+		cli.IntFlag{
+			Name:  "inputProcessorCount",
+			Value: 128,
+			Usage: "transport inputProcessorCount",
+		},
+		cli.IntFlag{
+			Name:  "noResend",
+			Value: 0,
+			Usage: "kcp noResend",
 		},
 	}
 	myApp.Action = func(c *cli.Context) error {
@@ -322,7 +342,11 @@ func main() {
 
 		logLevel := c.Int("logLevel")
 		wndSize := c.Int("wndSize")
+		bufferSize := c.Int("bufferSize")
 		interval := c.Int("interval")
+		inputQueueCount := c.Int("inputQueueCount")
+		inputProcessorCount := c.Int("inputProcessorCount")
+		noResend := c.Int("noResend")
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -340,7 +364,11 @@ func main() {
 		fmt.Printf("Action transmitTuns:%v\n", transmitTuns)
 		fmt.Printf("Action logLevel:%v\n", logLevel)
 		fmt.Printf("Action wndSize:%v\n", wndSize)
+		fmt.Printf("Action bufferSize:%v\n", bufferSize)
 		fmt.Printf("Action interval:%v\n", interval)
+		fmt.Printf("Action inputQueueCount:%v\n", inputQueueCount)
+		fmt.Printf("Action inputProcessorCount:%v\n", inputProcessorCount)
+		fmt.Printf("Action noResend:%v\n", noResend)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -348,8 +376,11 @@ func main() {
 			}
 		}
 
-		kcp.DefaultTunOption.ReadBuffer = 16 * 1024 * 1024
-		kcp.DefaultTunOption.WriteBuffer = 16 * 1024 * 1024
+		kcp.DefaultDialTimeout = time.Second * 60
+		kcp.DefaultTunOption.ReadBuffer = bufferSize
+		kcp.DefaultTunOption.WriteBuffer = bufferSize
+		kcp.DefaultInputQueue = inputQueueCount
+		kcp.DefaultInputProcessor = inputProcessorCount
 		kcp.FastKCPOption.Interval = interval
 
 		sel, err := NewTestSelector()
@@ -418,8 +449,6 @@ func main() {
 		localIdx := 0
 		remoteIdx := 0
 
-		kcp.DefaultDialTimeout = time.Second * 60
-
 		for {
 			conn, err := listener.AcceptTCP()
 			checkError(err)
@@ -437,11 +466,11 @@ func main() {
 				}
 				start := time.Now()
 				stream, err := transport.Open(tunLocals, tunRemotes)
-				fmt.Println("Open UDPStream cost:", time.Since(start))
 				if err != nil {
 					fmt.Println("Open UDPStream err", err)
 					panic("Open UDPStream failed")
 				}
+				fmt.Println("Open UDPStream cost", stream.GetUUID(), time.Since(start))
 				stream.SetWindowSize(wndSize, wndSize)
 				go handleClient(stream, conn)
 			}()

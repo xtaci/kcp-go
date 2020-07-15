@@ -148,6 +148,7 @@ func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
 		if !ok {
 			t.msgsm[target] = &MsgQueue{msgs: msgs}
 			t.mu.Unlock()
+			t.notifyFlush()
 			return
 		}
 		t.mu.Unlock()

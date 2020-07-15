@@ -457,10 +457,6 @@ func (s *UDPStream) CloseWrite() error {
 }
 
 func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
-	// start := time.Now()
-	// defer func() {
-	// 	Logf(INFO, "UDPStream::dial cost uuid:%v accepted:%v locals:%v timeout:%v cost:%v", s.uuid, s.accepted, locals, timeout, time.Since(start))
-	// }()
 	Logf(INFO, "UDPStream::dial uuid:%v accepted:%v locals:%v timeout:%v", s.uuid, s.accepted, locals, timeout)
 
 	if s.accepted {

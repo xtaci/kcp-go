@@ -22,7 +22,7 @@ func (t *UDPTunnel) readLoop() {
 	// x/net version
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+		msgs[k].Buffers = [][]byte{xmitBuf.Get().([]byte)[:mtuLimit]}
 	}
 
 	for {
@@ -31,6 +31,7 @@ func (t *UDPTunnel) readLoop() {
 				msg := &msgs[i]
 				if msg.N >= gouuid.Size+IKCP_OVERHEAD {
 					t.input(msg.Buffers[0][:msg.N], msg.Addr)
+					msg.Buffers[0] = xmitBuf.Get().([]byte)[:mtuLimit]
 				} else {
 					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 				}
