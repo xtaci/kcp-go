@@ -15,6 +15,7 @@ var (
 	DefaultDialTimeout     = time.Millisecond * 500
 	DefaultInputQueue      = 128
 	DefaultTunnelProcessor = 10
+	DefaultInputTime       = 3
 )
 
 type LogLevel int
@@ -139,9 +140,16 @@ func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel 
 	inputPoll := 0
 	tunnel, err = NewUDPTunnel(lAddr, func(tun *UDPTunnel, data []byte, addr net.Addr) {
 		msg := &inputMsg{data: data, addr: addr}
-		idx := inputPoll%DefaultTunnelProcessor + tunnelIdx
-		inputPoll++
-		t.inputQueues[idx] <- msg
+		for i := 0; i < DefaultInputTime-1; i++ {
+			idx := inputPoll%DefaultTunnelProcessor + tunnelIdx
+			inputPoll++
+			select {
+			case t.inputQueues[idx] <- msg:
+				return
+			default:
+			}
+		}
+		t.inputQueues[inputPoll%DefaultTunnelProcessor+tunnelIdx] <- msg
 	})
 
 	if err != nil {
@@ -218,8 +226,6 @@ func (t *UDPTransport) Accept() (*UDPStream, error) {
 }
 
 func (t *UDPTransport) processInput(queue int) {
-	Logf(INFO, "UDPTransport::processInput queue:%v", queue)
-
 	for {
 		msg := <-t.inputQueues[queue]
 		t.handleInput(msg.data, msg.addr)
