@@ -589,6 +589,7 @@ func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 		return
 	}
 	msgss := s.msgss
+	tunnels := s.tunnels[:len(msgss)]
 	s.msgss = make([][]ipv4.Message, 0)
 	s.mu.Unlock()
 
@@ -601,7 +602,7 @@ func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 	//if tunnel output failure, can change tunnel or else ?
 	for i, msgs := range msgss {
 		if len(msgs) > 0 {
-			s.tunnels[i].output(msgs)
+			tunnels[i].output(msgs)
 		}
 	}
 	return
