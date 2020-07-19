@@ -110,6 +110,11 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 		remoteAddrs[i] = remoteAddr
 	}
 
+	tunnelAddr := make([]string, len(tunnels))
+	for i, tunnel := range tunnels {
+		tunnelAddr[i] = tunnel.LocalAddr().String()
+	}
+
 	stream = new(UDPStream)
 	stream.chClose = make(chan struct{})
 	stream.chRst = make(chan struct{})
@@ -148,7 +153,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 
 	go stream.update()
 
-	Logf(INFO, "NewUDPStream uuid:%v accepted:%v remotes:%v", uuid, accepted, remotes)
+	Logf(INFO, "NewUDPStream uuid:%v accepted:%v tunnels:%v remotes:%v", uuid, accepted, tunnelAddr, remotes)
 	return stream, nil
 }
 
@@ -739,10 +744,16 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 		}
 		remoteAddrs[i] = remoteAddr
 	}
+
+	tunnelAddr := make([]string, len(tunnels))
+	for i, tunnel := range tunnels {
+		tunnelAddr[i] = tunnel.LocalAddr().String()
+	}
+
 	s.tunnels = tunnels
 	s.remotes = remoteAddrs
 
-	Logf(INFO, "UDPStream::recvSyn uuid:%v accepted:%v remotes:%v", s.uuid, s.accepted, remotes)
+	Logf(INFO, "UDPStream::recvSyn uuid:%v accepted:%v tunnels:%v remotes:%v", s.uuid, s.accepted, tunnelAddr, remotes)
 	return len(data), nil
 }
 

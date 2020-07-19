@@ -169,7 +169,8 @@ type KCP struct {
 	snd_buf   []segment
 	rcv_buf   []segment
 
-	acklist []ackItem
+	acklist     []ackItem
+	ackxmitlist []ackXmitItem
 
 	buffer   []byte
 	reserved int
@@ -179,6 +180,11 @@ type KCP struct {
 type ackItem struct {
 	sn uint32
 	ts uint32
+}
+
+type ackXmitItem struct {
+	sn   uint32
+	xmit uint32
 }
 
 // NewKCP create a new kcp state machine
@@ -479,6 +485,59 @@ func (kcp *KCP) parse_una(una uint32) {
 // ack append
 func (kcp *KCP) ack_push(sn, ts uint32) {
 	kcp.acklist = append(kcp.acklist, ackItem{sn, ts})
+
+	n := len(kcp.ackxmitlist) - 1
+	insert_idx := 0
+	repeat := false
+	for i := n; i >= 0; i-- {
+		ackxmit := &kcp.ackxmitlist[i]
+		if ackxmit.sn == sn {
+			repeat = true
+			break
+		}
+		if _itimediff(sn, ackxmit.sn) > 0 {
+			insert_idx = i + 1
+			break
+		}
+	}
+	if !repeat {
+		if insert_idx == n+1 {
+			kcp.ackxmitlist = append(kcp.ackxmitlist, ackXmitItem{sn: sn})
+		} else {
+			kcp.ackxmitlist = append(kcp.ackxmitlist, ackXmitItem{})
+			copy(kcp.ackxmitlist[insert_idx+1:], kcp.ackxmitlist[insert_idx:])
+			kcp.ackxmitlist[insert_idx] = ackXmitItem{sn: sn}
+		}
+	}
+
+	if len(kcp.ackxmitlist) > int(kcp.rcv_wnd) {
+		kcp.ackxmitlist = kcp.ackxmitlist[len(kcp.ackxmitlist)-int(kcp.rcv_wnd):]
+	}
+
+	count := 0
+	for k := range kcp.ackxmitlist {
+		ackxmit := &kcp.ackxmitlist[k]
+		if ackxmit.sn+uint32(kcp.rcv_wnd) < sn {
+			count++
+		} else {
+			break
+		}
+	}
+	if count > 0 {
+		kcp.ackxmitlist = kcp.ackxmitlist[count:]
+	}
+}
+
+func (kcp *KCP) incre_ackxmit(sn uint32) uint32 {
+	n := len(kcp.ackxmitlist) - 1
+	for i := n; i >= 0; i-- {
+		ackxmit := &kcp.ackxmitlist[i]
+		if ackxmit.sn == sn {
+			ackxmit.xmit += 1
+			return ackxmit.xmit
+		}
+	}
+	return 0
 }
 
 // returns true if data has repeated
@@ -729,6 +788,10 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		if _itimediff(ack.sn, kcp.rcv_nxt) >= 0 || len(kcp.acklist)-1 == i {
 			seg.sn, seg.ts = ack.sn, ack.ts
 			ptr = seg.encode(ptr)
+			xmit := kcp.incre_ackxmit(seg.sn)
+			if xmit > xmitMax {
+				xmitMax = xmit
+			}
 		}
 	}
 	kcp.acklist = kcp.acklist[0:0]

@@ -607,6 +607,7 @@ func parallelClient(t *testing.T, wg *sync.WaitGroup) (err error) {
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
+	DefaultDialTimeout = time.Second * 4
 	var wg sync.WaitGroup
 	N := 1000
 	wg.Add(N)
@@ -840,6 +841,50 @@ func TestFileTransfer(t *testing.T) {
 
 	<-finish
 	<-finish
+}
+
+func TestAckXmit(t *testing.T) {
+	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	for i := 0; i < IKCP_WND_RCV+2; i++ {
+		kcp.ack_push(uint32(i), 0)
+	}
+	if len(kcp.ackxmitlist) != IKCP_WND_RCV {
+		t.Fatal("ackxmitlist length failed")
+	}
+
+	var xmit uint32
+	xmit = kcp.incre_ackxmit(1)
+	if xmit != 0 {
+		t.Fatal("xmit not expect")
+	}
+	xmit = kcp.incre_ackxmit(2)
+	if xmit != 1 {
+		t.Fatal("xmit not expect")
+	}
+	xmit = kcp.incre_ackxmit(IKCP_WND_RCV + 1)
+	if xmit != 1 {
+		t.Fatal("xmit not expect")
+	}
+	xmit = kcp.incre_ackxmit(IKCP_WND_RCV + 2)
+	if xmit != 0 {
+		t.Fatal("xmit not expect")
+	}
+
+	kcp.ack_push(IKCP_WND_RCV+1, 0)
+	if len(kcp.ackxmitlist) != IKCP_WND_RCV {
+		t.Fatal("TestAckXmit ackxmitlist length failed")
+	}
+
+	xmit = kcp.incre_ackxmit(IKCP_WND_RCV + 1)
+	if xmit != 2 {
+		t.Fatal("xmit not expect")
+	}
+
+	kcp.ack_push(IKCP_WND_RCV+3, 0)
+	xmit = kcp.incre_ackxmit(2)
+	if xmit != 0 {
+		t.Fatal("xmit not expect")
+	}
 }
 
 func BenchmarkFlush(b *testing.B) {
