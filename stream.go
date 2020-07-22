@@ -470,6 +470,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return errDialParam
 	}
 
+	s.parallelExpire = time.Now().Add(timeout)
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
 	s.flush(true)
 
@@ -484,6 +485,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 	case <-s.chRecvFinEvent:
 		return io.EOF
 	case <-s.chDialEvent:
+		s.parallelExpire = time.Time{}
 		return nil
 	case <-dialTimer.C:
 		return errTimeout
@@ -521,6 +523,7 @@ func (s *UDPStream) accept() (err error) {
 	_, err = s.recvSyn(s.recvbuf[1:])
 	s.mu.Unlock()
 
+	s.parallelExpire = time.Now().Add(DefaultDialTimeout)
 	if err == nil {
 		s.flush(true)
 	}
