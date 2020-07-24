@@ -3,7 +3,6 @@ package main
 import (
 	"flag"
 	"fmt"
-	"math/rand"
 	"net"
 	"os"
 	"sync"
@@ -19,13 +18,14 @@ func checkError(err error) {
 
 type client struct {
 	*net.TCPConn
-	count int
-	cost  float64
+	count   int
+	cost    float64
+	maxCost time.Duration
 }
 
 func echoTester(c *client, msglen, msgcount int) (err error) {
 	start := time.Now()
-	fmt.Printf("echoTester start c:%v msglen:%v msgcount:%v start:%v\n", c.LocalAddr(), msglen, msgcount, start)
+	fmt.Printf("echoTester start c:%v msglen:%v msgcount:%v start:%v\n", c.LocalAddr(), msglen, msgcount, start.Format("2006-01-02 15:04:05.000"))
 	defer func() {
 		fmt.Printf("echoTester end c:%v msglen:%v msgcount:%v count:%v cost:%v elasp:%v err:%v \n", c.LocalAddr(), msglen, msgcount, c.count, c.cost, time.Since(start), err)
 	}()
@@ -55,44 +55,70 @@ func echoTester(c *client, msglen, msgcount int) (err error) {
 		costTmp := time.Since(start)
 		cost := float64(costTmp.Nanoseconds()) / (1000 * 1000)
 		c.cost += cost
+		if costTmp > c.maxCost {
+			c.maxCost = costTmp
+		}
 		c.count += 1
 	}
 	return nil
 }
 
 func TestClientEcho(clientnum, msgcount, msglen int, remoteAddr string, finish *sync.WaitGroup) {
+	baseSleep := time.Second * 2
+	extraSleep := time.Duration(clientnum*3/2) * time.Millisecond
+
+	batch := 100
+	batchCount := (clientnum + batch - 1) / batch
+	batchSleep := extraSleep / time.Duration(batchCount)
+
 	clients := make([]*client, clientnum)
+
+	fmt.Printf("TestClientEcho clientnum:%d batchCount:%v batchSleep:%v \n", clientnum, batchCount, batchSleep)
 
 	var wg sync.WaitGroup
 	wg.Add(clientnum)
 
-	for i := 0; i < clientnum; i++ {
-		conn, err := net.Dial("tcp", remoteAddr)
-		checkError(err)
-		c := &client{
-			TCPConn: conn.(*net.TCPConn),
+	for i := 0; i < batchCount; i++ {
+		batchNum := batch
+		if i == batchCount-1 {
+			batchNum = clientnum - i*batch
 		}
-		clients[i] = c
-		go func(j int) {
-			time.Sleep(time.Duration(rand.Intn(clientnum)+1000) * time.Millisecond)
-			echoTester(c, msglen, msgcount)
-			wg.Done()
-		}(i)
+
+		fmt.Printf("TestClientEcho clientnum:%d batchIdx:%v batchNum:%v \n", clientnum, i, batchNum)
+
+		for j := 0; j < batchNum; j++ {
+			go func(batchIdx, idx int) {
+				conn, err := net.Dial("tcp", remoteAddr)
+				checkError(err)
+				c := &client{
+					TCPConn: conn.(*net.TCPConn),
+				}
+				clients[batchIdx*batch+idx] = c
+				time.Sleep(baseSleep + extraSleep - time.Duration(batchIdx)*batchSleep)
+				echoTester(c, msglen, msgcount)
+				wg.Done()
+			}(i, j)
+		}
+		time.Sleep(batchSleep)
 	}
 	wg.Wait()
 
 	var avgCostA float64
+	var maxCost time.Duration
 	echocount := 0
 	for _, c := range clients {
 		if c.count != 0 {
 			avgCostA += (c.cost / float64(c.count))
 			echocount += c.count
+			if c.maxCost > maxCost {
+				maxCost = c.maxCost
+			}
 		}
 		c.Close()
 	}
 	avgCost := avgCostA / float64(len(clients))
 
-	fmt.Printf("TestClientEcho clientnum:%d msgcount:%v msglen:%v echocount:%v remoteAddr:%v avgCost:%v \n", clientnum, msgcount, msglen, echocount, remoteAddr, avgCost)
+	fmt.Printf("TestClientEcho clientnum:%d msgcount:%v msglen:%v echocount:%v remoteAddr:%v avgCost:%v maxCost:%v\n", clientnum, msgcount, msglen, echocount, remoteAddr, avgCost, maxCost)
 
 	if finish != nil {
 		finish.Done()
