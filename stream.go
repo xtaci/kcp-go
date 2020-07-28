@@ -328,20 +328,12 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 
 // Write implements net.Conn
 func (s *UDPStream) Write(b []byte) (n int, err error) {
-	n, err = s.WriteBuffer(PSH, b, false)
-	if err != nil {
-		Logf(WARN, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
-	}
-	return
+	return s.WriteBuffer(PSH, b, false)
 }
 
 // Write implements net.Conn
 func (s *UDPStream) WriteFlag(flag byte, b []byte) (n int, err error) {
-	n, err = s.WriteBuffer(flag, b, flag == HRT)
-	if err != nil {
-		Logf(WARN, "UDPStream::Write uuid:%v accepted:%v err:%v", s.uuid, s.accepted, err)
-	}
-	return
+	return s.WriteBuffer(flag, b, flag == HRT)
 }
 
 // WriteBuffers write a vector of byte slices to the underlying connection
@@ -562,7 +554,7 @@ func (s *UDPStream) update() {
 
 			return
 		case <-s.hrtTick.C:
-			Logf(INFO, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
+			Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
 			s.WriteFlag(HRT, nil)
 		case <-s.flushTimer.C:
 			s.mu.Lock()
@@ -770,7 +762,7 @@ func (s *UDPStream) recvFin(data []byte) (n int, err error) {
 }
 
 func (s *UDPStream) recvHrt(data []byte) (n int, err error) {
-	Logf(INFO, "UDPStream::recvHrt uuid:%v accepted:%v", s.uuid, s.accepted)
+	Logf(DEBUG, "UDPStream::recvHrt uuid:%v accepted:%v", s.uuid, s.accepted)
 	return len(data), nil
 }
 

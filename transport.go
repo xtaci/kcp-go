@@ -14,7 +14,7 @@ var (
 	DefaultAcceptBacklog   = 512
 	DefaultDialTimeout     = time.Millisecond * 500
 	DefaultInputQueue      = 128
-	DefaultTunnelProcessor = 10
+	DefaultTunnelProcessor = 5
 	DefaultInputTime       = 3
 )
 
