@@ -63,12 +63,11 @@ type (
 		// settings
 		flushTimer *time.Timer  // flush timer
 		hrtTick    *time.Ticker // heart beat ticker
-		chClean    <-chan time.Time
-		rd         time.Time // read deadline
-		wd         time.Time // write deadline
-		headerSize int       // the header size additional to a KCP frame
-		ackNoDelay bool      // send ack immediately for each incoming packet(testing purpose)
-		writeDelay bool      // delay kcp.flush() for Write() for bulk transfer
+		rd         time.Time    // read deadline
+		wd         time.Time    // write deadline
+		headerSize int          // the header size additional to a KCP frame
+		ackNoDelay bool         // send ack immediately for each incoming packet(testing purpose)
+		writeDelay bool         // delay kcp.flush() for Write() for bulk transfer
 
 		// notifications
 		recvSynOnce    sync.Once
@@ -80,6 +79,7 @@ type (
 		chRst          chan struct{} // notify current stream reset
 		closeOnce      sync.Once
 		chClose        chan struct{} // notify stream has Closed
+		chClean        chan struct{} // notify clean
 		chDialEvent    chan struct{} // notify Dial() has finished
 		chReadEvent    chan struct{} // notify Read() can be called without blocking
 		chWriteEvent   chan struct{} // notify Write() can be called without blocking
@@ -117,6 +117,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 
 	stream = new(UDPStream)
 	stream.chClose = make(chan struct{})
+	stream.chClean = make(chan struct{}, 1)
 	stream.chRst = make(chan struct{})
 	stream.chSendFinEvent = make(chan struct{})
 	stream.chRecvFinEvent = make(chan struct{})
@@ -432,7 +433,7 @@ func (s *UDPStream) Close() error {
 
 	s.WriteFlag(RST, nil)
 	close(s.chClose)
-	s.chClean = time.NewTimer(CleanTimeout).C
+	s.chClean <- struct{}{}
 
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
 	return nil
@@ -539,9 +540,11 @@ func (s *UDPStream) reset() {
 
 // sess update to trigger protocol
 func (s *UDPStream) update() {
+	var cleanTimer <-chan time.Time
+
 	for {
 		select {
-		case <-s.chClean:
+		case <-cleanTimer:
 			Logf(INFO, "UDPStream::clean uuid:%v accepted:%v", s.uuid, s.accepted)
 
 			s.mu.Lock()
@@ -553,19 +556,17 @@ func (s *UDPStream) update() {
 			s.cleancb(s.uuid)
 
 			return
+		case <-s.chClean:
+			timer := time.NewTimer(CleanTimeout)
+			defer timer.Stop() // prevent leaks
+			cleanTimer = timer.C
 		case <-s.hrtTick.C:
 			Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
 			s.WriteFlag(HRT, nil)
 		case <-s.flushTimer.C:
-			s.mu.Lock()
-			if s.kcp.state == 0xFFFFFFFF {
-				s.reset()
-				s.mu.Unlock()
-				return
+			if interval := s.flush(true); interval != 0 {
+				s.flushTimer.Reset(time.Duration(interval) * time.Millisecond)
 			}
-			s.mu.Unlock()
-			interval := s.flush(true)
-			s.flushTimer.Reset(time.Duration(interval) * time.Millisecond)
 		}
 	}
 }
@@ -574,8 +575,11 @@ func (s *UDPStream) update() {
 // return if interval means next flush interval
 func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 	s.mu.Lock()
-	if kcpFlush {
+	if kcpFlush && s.kcp.state != 0xFFFFFFFF {
 		interval = s.kcp.flush(false)
+		if s.kcp.state == 0xFFFFFFFF {
+			s.reset()
+		}
 	}
 
 	waitsnd := s.kcp.WaitSnd()
