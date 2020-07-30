@@ -13,6 +13,7 @@ type Snmp struct {
 	ActiveOpens      uint64 // accumulated active open connections
 	PassiveOpens     uint64 // accumulated passive open connections
 	CurrEstab        uint64 // current number of established connections
+	DialTimeout      uint64 // dial timeout count
 	InErrs           uint64 // UDP read errors reported from net.PacketConn
 	InCsumErrors     uint64 // checksum errors from CRC32
 	KCPInErrors      uint64 // packet iput errors reported from KCP
@@ -42,6 +43,7 @@ func (s *Snmp) Header() []string {
 		"ActiveOpens",
 		"PassiveOpens",
 		"CurrEstab",
+		"DialTimeout",
 		"InErrs",
 		"InCsumErrors",
 		"KCPInErrors",
@@ -69,6 +71,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.ActiveOpens),
 		fmt.Sprint(snmp.PassiveOpens),
 		fmt.Sprint(snmp.CurrEstab),
+		fmt.Sprint(snmp.DialTimeout),
 		fmt.Sprint(snmp.InErrs),
 		fmt.Sprint(snmp.InCsumErrors),
 		fmt.Sprint(snmp.KCPInErrors),
@@ -95,6 +98,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.ActiveOpens = atomic.LoadUint64(&s.ActiveOpens)
 	d.PassiveOpens = atomic.LoadUint64(&s.PassiveOpens)
 	d.CurrEstab = atomic.LoadUint64(&s.CurrEstab)
+	d.DialTimeout = atomic.LoadUint64(&s.DialTimeout)
 	d.InErrs = atomic.LoadUint64(&s.InErrs)
 	d.InCsumErrors = atomic.LoadUint64(&s.InCsumErrors)
 	d.KCPInErrors = atomic.LoadUint64(&s.KCPInErrors)
@@ -120,6 +124,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.ActiveOpens, 0)
 	atomic.StoreUint64(&s.PassiveOpens, 0)
 	atomic.StoreUint64(&s.CurrEstab, 0)
+	atomic.StoreUint64(&s.DialTimeout, 0)
 	atomic.StoreUint64(&s.InErrs, 0)
 	atomic.StoreUint64(&s.InCsumErrors, 0)
 	atomic.StoreUint64(&s.KCPInErrors, 0)

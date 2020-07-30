@@ -481,6 +481,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		s.parallelExpire = time.Time{}
 		return nil
 	case <-dialTimer.C:
+		atomic.AddUint64(&DefaultSnmp.DialTimeout, 1)
 		return errTimeout
 	}
 }
