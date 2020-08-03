@@ -129,7 +129,7 @@ var serverTunnels []*UDPTunnel
 func InitLog(l LogLevel) {
 	Logf = func(lvl LogLevel, f string, args ...interface{}) {
 		if lvl >= l {
-			logs[lvl-1].Printf(f+"\n", args...)
+			logs[lvl].Printf(f+"\n", args...)
 		}
 	}
 }
@@ -221,7 +221,7 @@ func init() {
 		"FATAL: ",
 		log.Ldate|log.Lmicroseconds)
 
-	logs = [int(FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
+	logs = [int(FATAL) + 1]*log.Logger{Debug, Info, Warning, Error, Fatal}
 
 	Init(DEBUG)
 }

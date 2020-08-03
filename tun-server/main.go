@@ -37,7 +37,7 @@ func init() {
 		"FATAL: ",
 		log.Ldate|log.Lmicroseconds)
 
-	logs = [int(kcp.FATAL)]*log.Logger{Debug, Info, Warning, Error, Fatal}
+	logs = [int(kcp.FATAL) + 1]*log.Logger{Debug, Info, Warning, Error, Fatal}
 }
 
 var bufPool = sync.Pool{
@@ -310,7 +310,7 @@ func main() {
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
-				logs[lvl-1].Printf(f+"\n", args...)
+				logs[lvl].Printf(f+"\n", args...)
 			}
 		}
 

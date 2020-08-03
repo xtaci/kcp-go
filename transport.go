@@ -21,11 +21,11 @@ var (
 type LogLevel int
 
 const (
-	DEBUG = LogLevel(1)
-	INFO  = LogLevel(2)
-	WARN  = LogLevel(3)
-	ERROR = LogLevel(4)
-	FATAL = LogLevel(5)
+	DEBUG LogLevel = iota
+	INFO
+	WARN
+	ERROR
+	FATAL
 )
 
 var Logf = func(lvl LogLevel, f string, args ...interface{}) {}
