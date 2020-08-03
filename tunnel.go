@@ -233,9 +233,9 @@ func (t *UDPTunnel) notifyFlush() {
 }
 
 func (t *UDPTunnel) notifyReadError(err error) {
-	Logf(WARN, "UDPTunnel::notifyReadError addr:%v err:%v", t.addr, err)
+	Logf(ERROR, "UDPTunnel::notifyReadError addr:%v err:%v", t.addr, err)
 }
 
 func (t *UDPTunnel) notifyWriteError(err error) {
-	Logf(WARN, "UDPTunnel::notifyWriteError addr:%v err:%v", t.addr, err)
+	Logf(ERROR, "UDPTunnel::notifyWriteError addr:%v err:%v", t.addr, err)
 }
