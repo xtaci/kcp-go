@@ -28,6 +28,7 @@ type Snmp struct {
 	EarlyRetransSegs uint64 // accmulated early retransmitted segments
 	LostSegs         uint64 // number of segs infered as lost
 	RepeatSegs       uint64 // number of segs duplicated
+	Parallels        uint64 // parallel count
 }
 
 func newSnmp() *Snmp {
@@ -58,6 +59,7 @@ func (s *Snmp) Header() []string {
 		"EarlyRetransSegs",
 		"LostSegs",
 		"RepeatSegs",
+		"Parallels",
 	}
 }
 
@@ -86,6 +88,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.EarlyRetransSegs),
 		fmt.Sprint(snmp.LostSegs),
 		fmt.Sprint(snmp.RepeatSegs),
+		fmt.Sprint(snmp.Parallels),
 	}
 }
 
@@ -113,6 +116,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.EarlyRetransSegs = atomic.LoadUint64(&s.EarlyRetransSegs)
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
+	d.Parallels = atomic.LoadUint64(&s.Parallels)
 	return d
 }
 
@@ -139,6 +143,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.EarlyRetransSegs, 0)
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
+	atomic.StoreUint64(&s.Parallels, 0)
 }
 
 // DefaultSnmp is the global KCP connection statistics collector
