@@ -260,6 +260,11 @@ func main() {
 			Value: 0,
 			Usage: "kcp noResend",
 		},
+		cli.IntFlag{
+			Name:  "parallelXmit",
+			Value: 5,
+			Usage: "parallel xmit",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		targetAddr := c.String("targetAddr")
@@ -291,6 +296,7 @@ func main() {
 		inputQueueCount := c.Int("inputQueueCount")
 		tunnelProcessorCount := c.Int("tunnelProcessorCount")
 		noResend := c.Int("noResend")
+		parallelXmit := c.Int("parallelXmit")
 
 		fmt.Printf("Action targetAddr:%v\n", targetAddr)
 		fmt.Printf("Action localIp:%v\n", localIp)
@@ -307,6 +313,7 @@ func main() {
 		fmt.Printf("Action inputQueueCount:%v\n", inputQueueCount)
 		fmt.Printf("Action tunnelProcessorCount:%v\n", tunnelProcessorCount)
 		fmt.Printf("Action noResend:%v\n", noResend)
+		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -319,6 +326,7 @@ func main() {
 		kcp.DefaultTunOption.WriteBuffer = bufferSize
 		kcp.DefaultInputQueue = inputQueueCount
 		kcp.DefaultTunnelProcessor = tunnelProcessorCount
+		kcp.DefaultParallelXmit = parallelXmit
 		kcp.FastKCPOption.Interval = interval
 
 		sel, err := NewTestSelector()

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -36,8 +37,13 @@ func handleEcho(conn *net.TCPConn) {
 	}
 }
 
+var listenAddr = flag.String("listenAddr", "0.0.0.0:9259", "listen address")
+
 func main() {
-	addr, err := net.ResolveTCPAddr("tcp", "0.0.0.0:7900")
+	flag.Parse()
+	fmt.Printf("listenAddr:%v\n", *listenAddr)
+
+	addr, err := net.ResolveTCPAddr("tcp", *listenAddr)
 	checkError(err)
 	listener, err := net.ListenTCP("tcp", addr)
 	checkError(err)

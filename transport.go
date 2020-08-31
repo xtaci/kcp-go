@@ -186,7 +186,11 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 
 //interface
 func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err error) {
-	Logf(INFO, "UDPTransport::Open locals:%v remotes:%v", locals, remotes)
+	return t.OpenTimeout(locals, remotes, DefaultDialTimeout)
+}
+
+func (t *UDPTransport) OpenTimeout(locals, remotes []string, timeout time.Duration) (stream *UDPStream, err error) {
+	Logf(INFO, "UDPTransport::Open locals:%v remotes:%v timeout:%v", locals, remotes, timeout)
 
 	uuid, err := gouuid.NewV1()
 	if err != nil {
@@ -200,7 +204,10 @@ func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err er
 		return nil, err
 	}
 	t.streamm.Set(uuid, stream)
-	err = stream.dial(locals, DefaultDialTimeout)
+	if timeout == 0 {
+		timeout = DefaultDialTimeout
+	}
+	err = stream.dial(locals, timeout)
 	if err != nil {
 		Logf(WARN, "UDPTransport::Open dial timeout. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
 		stream.Close()

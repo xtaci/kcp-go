@@ -318,6 +318,16 @@ func main() {
 			Value: 0,
 			Usage: "kcp noResend",
 		},
+		cli.IntFlag{
+			Name:  "timeout",
+			Value: 500,
+			Usage: "dial timeout",
+		},
+		cli.IntFlag{
+			Name:  "parallelXmit",
+			Value: 5,
+			Usage: "parallel xmit",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		listenAddr := c.String("listenAddr")
@@ -347,6 +357,8 @@ func main() {
 		inputQueueCount := c.Int("inputQueueCount")
 		tunnelProcessorCount := c.Int("tunnelProcessorCount")
 		noResend := c.Int("noResend")
+		timeout := c.Int("timeout")
+		parallelXmit := c.Int("parallelXmit")
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -369,6 +381,8 @@ func main() {
 		fmt.Printf("Action inputQueueCount:%v\n", inputQueueCount)
 		fmt.Printf("Action tunnelProcessorCount:%v\n", tunnelProcessorCount)
 		fmt.Printf("Action noResend:%v\n", noResend)
+		fmt.Printf("Action timeout:%v\n", timeout)
+		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -376,11 +390,12 @@ func main() {
 			}
 		}
 
-		kcp.DefaultDialTimeout = time.Second * 60
+		kcp.DefaultDialTimeout = time.Millisecond * time.Duration(timeout)
 		kcp.DefaultTunOption.ReadBuffer = bufferSize
 		kcp.DefaultTunOption.WriteBuffer = bufferSize
 		kcp.DefaultInputQueue = inputQueueCount
 		kcp.DefaultTunnelProcessor = tunnelProcessorCount
+		kcp.DefaultParallelXmit = parallelXmit
 		kcp.FastKCPOption.Interval = interval
 
 		sel, err := NewTestSelector()
