@@ -320,7 +320,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "timeout",
-			Value: 500,
+			Value: 0,
 			Usage: "dial timeout",
 		},
 		cli.IntFlag{
@@ -390,7 +390,7 @@ func main() {
 			}
 		}
 
-		kcp.DefaultDialTimeout = time.Millisecond * time.Duration(timeout)
+		kcp.DefaultDialTimeout = time.Minute
 		kcp.DefaultTunOption.ReadBuffer = bufferSize
 		kcp.DefaultTunOption.WriteBuffer = bufferSize
 		kcp.DefaultInputQueue = inputQueueCount
@@ -480,7 +480,7 @@ func main() {
 					remoteIdx++
 				}
 				start := time.Now()
-				stream, err := transport.Open(tunLocals, tunRemotes)
+				stream, err := transport.OpenTimeout(tunLocals, tunRemotes, time.Duration(timeout)*time.Millisecond)
 				if err != nil {
 					fmt.Println("Open UDPStream err", err)
 					panic("Open UDPStream failed")
