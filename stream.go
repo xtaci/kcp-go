@@ -615,7 +615,9 @@ func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	//todo time.Now optimize
-	if xmitMax >= s.parallelXmit {
+	if s.parallelXmit == 0 {
+		return len(s.tunnels)
+	} else if xmitMax >= s.parallelXmit {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		if s.parallelExpire.IsZero() {
 			atomic.AddUint64(&DefaultSnmp.Parallels, 1)
