@@ -321,20 +321,23 @@ func main() {
 			}
 		}
 
-		kcp.DefaultAcceptBacklog = 1024
-		kcp.DefaultTunOption.ReadBuffer = bufferSize
-		kcp.DefaultTunOption.WriteBuffer = bufferSize
-		kcp.DefaultInputQueue = inputQueueCount
-		kcp.DefaultTunnelProcessor = tunnelProcessorCount
-		kcp.DefaultParallelXmit = parallelXmit
-		kcp.FastKCPOption.Interval = interval
+		opt := &kcp.TransportOption{
+			AcceptBacklog:   1024,
+			DialTimeout:     time.Minute,
+			InputQueue:      inputQueueCount,
+			TunnelProcessor: tunnelProcessorCount,
+		}
 
 		sel, err := NewTestSelector()
 		checkError(err)
-		transport, err := kcp.NewUDPTransport(sel, kcp.FastKCPOption)
+		transport, err := kcp.NewUDPTransport(sel, opt)
 		checkError(err)
 		for portS := localPortS; portS <= localPortE; portS++ {
-			_, err := transport.NewTunnel(localIp+":"+strconv.Itoa(portS), kcp.DefaultTunOption)
+			tunnel, err := transport.NewTunnel(localIp + ":" + strconv.Itoa(portS))
+			checkError(err)
+			err = tunnel.SetReadBuffer(bufferSize)
+			checkError(err)
+			err = tunnel.SetWriteBuffer(bufferSize)
 			checkError(err)
 		}
 
@@ -356,6 +359,8 @@ func main() {
 			checkError(err)
 			go func() {
 				stream.SetWindowSize(wndSize, wndSize)
+				stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
+				stream.SetParallelXmit(uint32(parallelXmit))
 				conn, err := net.Dial("tcp", targetAddr)
 				checkError(err)
 				tcpConn := conn.(*net.TCPConn)

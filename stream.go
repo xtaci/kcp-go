@@ -37,7 +37,7 @@ const (
 )
 
 var (
-	DefaultParallelXmit = 5
+	DefaultParallelXmit = 3
 	DefaultParallelTime = time.Second * 60
 )
 
@@ -246,6 +246,18 @@ func (s *UDPStream) SetDeadLink(deadLink int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.kcp.dead_link = uint32(deadLink)
+}
+
+func (s *UDPStream) SetParallelXmit(parallelXmit uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.parallelXmit = parallelXmit
+}
+
+func (s *UDPStream) SetParallelTime(parallelTime time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.parallelTime = parallelTime
 }
 
 // GetConv gets conversation id of a session

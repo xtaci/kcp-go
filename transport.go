@@ -51,7 +51,34 @@ type TunnelSelector interface {
 	Pick(remotes []string) (tunnels []*UDPTunnel)
 }
 
-type KCPOption struct {
+type TransportOption struct {
+	AcceptBacklog   int
+	DialTimeout     time.Duration
+	InputQueue      int
+	TunnelProcessor int
+	InputTime       int
+}
+
+func (opt *TransportOption) SetDefault() *TransportOption {
+	if opt.AcceptBacklog == 0 {
+		opt.AcceptBacklog = DefaultAcceptBacklog
+	}
+	if opt.DialTimeout == 0 {
+		opt.DialTimeout = DefaultDialTimeout
+	}
+	if opt.InputQueue == 0 {
+		opt.InputQueue = DefaultInputQueue
+	}
+	if opt.TunnelProcessor == 0 {
+		opt.TunnelProcessor = DefaultTunnelProcessor
+	}
+	if opt.InputTime == 0 {
+		opt.InputTime = DefaultInputTime
+	}
+	return opt
+}
+
+type StreamOption struct {
 	Nodelay  int
 	Interval int
 	Resend   int
@@ -63,7 +90,7 @@ type TunnelOption struct {
 	WriteBuffer int
 }
 
-var FastKCPOption = &KCPOption{
+var FastStreamOption = &StreamOption{
 	Nodelay:  1,
 	Interval: 20,
 	Resend:   2,
@@ -86,7 +113,7 @@ type inputTest struct {
 }
 
 type UDPTransport struct {
-	kcpOption     *KCPOption
+	*TransportOption
 	streamm       ConcurrentMap
 	startAccept   int32
 	preAcceptChan chan chan *UDPStream
@@ -97,33 +124,24 @@ type UDPTransport struct {
 	inputQueues   []chan *inputMsg
 }
 
-func NewUDPTransport(sel TunnelSelector, option *KCPOption) (t *UDPTransport, err error) {
+func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport, err error) {
+	if opt == nil {
+		opt = &TransportOption{}
+	}
+	opt.SetDefault()
 	t = &UDPTransport{
-		kcpOption:     option,
-		streamm:       NewConcurrentMap(),
-		preAcceptChan: make(chan chan *UDPStream, DefaultAcceptBacklog),
-		tunnelHostM:   make(map[string]*UDPTunnel),
-		sel:           sel,
-		die:           make(chan struct{}),
-		inputQueues:   make([]chan *inputMsg, 0),
+		TransportOption: opt,
+		streamm:         NewConcurrentMap(),
+		preAcceptChan:   make(chan chan *UDPStream, opt.AcceptBacklog),
+		tunnelHostM:     make(map[string]*UDPTunnel),
+		sel:             sel,
+		die:             make(chan struct{}),
+		inputQueues:     make([]chan *inputMsg, 0),
 	}
 	return t, nil
 }
 
-func (t *UDPTransport) InitTunnel(tunnel *UDPTunnel, option *TunnelOption) error {
-	if option == nil {
-		return nil
-	}
-	if err := tunnel.SetReadBuffer(option.ReadBuffer); err != nil {
-		return err
-	}
-	if err := tunnel.SetWriteBuffer(option.WriteBuffer); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel *UDPTunnel, err error) {
+func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 	Logf(INFO, "UDPTransport::NewTunnel lAddr:%v", lAddr)
 
 	tunnel, ok := t.tunnelHostM[lAddr]
@@ -132,16 +150,16 @@ func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel 
 	}
 
 	tunnelIdx := len(t.inputQueues)
-	for i := 0; i < DefaultTunnelProcessor; i++ {
-		t.inputQueues = append(t.inputQueues, make(chan *inputMsg, DefaultInputQueue))
+	for i := 0; i < t.TunnelProcessor; i++ {
+		t.inputQueues = append(t.inputQueues, make(chan *inputMsg, t.InputQueue))
 		go t.processInput(tunnelIdx + i)
 	}
 
 	inputPoll := 0
 	tunnel, err = NewUDPTunnel(lAddr, func(tun *UDPTunnel, data []byte, addr net.Addr) {
 		msg := &inputMsg{data: data, addr: addr}
-		for i := 0; i < DefaultInputTime-1; i++ {
-			idx := inputPoll%DefaultTunnelProcessor + tunnelIdx
+		for i := 0; i < t.InputTime-1; i++ {
+			idx := inputPoll%t.TunnelProcessor + tunnelIdx
 			inputPoll++
 			select {
 			case t.inputQueues[idx] <- msg:
@@ -149,17 +167,11 @@ func (t *UDPTransport) NewTunnel(lAddr string, tunOption *TunnelOption) (tunnel 
 			default:
 			}
 		}
-		t.inputQueues[inputPoll%DefaultTunnelProcessor+tunnelIdx] <- msg
+		t.inputQueues[inputPoll%t.TunnelProcessor+tunnelIdx] <- msg
 	})
 
 	if err != nil {
 		Logf(ERROR, "UDPTransport::NewTunnel lAddr:%v err:%v", lAddr, err)
-		return nil, err
-	}
-	err = t.InitTunnel(tunnel, tunOption)
-	if err != nil {
-		Logf(ERROR, "UDPTransport::NewTunnel InitTunnel lAddr:%v err:%v", lAddr, err)
-		tunnel.Close()
 		return nil, err
 	}
 
@@ -178,15 +190,12 @@ func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []stri
 		Logf(ERROR, "UDPTransport::NewStream uuid:%v accepted:%v remotes:%v err:%v", uuid, accepted, remotes, err)
 		return nil, err
 	}
-	if t.kcpOption != nil {
-		stream.SetNoDelay(t.kcpOption.Nodelay, t.kcpOption.Interval, t.kcpOption.Resend, t.kcpOption.Nc)
-	}
 	return stream, err
 }
 
 //interface
 func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err error) {
-	return t.OpenTimeout(locals, remotes, DefaultDialTimeout)
+	return t.OpenTimeout(locals, remotes, t.DialTimeout)
 }
 
 func (t *UDPTransport) OpenTimeout(locals, remotes []string, timeout time.Duration) (stream *UDPStream, err error) {
@@ -205,7 +214,7 @@ func (t *UDPTransport) OpenTimeout(locals, remotes []string, timeout time.Durati
 	}
 	t.streamm.Set(uuid, stream)
 	if timeout == 0 {
-		timeout = DefaultDialTimeout
+		timeout = t.DialTimeout
 	}
 	err = stream.dial(locals, timeout)
 	if err != nil {

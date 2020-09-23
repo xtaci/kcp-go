@@ -137,8 +137,6 @@ func InitLog(l LogLevel) {
 func Init(l LogLevel) {
 	InitLog(l)
 
-	DefaultDialTimeout = time.Second * 2
-
 	for i := 0; i < lPortCount; i++ {
 		lAddrs = append(lAddrs, "127.0.0.1:"+strconv.Itoa(lPortStart+i))
 	}
@@ -156,12 +154,12 @@ func Init(l LogLevel) {
 	if err != nil {
 		panic("NewTestSelector")
 	}
-	clientTransport, err = NewUDPTransport(clientSel, nil)
+	clientTransport, err = NewUDPTransport(clientSel, &TransportOption{DialTimeout: time.Second * 2})
 	if err != nil {
 		panic("NewUDPTransport")
 	}
 	for _, lAddr := range lAddrs {
-		tunnel, err := clientTransport.NewTunnel(lAddr, nil)
+		tunnel, err := clientTransport.NewTunnel(lAddr)
 		if err != nil {
 			panic("NewTunnel" + err.Error())
 		}
@@ -172,12 +170,12 @@ func Init(l LogLevel) {
 	if err != nil {
 		panic("NewTestSelector")
 	}
-	serverTransport, err = NewUDPTransport(serverSel, nil)
+	serverTransport, err = NewUDPTransport(serverSel, &TransportOption{DialTimeout: time.Second * 2})
 	if err != nil {
 		panic("NewUDPTransport")
 	}
 	for _, rAddr := range rAddrs {
-		tunnel, err := serverTransport.NewTunnel(rAddr, nil)
+		tunnel, err := serverTransport.NewTunnel(rAddr)
 		if err != nil {
 			panic("NewTunnel")
 		}
@@ -317,6 +315,30 @@ func testLossyConn4(t *testing.T) {
 	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
 	Logf(INFO, "testing link with nodelay parameters:1 10 2 0")
 	testlink(t, 0.1, 10, 20, 1, 10, 2, 0)
+}
+
+func TestTransportOption(t *testing.T) {
+	opt := &TransportOption{
+		DialTimeout: time.Second,
+		InputQueue:  100,
+	}
+	opt.SetDefault()
+
+	if opt.AcceptBacklog != DefaultAcceptBacklog {
+		t.Fatal("AcceptBacklog")
+	}
+	if opt.DialTimeout != time.Second {
+		t.Fatal("DialTimeout")
+	}
+	if opt.InputQueue != 100 {
+		t.Fatal("InputQueue")
+	}
+	if opt.TunnelProcessor != DefaultTunnelProcessor {
+		t.Fatal("TunnelProcessor")
+	}
+	if opt.InputTime != DefaultInputTime {
+		t.Fatal("InputTime")
+	}
 }
 
 func TestLossyConn(t *testing.T) {
@@ -607,7 +629,6 @@ func parallelClient(t *testing.T, wg *sync.WaitGroup) (err error) {
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
-	DefaultDialTimeout = time.Second * 4
 	var wg sync.WaitGroup
 	N := 1000
 	wg.Add(N)
@@ -624,7 +645,6 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 }
 
 func TestAcceptBackuplog(t *testing.T) {
-	DefaultDialTimeout = time.Second * 10
 	serverTransport.preAcceptChan = make(chan chan *UDPStream, 30)
 	var wg sync.WaitGroup
 	N := 1000
@@ -640,7 +660,8 @@ func TestAcceptBackuplog(t *testing.T) {
 
 	for i := 0; i < N; i++ {
 		go func() {
-			_, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+			locals, remotes := clientSel.PickAddrs(ipsCount)
+			_, err := clientTransport.OpenTimeout(locals, remotes, time.Second*10)
 			if err != nil {
 				t.Fatal("Open failed", err)
 			}
