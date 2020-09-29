@@ -1011,6 +1011,11 @@ func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	return serveConn(block, dataShards, parityShards, dataShards, parityShards, conn, false)
 }
 
+// ServeConn2 serves KCP protocol for a single packet connection.
+func ServeConn2(block BlockCrypt, dataShards, parityShards int, remoteDataShards, remoteParityShards int, conn net.PacketConn) (*Listener, error) {
+	return serveConn(block, dataShards, parityShards, remoteDataShards, remoteParityShards, conn, false)
+}
+
 func serveConn(block BlockCrypt, dataShards, parityShards int, remoteDataShards, remoteParityShards int, conn net.PacketConn, ownConn bool) (*Listener, error) {
 	l := new(Listener)
 	l.conn = conn
@@ -1068,6 +1073,11 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	var convid uint32
 	binary.Read(rand.Reader, binary.LittleEndian, &convid)
 	return newUDPSession(convid, dataShards, parityShards, dataShards, parityShards, nil, conn, true, udpaddr, block), nil
+}
+
+// NewConn4 establishes a session and talks KCP protocol over a packet connection.
+func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, remoteDataShards, remoteParityShards int, conn net.PacketConn) (*UDPSession, error) {
+	return newUDPSession(convid, dataShards, parityShards, remoteDataShards, remoteParityShards, nil, conn, false, raddr, block), nil
 }
 
 // NewConn3 establishes a session and talks KCP protocol over a packet connection.
