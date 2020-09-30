@@ -775,8 +775,7 @@ type (
 		conn         net.PacketConn // the underlying packet connection
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions        map[string]*UDPSession // all sessions accepted by this Listener
-		sessionLock     sync.Mutex
+		sessions        *ConcurrentMap   // all sessions accepted by this Listener
 		chAccepts       chan *UDPSession // Listen() backlog
 		chSessionClosed chan net.Addr    // session close queue
 		headerSize      int              // the additional header to a KCP frame
@@ -811,10 +810,8 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	}
 
 	if dataValid {
-		l.sessionLock.Lock()
-		s, ok := l.sessions[addr.String()]
-		l.sessionLock.Unlock()
-
+		tmp, ok := l.sessions.Get(addr.String())
+		s, _ := tmp.(*UDPSession)
 		var conv, sn uint32
 		convValid := false
 		if l.fecDecoder != nil {
@@ -843,9 +840,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
 				s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
 				s.kcpInput(data)
-				l.sessionLock.Lock()
-				l.sessions[addr.String()] = s
-				l.sessionLock.Unlock()
+				l.sessions.Put(addr.String(), s)
 				l.chAccepts <- s
 			}
 		}
@@ -858,11 +853,10 @@ func (l *Listener) notifyReadError(err error) {
 		close(l.chSocketReadError)
 
 		// propagate read error to all sessions
-		l.sessionLock.Lock()
-		for _, s := range l.sessions {
-			s.notifyReadError(err)
-		}
-		l.sessionLock.Unlock()
+		l.sessions.Iterate(func(key string, val interface{}) bool {
+			val.(*UDPSession).notifyReadError(err)
+			return true
+		})
 	})
 }
 
@@ -969,12 +963,12 @@ func (l *Listener) Close() error {
 
 // closeSession notify the listener that a session has closed
 func (l *Listener) closeSession(remote net.Addr) (ret bool) {
-	l.sessionLock.Lock()
-	defer l.sessionLock.Unlock()
-	if _, ok := l.sessions[remote.String()]; ok {
-		delete(l.sessions, remote.String())
+	l.sessions.Filter(func(key string, val interface{}) bool {
+		if key == remote.String() {
+			return false
+		}
 		return true
-	}
+	})
 	return false
 }
 
@@ -1013,7 +1007,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l := new(Listener)
 	l.conn = conn
 	l.ownConn = ownConn
-	l.sessions = make(map[string]*UDPSession)
+	l.sessions = NewConcurrentMap()
 	l.chAccepts = make(chan *UDPSession, acceptBacklog)
 	l.chSessionClosed = make(chan net.Addr)
 	l.die = make(chan struct{})
