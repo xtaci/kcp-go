@@ -1,6 +1,8 @@
 module github.com/xtaci/kcp-go/v5
 
 require (
+	github.com/OneOfOne/xxhash v1.2.2
+	github.com/cespare/xxhash v1.1.0 // indirect
 	github.com/klauspost/cpuid v1.3.1 // indirect
 	github.com/klauspost/reedsolomon v1.9.9
 	github.com/mmcloughlin/avo v0.0.0-20200803215136-443f81d77104 // indirect
