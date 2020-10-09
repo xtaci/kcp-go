@@ -817,13 +817,11 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 
 		var conv, sn uint32
 		convValid := false
-		if l.fecDecoder != nil {
-			isfec := binary.LittleEndian.Uint16(data[4:])
-			if isfec == typeData {
-				conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
-				sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
-				convValid = true
-			}
+		fecFlag := binary.LittleEndian.Uint16(data[4:])
+		if fecFlag == typeData { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
+			conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+			sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
+			convValid = true
 		} else {
 			conv = binary.LittleEndian.Uint32(data)
 			sn = binary.LittleEndian.Uint32(data[IKCP_SN_OFFSET:])
