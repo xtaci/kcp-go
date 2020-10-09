@@ -99,18 +99,21 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 		// edges found, we can tune parameters now
 		if autoDS > 0 && autoPS > 0 && autoDS < 256 && autoPS < 256 {
-			dec.dataShards = autoDS
-			dec.parityShards = autoPS
-			dec.shardSize = autoDS + autoPS
-			dec.rxlimit = rxFECMulti * dec.shardSize
-			codec, err := reedsolomon.New(autoDS, autoPS)
-			if err != nil {
-				return nil
+			// and make sure it's different
+			if autoDS != dec.dataShards || autoPS != dec.parityShards {
+				dec.dataShards = autoDS
+				dec.parityShards = autoPS
+				dec.shardSize = autoDS + autoPS
+				dec.rxlimit = rxFECMulti * dec.shardSize
+				codec, err := reedsolomon.New(autoDS, autoPS)
+				if err != nil {
+					return nil
+				}
+				dec.codec = codec
+				dec.decodeCache = make([][]byte, dec.shardSize)
+				dec.flagCache = make([]bool, dec.shardSize)
+				//log.Println("autotune to :", dec.dataShards, dec.parityShards)
 			}
-			dec.codec = codec
-			dec.decodeCache = make([][]byte, dec.shardSize)
-			dec.flagCache = make([]bool, dec.shardSize)
-			//log.Println("autotune to :", dec.dataShards, dec.parityShards)
 		}
 	}
 
