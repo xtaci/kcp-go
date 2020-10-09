@@ -10,7 +10,7 @@ func BenchmarkFECDecode(b *testing.B) {
 	const dataSize = 10
 	const paritySize = 3
 	const payLoad = 1500
-	decoder := newFECDecoder(1024, dataSize, paritySize)
+	decoder := newFECDecoder(dataSize, paritySize)
 	b.ReportAllocs()
 	b.SetBytes(payLoad)
 	for i := 0; i < b.N; i++ {

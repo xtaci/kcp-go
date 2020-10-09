@@ -104,7 +104,7 @@ func testlink(t *testing.T, client *lossyconn.LossyConn, server *lossyconn.Lossy
 			start := time.Now()
 			s.Write(buf)
 			io.ReadFull(s, buf)
-			rtt += time.Now().Sub(start)
+			rtt += time.Since(start)
 		}
 
 		t.Log("client:", client)
