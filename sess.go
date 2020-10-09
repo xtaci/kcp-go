@@ -213,7 +213,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 				return size, nil
 			}
 
-			// if necessary resize the stream buffer to guarantee a sufficent buffer space
+			// if necessary resize the stream buffer to guarantee a sufficient buffer space
 			if cap(s.recvbuf) < size {
 				s.recvbuf = make([]byte, size)
 			}
@@ -985,7 +985,7 @@ func Listen(laddr string) (net.Listener, error) { return ListenWithOptions(laddr
 //
 // 'block' is the block encryption algorithm to encrypt packets.
 //
-// 'dataShards', 'parityShards' specifiy how many parity packets will be generated following the data packets.
+// 'dataShards', 'parityShards' specify how many parity packets will be generated following the data packets.
 //
 // Check https://github.com/klauspost/reedsolomon for details
 func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards int) (*Listener, error) {
@@ -1029,7 +1029,7 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 //
 // 'block' is the block encryption algorithm to encrypt packets.
 //
-// 'dataShards', 'parityShards' specifiy how many parity packets will be generated following the data packets.
+// 'dataShards', 'parityShards' specify how many parity packets will be generated following the data packets.
 //
 // Check https://github.com/klauspost/reedsolomon for details
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
