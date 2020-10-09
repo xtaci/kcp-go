@@ -35,9 +35,6 @@ const (
 	// maximum packet size
 	mtuLimit = 1500
 
-	// FEC keeps rxFECMulti* (dataShard+parityShard) ordered packets in memory
-	rxFECMulti = 3
-
 	// accept backlog
 	acceptBacklog = 128
 )
@@ -155,7 +152,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	// FEC codec initialization
-	sess.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
+	sess.fecDecoder = newFECDecoder(dataShards, parityShards)
 	if sess.block != nil {
 		sess.fecEncoder = newFECEncoder(dataShards, parityShards, cryptHeaderSize)
 	} else {
@@ -689,6 +686,10 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 				// lock
 				s.mu.Lock()
+				// if fecDecoder is not initialized, create one with default parameter
+				if s.fecDecoder == nil {
+					s.fecDecoder = newFECDecoder(1, 1)
+				}
 				recovers := s.fecDecoder.decode(f)
 				if f.flag() == typeData {
 					if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
@@ -1021,7 +1022,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.dataShards = dataShards
 	l.parityShards = parityShards
 	l.block = block
-	l.fecDecoder = newFECDecoder(rxFECMulti*(dataShards+parityShards), dataShards, parityShards)
+	l.fecDecoder = newFECDecoder(dataShards, parityShards)
 	l.chSocketReadError = make(chan struct{})
 
 	// calculate header size
