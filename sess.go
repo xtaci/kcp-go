@@ -653,7 +653,7 @@ func (s *UDPSession) notifyWriteError(err error) {
 // packet input stage
 func (s *UDPSession) packetInput(data []byte) {
 	dataValid := false
-	if s.block != nil {
+	if s.block != nil && len(data) >= cryptHeaderSize {
 		s.block.Decrypt(data, data)
 		data = data[nonceSize:]
 		checksum := crc32.ChecksumIEEE(data[crcSize:])
@@ -667,7 +667,7 @@ func (s *UDPSession) packetInput(data []byte) {
 		dataValid = true
 	}
 
-	if dataValid {
+	if dataValid && len(data) >= IKCP_OVERHEAD {
 		s.kcpInput(data)
 	}
 }
@@ -677,7 +677,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 
 	fecFlag := binary.LittleEndian.Uint16(data[4:])
 	if fecFlag == typeData || fecFlag == typeParity { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
-		if len(data) > fecHeaderSize {
+		if len(data) >= fecHeaderSizePlus2 {
 			f := fecPacket(data)
 			if f.flag() == typeParity {
 				fecParityShards++
@@ -794,7 +794,7 @@ type (
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	dataValid := false
-	if l.block != nil {
+	if l.block != nil && len(data) >= cryptHeaderSize {
 		l.block.Decrypt(data, data)
 		data = data[nonceSize:]
 		checksum := crc32.ChecksumIEEE(data[crcSize:])
@@ -808,7 +808,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		dataValid = true
 	}
 
-	if dataValid {
+	if dataValid && len(data) >= IKCP_OVERHEAD {
 		l.sessionLock.Lock()
 		s, ok := l.sessions[addr.String()]
 		l.sessionLock.Unlock()
