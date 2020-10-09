@@ -237,7 +237,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 				return 0, errors.WithStack(errTimeout)
 			}
 
-			delay := s.rd.Sub(time.Now())
+			delay := time.Until(s.rd)
 			timeout = time.NewTimer(delay)
 			c = timeout.C
 		}
@@ -308,7 +308,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 				s.mu.Unlock()
 				return 0, errors.WithStack(errTimeout)
 			}
-			delay := s.wd.Sub(time.Now())
+			delay := time.Until(s.wd)
 			timeout = time.NewTimer(delay)
 			c = timeout.C
 		}
@@ -340,7 +340,6 @@ func (s *UDPSession) uncork() {
 		}
 		s.txqueue = s.txqueue[:0]
 	}
-	return
 }
 
 // Close closes the connection.
@@ -652,22 +651,22 @@ func (s *UDPSession) notifyWriteError(err error) {
 
 // packet input stage
 func (s *UDPSession) packetInput(data []byte) {
-	dataValid := false
+	decrypted := false
 	if s.block != nil && len(data) >= cryptHeaderSize {
 		s.block.Decrypt(data, data)
 		data = data[nonceSize:]
 		checksum := crc32.ChecksumIEEE(data[crcSize:])
 		if checksum == binary.LittleEndian.Uint32(data) {
 			data = data[crcSize:]
-			dataValid = true
+			decrypted = true
 		} else {
 			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 		}
 	} else if s.block == nil {
-		dataValid = true
+		decrypted = true
 	}
 
-	if dataValid && len(data) >= IKCP_OVERHEAD {
+	if decrypted && len(data) >= IKCP_OVERHEAD {
 		s.kcpInput(data)
 	}
 }
@@ -769,7 +768,6 @@ type (
 		block        BlockCrypt     // block encryption
 		dataShards   int            // FEC data shard
 		parityShards int            // FEC parity shard
-		fecDecoder   *fecDecoder    // FEC mock initialization
 		conn         net.PacketConn // the underlying packet connection
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
@@ -792,43 +790,43 @@ type (
 
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
-	dataValid := false
+	decrypted := false
 	if l.block != nil && len(data) >= cryptHeaderSize {
 		l.block.Decrypt(data, data)
 		data = data[nonceSize:]
 		checksum := crc32.ChecksumIEEE(data[crcSize:])
 		if checksum == binary.LittleEndian.Uint32(data) {
 			data = data[crcSize:]
-			dataValid = true
+			decrypted = true
 		} else {
 			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 		}
 	} else if l.block == nil {
-		dataValid = true
+		decrypted = true
 	}
 
-	if dataValid && len(data) >= IKCP_OVERHEAD {
+	if decrypted && len(data) >= IKCP_OVERHEAD {
 		l.sessionLock.Lock()
 		s, ok := l.sessions[addr.String()]
 		l.sessionLock.Unlock()
 
 		var conv, sn uint32
-		convValid := false
+		convRecovered := false
 		fecFlag := binary.LittleEndian.Uint16(data[4:])
 		if fecFlag == typeData || fecFlag == typeParity { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
 			if fecFlag == typeData && len(data) >= fecHeaderSizePlus2+IKCP_OVERHEAD {
 				conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
 				sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
-				convValid = true
+				convRecovered = true
 			}
 		} else {
 			conv = binary.LittleEndian.Uint32(data)
 			sn = binary.LittleEndian.Uint32(data[IKCP_SN_OFFSET:])
-			convValid = true
+			convRecovered = true
 		}
 
 		if ok { // existing connection
-			if !convValid || conv == s.kcp.conv { // parity or valid data shard
+			if !convRecovered || conv == s.kcp.conv { // parity data or valid conversation
 				s.kcpInput(data)
 			} else if sn == 0 { // should replace current connection
 				s.Close()
@@ -836,7 +834,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 			}
 		}
 
-		if s == nil && convValid { // new session
+		if s == nil && convRecovered { // new session
 			if len(l.chAccepts) < cap(l.chAccepts) { // do not let the new sessions overwhelm accept queue
 				s := newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
 				s.kcpInput(data)
@@ -914,7 +912,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	var timeout <-chan time.Time
 	if tdeadline, ok := l.rd.Load().(time.Time); ok && !tdeadline.IsZero() {
-		timeout = time.After(tdeadline.Sub(time.Now()))
+		timeout = time.After(time.Until(tdeadline))
 	}
 
 	select {
