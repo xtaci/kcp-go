@@ -679,58 +679,54 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if fecFlag == typeData || fecFlag == typeParity { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
 		if len(data) > fecHeaderSize {
 			f := fecPacket(data)
-			if f.flag() == typeData || f.flag() == typeParity { // header check
-				if f.flag() == typeParity {
-					fecParityShards++
-				}
+			if f.flag() == typeParity {
+				fecParityShards++
+			}
 
-				// lock
-				s.mu.Lock()
-				// if fecDecoder is not initialized, create one with default parameter
-				if s.fecDecoder == nil {
-					s.fecDecoder = newFECDecoder(1, 1)
+			// lock
+			s.mu.Lock()
+			// if fecDecoder is not initialized, create one with default parameter
+			if s.fecDecoder == nil {
+				s.fecDecoder = newFECDecoder(1, 1)
+			}
+			recovers := s.fecDecoder.decode(f)
+			if f.flag() == typeData {
+				if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
+					kcpInErrors++
 				}
-				recovers := s.fecDecoder.decode(f)
-				if f.flag() == typeData {
-					if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
-						kcpInErrors++
-					}
-				}
+			}
 
-				for _, r := range recovers {
-					if len(r) >= 2 { // must be larger than 2bytes
-						sz := binary.LittleEndian.Uint16(r)
-						if int(sz) <= len(r) && sz >= 2 {
-							if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
-								fecRecovered++
-							} else {
-								kcpInErrors++
-							}
+			for _, r := range recovers {
+				if len(r) >= 2 { // must be larger than 2bytes
+					sz := binary.LittleEndian.Uint16(r)
+					if int(sz) <= len(r) && sz >= 2 {
+						if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret == 0 {
+							fecRecovered++
 						} else {
-							fecErrs++
+							kcpInErrors++
 						}
 					} else {
 						fecErrs++
 					}
-					// recycle the recovers
-					xmitBuf.Put(r)
+				} else {
+					fecErrs++
 				}
-
-				// to notify the readers to receive the data
-				if n := s.kcp.PeekSize(); n > 0 {
-					s.notifyReadEvent()
-				}
-				// to notify the writers
-				waitsnd := s.kcp.WaitSnd()
-				if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
-					s.notifyWriteEvent()
-				}
-
-				s.uncork()
-				s.mu.Unlock()
-			} else {
-				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+				// recycle the recovers
+				xmitBuf.Put(r)
 			}
+
+			// to notify the readers to receive the data
+			if n := s.kcp.PeekSize(); n > 0 {
+				s.notifyReadEvent()
+			}
+			// to notify the writers
+			waitsnd := s.kcp.WaitSnd()
+			if waitsnd < int(s.kcp.snd_wnd) && waitsnd < int(s.kcp.rmt_wnd) {
+				s.notifyWriteEvent()
+			}
+
+			s.uncork()
+			s.mu.Unlock()
 		} else {
 			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 		}
@@ -821,7 +817,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		convValid := false
 		fecFlag := binary.LittleEndian.Uint16(data[4:])
 		if fecFlag == typeData || fecFlag == typeParity { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
-			if fecFlag == typeData && len(data) > fecHeaderSize {
+			if fecFlag == typeData && len(data) >= fecHeaderSizePlus2+IKCP_OVERHEAD {
 				conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
 				sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
 				convValid = true
