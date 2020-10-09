@@ -777,7 +777,6 @@ type (
 		sessionLock     sync.Mutex
 		chAccepts       chan *UDPSession // Listen() backlog
 		chSessionClosed chan net.Addr    // session close queue
-		headerSize      int              // the additional header to a KCP frame
 
 		die     chan struct{} // notify the listener has closed
 		dieOnce sync.Once
@@ -1018,17 +1017,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.dataShards = dataShards
 	l.parityShards = parityShards
 	l.block = block
-	l.fecDecoder = newFECDecoder(dataShards, parityShards)
 	l.chSocketReadError = make(chan struct{})
-
-	// calculate header size
-	if l.block != nil {
-		l.headerSize += cryptHeaderSize
-	}
-	if l.fecDecoder != nil {
-		l.headerSize += fecHeaderSizePlus2
-	}
-
 	go l.monitor()
 	return l, nil
 }
