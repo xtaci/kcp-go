@@ -678,8 +678,9 @@ func (s *UDPSession) packetInput(data []byte) {
 func (s *UDPSession) kcpInput(data []byte) {
 	var kcpInErrors, fecErrs, fecRecovered, fecParityShards uint64
 
-	if s.fecDecoder != nil {
-		if len(data) > fecHeaderSize { // must be larger than fec header size
+	fecFlag := binary.LittleEndian.Uint16(data[4:])
+	if fecFlag == typeData || fecFlag == typeParity { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
+		if len(data) > fecHeaderSize {
 			f := fecPacket(data)
 			if f.flag() == typeData || f.flag() == typeParity { // header check
 				if f.flag() == typeParity {
@@ -818,10 +819,12 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		var conv, sn uint32
 		convValid := false
 		fecFlag := binary.LittleEndian.Uint16(data[4:])
-		if fecFlag == typeData { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
-			conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
-			sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
-			convValid = true
+		if fecFlag == typeData || fecFlag == typeParity { // 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
+			if fecFlag == typeData && len(data) > fecHeaderSize {
+				conv = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2:])
+				sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
+				convValid = true
+			}
 		} else {
 			conv = binary.LittleEndian.Uint32(data)
 			sn = binary.LittleEndian.Uint32(data[IKCP_SN_OFFSET:])

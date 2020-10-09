@@ -45,6 +45,9 @@ type fecDecoder struct {
 
 	// RS decoder
 	codec reedsolomon.Encoder
+
+	// auto tune fec parameter
+	autoTune autoTune
 }
 
 func newFECDecoder(rxlimit, dataShards, parityShards int) *fecDecoder {
@@ -73,6 +76,44 @@ func newFECDecoder(rxlimit, dataShards, parityShards int) *fecDecoder {
 
 // decode a fec packet
 func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
+	// autotune
+	if in.flag() == typeData {
+		dec.autoTune.Sample(true, in.seqid())
+	} else {
+		dec.autoTune.Sample(false, in.seqid())
+	}
+
+	// check if FEC parameters has mismatched
+	var shouldTune bool
+	if int(in.seqid())%dec.shardSize < dec.dataShards { // should be data
+		if in.flag() != typeData {
+			shouldTune = true
+		}
+	} else {
+		if in.flag() != typeParity {
+			shouldTune = true
+		}
+	}
+
+	if shouldTune {
+		autoDS := dec.autoTune.FindPeriod(true)
+		autoPS := dec.autoTune.FindPeriod(false)
+
+		// edges found, we can tune parameters now
+		if autoDS > 0 && autoPS > 0 {
+			dec.dataShards = autoDS
+			dec.parityShards = autoPS
+			dec.shardSize = autoDS + autoPS
+			codec, err := reedsolomon.New(autoDS, autoPS)
+			if err != nil {
+				return nil
+			}
+			dec.codec = codec
+			dec.decodeCache = make([][]byte, dec.shardSize)
+			dec.flagCache = make([]bool, dec.shardSize)
+		}
+	}
+
 	// insertion
 	n := len(dec.rx) - 1
 	insertIdx := 0
