@@ -668,7 +668,9 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		s.parallelExpire = time.Now().Add(s.parallelTime)
 		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-		s.hp.incParallel()
+		if s.hp != nil {
+			s.hp.incParallel()
+		}
 		return len(s.tunnels)
 	} else if s.parallelExpire.IsZero() {
 		return 1
