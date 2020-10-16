@@ -24,7 +24,7 @@ func incParallel(hp *hostParallel, count int) {
 }
 
 func TestHostParallel(t *testing.T) {
-	extraCachePeriods = 2
+	ExtraCachePeriods = 2
 
 	pc := newParallelCtrl(2, 0.2, time.Second)
 	hp := pc.getHostParallel("host1")

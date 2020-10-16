@@ -7,8 +7,8 @@ import (
 )
 
 var (
-	updateIntervalMs        = 250
-	extraCachePeriods int64 = 10
+	UpdateIntervalMs        = 250
+	ExtraCachePeriods int64 = 10
 )
 
 type parallelCtrl struct {
@@ -61,7 +61,7 @@ func newHostParallel(host string, p *parallelCtrl) *hostParallel {
 	h := &hostParallel{
 		host:        host,
 		p:           p,
-		ringCounter: make([]int64, p.periods+extraCachePeriods),
+		ringCounter: make([]int64, p.periods+ExtraCachePeriods),
 		lastDecT:    time.Now().Add(-time.Duration(p.periods) * time.Second).Unix(),
 	}
 	go h.update()
@@ -92,7 +92,7 @@ func (h *hostParallel) isParallel() bool {
 }
 
 func (h *hostParallel) incParallel() {
-	idx := int(time.Now().Unix() % int64(h.p.periods+extraCachePeriods))
+	idx := int(time.Now().Unix() % int64(h.p.periods+ExtraCachePeriods))
 	atomic.AddInt64(&h.ringCounter[idx], 1)
 	count := atomic.AddInt64(&h.count, 1)
 
@@ -113,14 +113,14 @@ func (h *hostParallel) dec() {
 func (h *hostParallel) update() {
 	for {
 		nowDecT := time.Now().Add(-time.Duration(h.p.periods) * time.Second).Unix()
-		if nowDecT-h.lastDecT > extraCachePeriods {
+		if nowDecT-h.lastDecT > ExtraCachePeriods {
 			Logf(ERROR, "hostParallel::update dec count delay. host:%v nowDecT:%v lastDecT:%v", h.host, nowDecT, h.lastDecT)
 			h.reset()
 			continue
 		}
 
 		for t := h.lastDecT + 1; t <= nowDecT; t++ {
-			idx := t % int64(h.p.periods+extraCachePeriods)
+			idx := t % int64(h.p.periods+ExtraCachePeriods)
 			count := atomic.LoadInt64(&h.ringCounter[idx])
 			atomic.AddInt64(&h.ringCounter[idx], -count)
 			atomic.AddInt64(&h.count, -count)
@@ -132,6 +132,6 @@ func (h *hostParallel) update() {
 			h.unsetParallel()
 		}
 
-		time.Sleep(time.Duration(updateIntervalMs) * time.Millisecond)
+		time.Sleep(time.Duration(UpdateIntervalMs) * time.Millisecond)
 	}
 }

@@ -52,11 +52,14 @@ type TunnelSelector interface {
 }
 
 type TransportOption struct {
-	AcceptBacklog   int
-	DialTimeout     time.Duration
-	InputQueue      int
-	TunnelProcessor int
-	InputTime       int
+	AcceptBacklog        int
+	DialTimeout          time.Duration
+	InputQueue           int
+	TunnelProcessor      int
+	InputTime            int
+	ParallelCheckPeriods int
+	ParallelStreamRate   float64
+	ParallelDuration     time.Duration
 }
 
 func (opt *TransportOption) SetDefault() *TransportOption {
@@ -122,6 +125,7 @@ type UDPTransport struct {
 	die           chan struct{} // notify the listener has closed
 	dieOnce       sync.Once
 	inputQueues   []chan *inputMsg
+	pc            *parallelCtrl
 }
 
 func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport, err error) {
@@ -137,6 +141,9 @@ func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport,
 		sel:             sel,
 		die:             make(chan struct{}),
 		inputQueues:     make([]chan *inputMsg, 0),
+	}
+	if opt.ParallelCheckPeriods != 0 && opt.ParallelStreamRate != 0 && opt.ParallelDuration != 0 {
+		t.pc = newParallelCtrl(int64(opt.ParallelCheckPeriods), opt.ParallelStreamRate, opt.ParallelDuration)
 	}
 	return t, nil
 }
@@ -183,7 +190,7 @@ func (t *UDPTransport) NewTunnel(lAddr string) (tunnel *UDPTunnel, err error) {
 func (t *UDPTransport) NewStream(uuid gouuid.UUID, accepted bool, remotes []string) (stream *UDPStream, err error) {
 	Logf(INFO, "UDPTransport::NewStream uuid:%v accepted:%v remotes:%v", uuid, accepted, remotes)
 
-	stream, err = NewUDPStream(uuid, accepted, remotes, t.sel, func(uuid gouuid.UUID) {
+	stream, err = NewUDPStream(uuid, accepted, remotes, t.pc, t.sel, func(uuid gouuid.UUID) {
 		t.handleClose(uuid)
 	})
 	if err != nil {

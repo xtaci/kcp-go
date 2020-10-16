@@ -50,7 +50,8 @@ type (
 		sel      TunnelSelector
 		kcp      *KCP // KCP ARQ protocol
 		tunnels  []*UDPTunnel
-		remotes  []net.Addr
+		locals   []*net.UDPAddr
+		remotes  []*net.UDPAddr
 		accepted bool
 		cleancb  clean_callback
 
@@ -91,17 +92,20 @@ type (
 		parallelXmit   uint32
 		parallelTime   time.Duration
 		parallelExpire time.Time
+
+		pc *parallelCtrl
+		hp *hostParallel
 	}
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *parallelCtrl, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
 	tunnels := sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return nil, errTunnelPick
 	}
 
-	remoteAddrs := make([]net.Addr, len(remotes))
+	remoteAddrs := make([]*net.UDPAddr, len(remotes))
 	for i, remote := range remotes {
 		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
 		if err != nil {
@@ -110,9 +114,9 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 		remoteAddrs[i] = remoteAddr
 	}
 
-	tunnelAddr := make([]string, len(tunnels))
+	locals := make([]*net.UDPAddr, len(tunnels))
 	for i, tunnel := range tunnels {
-		tunnelAddr[i] = tunnel.LocalAddr().String()
+		locals[i] = tunnel.LocalAddr()
 	}
 
 	stream = new(UDPStream)
@@ -133,11 +137,13 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
 	stream.tunnels = tunnels
+	stream.locals = locals
 	stream.remotes = remoteAddrs
 	stream.hrtTick = time.NewTicker(HeartbeatInterval)
 	stream.flushTimer = time.NewTimer(time.Duration(IKCP_RTO_NDL) * time.Millisecond)
 	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
+	stream.pc = pc
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -154,7 +160,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 
 	go stream.update()
 
-	Logf(INFO, "NewUDPStream uuid:%v accepted:%v tunnels:%v remotes:%v", uuid, accepted, tunnelAddr, remotes)
+	Logf(INFO, "NewUDPStream uuid:%v accepted:%v locals:%v remotes:%v", uuid, accepted, locals, remotes)
 	return stream, nil
 }
 
@@ -162,7 +168,17 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 func (s *UDPStream) LocalAddr() net.Addr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.tunnels[0].LocalAddr()
+	return s.locals[0]
+}
+
+func (s *UDPStream) LocalAddrs() []net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	addrs := make([]net.Addr, len(s.locals))
+	for i := 0; i < len(s.locals); i++ {
+		addrs[i] = s.locals[i]
+	}
+	return addrs
 }
 
 // RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
@@ -170,6 +186,16 @@ func (s *UDPStream) RemoteAddr() net.Addr {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.remotes[0]
+}
+
+func (s *UDPStream) RemoteAddrs() []net.Addr {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	addrs := make([]net.Addr, len(s.remotes))
+	for i := 0; i < len(s.locals); i++ {
+		addrs[i] = s.remotes[i]
+	}
+	return addrs
 }
 
 // SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
@@ -475,7 +501,13 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return errDialParam
 	}
 
+	s.mu.Lock()
 	s.parallelExpire = time.Now().Add(timeout)
+	if s.pc != nil {
+		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
+	}
+	s.mu.Unlock()
+
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
 	s.flush(true)
 
@@ -490,7 +522,6 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 	case <-s.chRecvFinEvent:
 		return io.EOF
 	case <-s.chDialEvent:
-		s.parallelExpire = time.Time{}
 		return nil
 	case <-dialTimer.C:
 		atomic.AddUint64(&DefaultSnmp.DialTimeout, 1)
@@ -527,9 +558,12 @@ func (s *UDPStream) accept() (err error) {
 		return errRemoteStream
 	}
 	_, err = s.recvSyn(s.recvbuf[1:])
+	if err == nil && s.pc != nil {
+		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
+	}
+	s.parallelExpire = time.Now().Add(DefaultDialTimeout)
 	s.mu.Unlock()
 
-	s.parallelExpire = time.Now().Add(DefaultDialTimeout)
 	if err == nil {
 		s.flush(true)
 	}
@@ -626,15 +660,15 @@ func (s *UDPStream) flush(kcpFlush bool) (interval uint32) {
 }
 
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
-	//todo time.Now optimize
 	if s.parallelXmit == 0 {
 		return len(s.tunnels)
-	} else if xmitMax >= s.parallelXmit {
+	} else if s.hp != nil && s.hp.isParallel() {
+		return len(s.tunnels)
+	} else if xmitMax >= s.parallelXmit && s.parallelExpire.IsZero() {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
-		if s.parallelExpire.IsZero() {
-			atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-		}
 		s.parallelExpire = time.Now().Add(s.parallelTime)
+		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
+		s.hp.incParallel()
 		return len(s.tunnels)
 	} else if s.parallelExpire.IsZero() {
 		return 1
@@ -753,7 +787,7 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return len(data), errSynInfo
 	}
-	remoteAddrs := make([]net.Addr, len(remotes))
+	remoteAddrs := make([]*net.UDPAddr, len(remotes))
 	for i, remote := range remotes {
 		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
 		if err != nil {
@@ -762,15 +796,16 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 		remoteAddrs[i] = remoteAddr
 	}
 
-	tunnelAddr := make([]string, len(tunnels))
+	locals := make([]*net.UDPAddr, len(tunnels))
 	for i, tunnel := range tunnels {
-		tunnelAddr[i] = tunnel.LocalAddr().String()
+		locals[i] = tunnel.LocalAddr()
 	}
 
 	s.tunnels = tunnels
+	s.locals = locals
 	s.remotes = remoteAddrs
 
-	Logf(INFO, "UDPStream::recvSyn uuid:%v accepted:%v tunnels:%v remotes:%v", s.uuid, s.accepted, tunnelAddr, remotes)
+	Logf(INFO, "UDPStream::recvSyn uuid:%v accepted:%v locals:%v remotes:%v", s.uuid, s.accepted, locals, remotes)
 	return len(data), nil
 }
 
