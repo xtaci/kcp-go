@@ -7,107 +7,46 @@ import (
 	"io"
 	"log"
 	"math/rand"
-	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
 
 var logs [5]*log.Logger
 
-type TunnelPoll struct {
-	tunnels []*UDPTunnel
-	idx     uint32
-}
-
-func (poll *TunnelPoll) Add(tunnel *UDPTunnel) {
-	poll.tunnels = append(poll.tunnels, tunnel)
-}
-
-func (poll *TunnelPoll) Pick() (tunnel *UDPTunnel) {
-	idx := atomic.AddUint32(&poll.idx, 1) % uint32(len(poll.tunnels))
-	return poll.tunnels[idx]
-}
-
 type TestSelector struct {
-	tunnelIPM   map[string]*TunnelPoll
-	localAddrs  []net.Addr
-	localIdx    uint32
-	remoteAddrs []net.Addr
-	remoteIdx   uint32
+	locals  []string
+	remotes []string
+	tunnels []*UDPTunnel
 }
 
 func NewTestSelector(locals, remotes []string) (*TestSelector, error) {
-	localAddrs := make([]net.Addr, len(locals))
-	for i := 0; i < len(locals); i++ {
-		addr, err := net.ResolveUDPAddr("udp", locals[i])
-		if err != nil {
-			return nil, err
-		}
-		localAddrs[i] = addr
-	}
-
-	remoteAddrs := make([]net.Addr, len(remotes))
-	for i := 0; i < len(remotes); i++ {
-		addr, err := net.ResolveUDPAddr("udp", remotes[i])
-		if err != nil {
-			return nil, err
-		}
-		remoteAddrs[i] = addr
-	}
 	return &TestSelector{
-		tunnelIPM:   make(map[string]*TunnelPoll),
-		localAddrs:  localAddrs,
-		remoteAddrs: remoteAddrs,
+		tunnels: make([]*UDPTunnel, 0),
+		locals:  locals,
+		remotes: remotes,
 	}, nil
 }
 
 func (sel *TestSelector) Add(tunnel *UDPTunnel) {
-	localIp := tunnel.LocalAddr().IP.String()
-	poll, ok := sel.tunnelIPM[localIp]
-	if !ok {
-		poll = &TunnelPoll{
-			tunnels: make([]*UDPTunnel, 0),
-		}
-		sel.tunnelIPM[localIp] = poll
-	}
-	poll.Add(tunnel)
+	sel.tunnels = append(sel.tunnels, tunnel)
 }
 
 func (sel *TestSelector) PickAddrs(count int) (locals, remotes []string) {
-	for i := 0; i < count; i++ {
-		idx := atomic.AddUint32(&sel.localIdx, 1) % uint32(len(sel.localAddrs))
-		locals = append(locals, sel.localAddrs[idx].String())
-	}
-	for i := 0; i < count; i++ {
-		idx := atomic.AddUint32(&sel.remoteIdx, 1) % uint32(len(sel.remoteAddrs))
-		remotes = append(remotes, sel.remoteAddrs[idx].String())
-	}
-	return locals, remotes
+	return sel.locals[:count], sel.remotes[:count]
 }
 
 func (sel *TestSelector) Pick(remotes []string) (tunnels []*UDPTunnel) {
-	tunnels = make([]*UDPTunnel, 0)
-	for _, remote := range remotes {
-		remoteAddr, err := net.ResolveUDPAddr("udp", remote)
-		if err == nil {
-			tunnelPoll, ok := sel.tunnelIPM[remoteAddr.IP.String()]
-			if ok {
-				tunnels = append(tunnels, tunnelPoll.Pick())
-			}
-		}
-	}
-	return tunnels
+	return sel.tunnels[:len(remotes)]
 }
 
 var lPortStart = 7001
-var lPortCount = 3
+var lPortCount = 2
 var rPortStart = 17001
-var rPortCount = 3
+var rPortCount = 2
 
 var lAddrs = []string{}
 var rAddrs = []string{}
@@ -149,12 +88,19 @@ func Init(l LogLevel) {
 
 	Logf(INFO, "init")
 
+	topt := &TransportOption{
+		DialTimeout:          time.Second * 2,
+		ParallelCheckPeriods: 2,
+		ParallelStreamRate:   0.1,
+		ParallelDuration:     time.Second * 60,
+	}
+
 	var err error
 	clientSel, err = NewTestSelector(lAddrs, rAddrs)
 	if err != nil {
 		panic("NewTestSelector")
 	}
-	clientTransport, err = NewUDPTransport(clientSel, &TransportOption{DialTimeout: time.Second * 2})
+	clientTransport, err = NewUDPTransport(clientSel, topt)
 	if err != nil {
 		panic("NewUDPTransport")
 	}
@@ -170,7 +116,7 @@ func Init(l LogLevel) {
 	if err != nil {
 		panic("NewTestSelector")
 	}
-	serverTransport, err = NewUDPTransport(serverSel, &TransportOption{DialTimeout: time.Second * 2})
+	serverTransport, err = NewUDPTransport(serverSel, topt)
 	if err != nil {
 		panic("NewUDPTransport")
 	}
@@ -248,6 +194,30 @@ func checkError(t *testing.T, err error) {
 	}
 }
 
+func TestTransportOption(t *testing.T) {
+	opt := &TransportOption{
+		DialTimeout: time.Second,
+		InputQueue:  100,
+	}
+	opt.SetDefault()
+
+	if opt.AcceptBacklog != DefaultAcceptBacklog {
+		t.Fatal("AcceptBacklog")
+	}
+	if opt.DialTimeout != time.Second {
+		t.Fatal("DialTimeout")
+	}
+	if opt.InputQueue != 100 {
+		t.Fatal("InputQueue")
+	}
+	if opt.TunnelProcessor != DefaultTunnelProcessor {
+		t.Fatal("TunnelProcessor")
+	}
+	if opt.InputTime != DefaultInputTime {
+		t.Fatal("InputTime")
+	}
+}
+
 func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) {
 	for _, tunnel := range tunnels {
 		tunnel.Simulate(loss, delayMin, delayMax)
@@ -317,30 +287,6 @@ func testLossyConn4(t *testing.T) {
 	testlink(t, 0.1, 10, 20, 1, 10, 2, 0)
 }
 
-func TestTransportOption(t *testing.T) {
-	opt := &TransportOption{
-		DialTimeout: time.Second,
-		InputQueue:  100,
-	}
-	opt.SetDefault()
-
-	if opt.AcceptBacklog != DefaultAcceptBacklog {
-		t.Fatal("AcceptBacklog")
-	}
-	if opt.DialTimeout != time.Second {
-		t.Fatal("DialTimeout")
-	}
-	if opt.InputQueue != 100 {
-		t.Fatal("InputQueue")
-	}
-	if opt.TunnelProcessor != DefaultTunnelProcessor {
-		t.Fatal("TunnelProcessor")
-	}
-	if opt.InputTime != DefaultInputTime {
-		t.Fatal("InputTime")
-	}
-}
-
 func TestLossyConn(t *testing.T) {
 	Logf(INFO, "TestKCP.testLossyConn1")
 	testLossyConn1(t)
@@ -372,7 +318,7 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestSendRecv(t *testing.T) {
-	go server(t, 0.1, 10, 20, 1, 10, 2, 0)
+	go server(t, 0, 0, 0, 1, 10, 2, 0)
 	clientStream.SetWriteDelay(true)
 
 	const N = 100
@@ -468,19 +414,6 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func handleServerStream(stream *UDPStream) {
-	defer stream.Close()
-
-	buf := make([]byte, 2)
-	for {
-		n, err := stream.Read(buf)
-		if err != nil {
-			return
-		}
-		stream.Write(buf[:n])
-	}
-}
-
 func handleEchoClient(stream *UDPStream) {
 	defer stream.Close()
 
@@ -527,7 +460,7 @@ func echoServer() {
 	if err != nil {
 		Logf(ERROR, "echoServer accept err:%v", err)
 	}
-	go handleEchoClient(stream)
+	handleEchoClient(stream)
 }
 
 func sinkServer() {
@@ -535,7 +468,7 @@ func sinkServer() {
 	if err != nil {
 		Logf(ERROR, "sinkServer accept err:%v", err)
 	}
-	go handleSinkClient(stream)
+	handleSinkClient(stream)
 }
 
 func echoTester(stream *UDPStream, msglen, msgcount int) error {
@@ -576,7 +509,8 @@ func sinkTester(stream *UDPStream, msglen, msgcount int) error {
 }
 
 func echoClient(nbytes, N int) error {
-	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	locals, remotes := clientSel.PickAddrs(ipsCount)
+	stream, err := clientTransport.OpenTimeout(locals, remotes, time.Second*10)
 	if err != nil {
 		return err
 	}
@@ -619,27 +553,64 @@ func sinkClient(nbytes, N int) error {
 	return nil
 }
 
-func parallelClient(t *testing.T, wg *sync.WaitGroup) (err error) {
-	defer wg.Done()
-	err = echoClient(64, 64)
-	if err != nil {
-		t.Fatal("parallelClient", err)
+func TestSNMP(t *testing.T) {
+	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
+	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
+	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
+	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
+
+	currEstab := DefaultSnmp.CurrEstab
+	Logf(INFO, "start establish:%v", DefaultSnmp.CurrEstab)
+
+	locals := []string{"127.0.0.1:10001"}
+	remotes := []string{"127.0.0.1:10002"}
+	_, err := clientTransport.Open(locals, remotes)
+	if err == nil {
+		t.Fatalf("test snmp failed")
 	}
-	return
+
+	Logf(INFO, "open invalid establish:%v", DefaultSnmp.CurrEstab)
+	if currEstab != DefaultSnmp.CurrEstab {
+		t.Fatalf("test snmp failed")
+	}
+
+	go echoServer()
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("test snmp failed")
+	}
+
+	Logf(INFO, "connect establish:%v", DefaultSnmp.CurrEstab)
+	if currEstab+2 != DefaultSnmp.CurrEstab {
+		t.Fatalf("test snmp failed")
+	}
+
+	stream.Close()
+	time.Sleep(time.Millisecond * 500)
+
+	Logf(INFO, "after close establish:%v", DefaultSnmp.CurrEstab)
+	if currEstab != DefaultSnmp.CurrEstab {
+		t.Fatalf("test snmp failed")
+	}
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
-	N := 1000
+	N := 200
 	wg.Add(N)
-	go func() {
-		for i := 0; i < N; i++ {
-			echoServer()
-		}
-	}()
+	for i := 0; i < N; i++ {
+		go echoServer()
+	}
 
 	for i := 0; i < N; i++ {
-		go parallelClient(t, &wg)
+		go func() {
+			defer wg.Done()
+			err := echoClient(64, 64)
+			if err != nil {
+				t.Fatal("echoClient", err)
+			}
+		}()
 	}
 	wg.Wait()
 }
@@ -647,36 +618,64 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 func TestAcceptBackuplog(t *testing.T) {
 	serverTransport.preAcceptChan = make(chan chan *UDPStream, 30)
 	var wg sync.WaitGroup
-	N := 1000
+	N := 500
 	wg.Add(N)
-	go func() {
-		for i := 0; i < N; i++ {
-			_, err := serverTransport.Accept()
-			if err != nil {
-				t.Fatal("Accept failed", err)
-			}
-		}
-	}()
+	for i := 0; i < N; i++ {
+		go echoServer()
+	}
 
 	for i := 0; i < N; i++ {
 		go func() {
 			locals, remotes := clientSel.PickAddrs(ipsCount)
-			_, err := clientTransport.OpenTimeout(locals, remotes, time.Second*10)
+			stream, err := clientTransport.OpenTimeout(locals, remotes, time.Second*10)
 			if err != nil {
 				t.Fatal("Open failed", err)
 			}
+			defer stream.Close()
 			wg.Done()
 		}()
 	}
 	wg.Wait()
 }
 
-func TestSNMP(t *testing.T) {
-	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
-	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
-	DefaultSnmp.Reset()
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
+func TestGlobalParallel(t *testing.T) {
+	clientTunnels[0].Simulate(100, 0, 0)
+	serverTunnels[0].Simulate(100, 0, 0)
+
+	var wg sync.WaitGroup
+	N := 200
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go echoServer()
+	}
+
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			err := echoClient(64, 64)
+			if err != nil {
+				t.Fatal("echoClient", err)
+			}
+		}()
+	}
+
+	parallel := false
+	go func() {
+		hp := clientTransport.pc.getHostParallel("127.0.0.1")
+		for {
+			time.Sleep(time.Second)
+			parallel = hp.isParallel()
+			if parallel {
+				Logf(INFO, "enter global parallel")
+				break
+			}
+		}
+	}()
+	wg.Wait()
+
+	if !parallel {
+		t.Fatalf("does not enter global parallel")
+	}
 }
 
 func echoSpeed(b *testing.B, bytes int) {

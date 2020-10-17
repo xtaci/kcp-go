@@ -23,6 +23,12 @@ var (
 )
 
 const (
+	StateNone = iota // 0
+	StateEstablish
+	StateClosed
+)
+
+const (
 	PSH = '1'
 	SYN = '2'
 	FIN = '3'
@@ -47,6 +53,7 @@ type (
 	// UDPStream defines a KCP session
 	UDPStream struct {
 		uuid     gouuid.UUID
+		state    int
 		sel      TunnelSelector
 		kcp      *KCP // KCP ARQ protocol
 		tunnels  []*UDPTunnel
@@ -151,12 +158,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
-
-	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
-	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
-	if currestab > maxconn {
-		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
-	}
 
 	go stream.update()
 
@@ -473,7 +474,16 @@ func (s *UDPStream) Close() error {
 	close(s.chClose)
 	s.chClean <- struct{}{}
 
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.state != StateEstablish {
+		return nil
+	}
+	s.state = StateClosed
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+	if s.hp != nil {
+		s.hp.dec()
+	}
 	return nil
 }
 
@@ -501,12 +511,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return errDialParam
 	}
 
-	s.mu.Lock()
 	s.parallelExpire = time.Now().Add(timeout)
-	if s.pc != nil {
-		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
-	}
-	s.mu.Unlock()
 
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
 	s.flush(true)
@@ -522,6 +527,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 	case <-s.chRecvFinEvent:
 		return io.EOF
 	case <-s.chDialEvent:
+		s.establish()
 		return nil
 	case <-dialTimer.C:
 		atomic.AddUint64(&DefaultSnmp.DialTimeout, 1)
@@ -542,6 +548,8 @@ func (s *UDPStream) accept() (err error) {
 	default:
 	}
 
+	s.parallelExpire = time.Now().Add(DefaultDialTimeout)
+
 	s.mu.Lock()
 	size := s.kcp.PeekSize()
 	if size <= 0 {
@@ -558,16 +566,34 @@ func (s *UDPStream) accept() (err error) {
 		return errRemoteStream
 	}
 	_, err = s.recvSyn(s.recvbuf[1:])
-	if err == nil && s.pc != nil {
-		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
+	if err != nil {
+		s.mu.Unlock()
+		return err
 	}
-	s.parallelExpire = time.Now().Add(DefaultDialTimeout)
 	s.mu.Unlock()
 
-	if err == nil {
-		s.flush(true)
-	}
+	s.flush(true)
+	s.establish()
 	return err
+}
+
+func (s *UDPStream) establish() {
+	Logf(INFO, "UDPStream::establish uuid:%v accepted:%v", s.uuid, s.accepted)
+
+	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
+	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
+	if currestab > maxconn {
+		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.pc != nil {
+		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
+		s.hp.inc()
+	}
+	s.state = StateEstablish
 }
 
 func (s *UDPStream) reset() {
@@ -700,8 +726,6 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v data:%v", s.uuid, s.accepted, len(data))
-
 	var kcpInErrors uint64
 
 	s.mu.Lock()

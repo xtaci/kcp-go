@@ -214,6 +214,12 @@ func (t *UDPTunnel) output(msgs []ipv4.Message) (err error) {
 			succMsgs = append(succMsgs, msgs[k])
 		}
 	}
+
+	if t.delayMin == 0 && t.delayMax == 0 && len(succMsgs) != 0 {
+		t.pushMsgs(succMsgs)
+		return
+	}
+
 	for _, msg := range succMsgs {
 		delay := time.Duration(t.delayMin+lossRand.Intn(t.delayMax-t.delayMin)) * time.Millisecond
 		timerSender.Send(t, msg, delay)
