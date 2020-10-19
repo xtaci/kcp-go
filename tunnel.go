@@ -128,7 +128,7 @@ func (t *UDPTunnel) LocalAddr() (addr *net.UDPAddr) {
 
 // for test
 func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
-	Logf(INFO, "UDPTunnel::Simulate addr:%v loss:%v delayMin:%v delayMax:%v", t.addr, loss, delayMin, delayMax)
+	Logf(WARN, "UDPTunnel::Simulate addr:%v loss:%v delayMin:%v delayMax:%v", t.addr, loss, delayMin, delayMax)
 
 	t.loss = int(loss * 100)
 	t.delayMin = delayMin

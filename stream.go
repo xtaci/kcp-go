@@ -589,6 +589,8 @@ func (s *UDPStream) establish() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.parallelExpire = time.Time{}
+
 	if s.pc != nil {
 		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
 		s.hp.inc()
