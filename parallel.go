@@ -20,6 +20,8 @@ type parallelCtrl struct {
 }
 
 func newParallelCtrl(periods int64, rate float64, duration time.Duration) *parallelCtrl {
+	Logf(WARN, "newParallelCtrl periods:%v rate:%v duration:%v", periods, rate, duration)
+
 	return &parallelCtrl{
 		periods:  periods,
 		rate:     rate,
@@ -58,6 +60,8 @@ type hostParallel struct {
 }
 
 func newHostParallel(host string, p *parallelCtrl) *hostParallel {
+	Logf(WARN, "newHostParallel host:%v", host)
+
 	h := &hostParallel{
 		host:        host,
 		p:           p,
@@ -97,7 +101,7 @@ func (h *hostParallel) incParallel() {
 	count := atomic.AddInt64(&h.count, 1)
 
 	streams := atomic.LoadInt64(&h.streams)
-	if streams != 0 && float64(count)/float64(streams) > h.p.rate {
+	if streams != 0 && float64(count)/float64(streams) >= h.p.rate {
 		h.setParallel()
 	}
 }

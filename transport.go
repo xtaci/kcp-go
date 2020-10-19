@@ -142,7 +142,7 @@ func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport,
 		die:             make(chan struct{}),
 		inputQueues:     make([]chan *inputMsg, 0),
 	}
-	if opt.ParallelCheckPeriods != 0 && opt.ParallelStreamRate != 0 && opt.ParallelDuration != 0 {
+	if opt.ParallelCheckPeriods != 0 && opt.ParallelDuration != 0 {
 		t.pc = newParallelCtrl(int64(opt.ParallelCheckPeriods), opt.ParallelStreamRate, opt.ParallelDuration)
 	}
 	return t, nil
@@ -225,7 +225,7 @@ func (t *UDPTransport) OpenTimeout(locals, remotes []string, timeout time.Durati
 	}
 	err = stream.dial(locals, timeout)
 	if err != nil {
-		Logf(WARN, "UDPTransport::OpenTimeout dial timeout. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
+		Logf(INFO, "UDPTransport::OpenTimeout dial timeout. uuid:%v locals:%v remotes:%v err:%v", uuid, locals, remotes, err)
 		stream.Close()
 		return nil, err
 	}
