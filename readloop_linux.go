@@ -26,6 +26,12 @@ func (t *UDPTunnel) readLoop() {
 	}
 
 	for {
+		select {
+		case <-t.die:
+			return
+		default:
+		}
+
 		if count, err := t.xconn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]

@@ -9,6 +9,12 @@ import (
 func (t *UDPTunnel) defaultReadLoop() {
 	buf := xmitBuf.Get().([]byte)[:mtuLimit]
 	for {
+		select {
+		case <-t.die:
+			return
+		default:
+		}
+
 		if n, from, err := t.conn.ReadFrom(buf); err == nil {
 			if n >= gouuid.Size+IKCP_OVERHEAD {
 				t.input(buf[:n], from)
