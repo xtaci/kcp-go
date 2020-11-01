@@ -287,6 +287,12 @@ func (s *UDPStream) SetParallelTime(parallelTime time.Duration) {
 	s.parallelTime = parallelTime
 }
 
+func (s *UDPStream) WaitSnd() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.kcp.WaitSnd()
+}
+
 // GetConv gets conversation id of a session
 func (s *UDPStream) GetConv() uint32      { return s.kcp.conv }
 func (s *UDPStream) GetUUID() gouuid.UUID { return s.uuid }
