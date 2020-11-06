@@ -7,12 +7,15 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"golang.org/x/net/ipv4"
 )
 
 var logs [5]*log.Logger
@@ -59,10 +62,8 @@ var ipsCount = 2
 
 var clientSel *TestSelector
 var clientTransport *UDPTransport
-var clientStream *UDPStream
 var clientTunnels []*UDPTunnel
 var serverTransport *UDPTransport
-var serverStream *UDPStream
 var serverTunnels []*UDPTunnel
 
 func InitLog(l LogLevel) {
@@ -127,21 +128,6 @@ func Init(l LogLevel) {
 		}
 		serverTunnels = append(serverTunnels, tunnel)
 	}
-
-	streamEstablish := make(chan struct{})
-	go func() {
-		serverStream, err = serverTransport.Accept()
-		if err != nil {
-			panic("serverTransport Accept")
-		}
-		streamEstablish <- struct{}{}
-	}()
-
-	clientStream, err = clientTransport.Open(clientSel.PickAddrs(ipsCount))
-	if err != nil {
-		panic("clientTransport Open")
-	}
-	<-streamEstablish
 }
 
 func init() {
@@ -224,194 +210,43 @@ func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) 
 	}
 }
 
-func server(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
-	serverStream.SetNoDelay(nodelay, interval, resend, nc)
-	tunnelSimulate(serverTunnels, loss, delayMin, delayMax)
+func server(t *testing.T, nodelay, interval, resend, nc int) {
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		t.Fatalf("server accept stream failed. err:%v", err)
+	}
+	defer stream.Close()
+	stream.SetNoDelay(nodelay, interval, resend, nc)
 
 	buf := make([]byte, 65536)
 	for {
-		n, err := serverStream.Read(buf)
+		n, err := stream.Read(buf)
 		if err != nil {
 			return
 		}
-		serverStream.Write(buf[:n])
+		stream.Write(buf[:n])
 	}
 }
 
-func client(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
-	clientStream.SetNoDelay(nodelay, interval, resend, nc)
-	tunnelSimulate(clientTunnels, loss, delayMin, delayMax)
+func client(t *testing.T, nodelay, interval, resend, nc int) {
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+	stream.SetNoDelay(nodelay, interval, resend, nc)
 
 	buf := make([]byte, 64)
 	var rtt time.Duration
 	for i := 0; i < repeat; i++ {
 		start := time.Now()
-		clientStream.Write(buf)
-		io.ReadFull(clientStream, buf)
+		stream.Write(buf)
+		io.ReadFull(stream, buf)
 		rtt += time.Now().Sub(start)
 	}
 
 	Logf(INFO, "avg rtt:%v", rtt/repeat)
 	Logf(INFO, "total time: %v for %v round trip:", rtt, repeat)
-}
-
-func testlink(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
-	Logf(INFO, "testing with nodelay parameters, loss:%v delayMin:%v delayMax:%v nodelay:%v interval:%v resend:%v nc:%v",
-		loss, delayMin, delayMax, nodelay, interval, resend, nc)
-
-	go server(t, loss, delayMin, delayMax, nodelay, interval, resend, nc)
-	client(t, loss, delayMin, delayMax, nodelay, interval, resend, nc)
-}
-
-func testLossyConn1(t *testing.T) {
-	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
-	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
-	testlink(t, 0.1, 10, 20, 1, 10, 2, 1)
-}
-
-func testLossyConn2(t *testing.T) {
-	Logf(INFO, "testing loss rate 0.2, rtt 20-40ms")
-	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
-	testlink(t, 0.2, 10, 20, 1, 10, 2, 1)
-}
-
-func testLossyConn3(t *testing.T) {
-	Logf(INFO, "testing loss rate 0.3, rtt 20-40ms")
-	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
-	testlink(t, 0.3, 10, 20, 1, 10, 2, 1)
-}
-
-func testLossyConn4(t *testing.T) {
-	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
-	Logf(INFO, "testing link with nodelay parameters:1 10 2 0")
-	testlink(t, 0.1, 10, 20, 1, 10, 2, 0)
-}
-
-func TestLossyConn(t *testing.T) {
-	Logf(INFO, "TestKCP.testLossyConn1")
-	testLossyConn1(t)
-
-	Logf(INFO, "TestKCP.testLossyConn2")
-	testLossyConn2(t)
-
-	Logf(INFO, "TestKCP.testLossyConn3")
-	testLossyConn3(t)
-
-	Logf(INFO, "TestKCP.testLossyConn4")
-	testLossyConn4(t)
-
-	tunnelSimulate(clientTunnels, 0, 0, 0)
-	tunnelSimulate(serverTunnels, 0, 0, 0)
-}
-
-func TestTimeout(t *testing.T) {
-	buf := make([]byte, 10)
-	//timeout
-	clientStream.SetDeadline(time.Now().Add(time.Second))
-	<-time.After(2 * time.Second)
-	n, err := clientStream.Read(buf)
-	if n != 0 || err == nil {
-		t.Fail()
-	}
-	clientStream.SetDeadline(time.Time{})
-	Logf(INFO, "TestTimeout err:%v", err)
-}
-
-func TestSendRecv(t *testing.T) {
-	go server(t, 0, 0, 0, 1, 10, 2, 0)
-	clientStream.SetWriteDelay(true)
-
-	const N = 100
-	buf := make([]byte, 10)
-	for i := 0; i < N; i++ {
-		msg := fmt.Sprintf("hello%v", i)
-		clientStream.Write([]byte(msg))
-		if n, err := clientStream.Read(buf); err == nil {
-			if string(buf[:n]) != msg {
-				t.Fatal("TestSendRecv msg not equal", err)
-			}
-		} else {
-			t.Fatal("TestSendRecv", err)
-		}
-	}
-}
-
-func tinyRecvServer(t *testing.T) {
-	buf := make([]byte, 2)
-	for {
-		n, err := serverStream.Read(buf)
-		if err != nil {
-			return
-		}
-		serverStream.Write(buf[:n])
-	}
-}
-
-func TestTinyBufferReceiver(t *testing.T) {
-	go tinyRecvServer(t)
-
-	const N = 100
-	snd := byte(0)
-	fillBuffer := func(buf []byte) {
-		for i := 0; i < len(buf); i++ {
-			buf[i] = snd
-			snd++
-		}
-	}
-
-	rcv := byte(0)
-	check := func(buf []byte) bool {
-		for i := 0; i < len(buf); i++ {
-			if buf[i] != rcv {
-				return false
-			}
-			rcv++
-		}
-		return true
-	}
-	sndbuf := make([]byte, 7)
-	rcvbuf := make([]byte, 7)
-	for i := 0; i < N; i++ {
-		fillBuffer(sndbuf)
-		clientStream.Write(sndbuf)
-		if n, err := io.ReadFull(clientStream, rcvbuf); err == nil {
-			if !check(rcvbuf[:n]) {
-				t.Fail()
-			}
-		} else {
-			checkError(t, err)
-		}
-	}
-}
-
-func TestClose(t *testing.T) {
-	var n int
-	var err error
-
-	clientStream.SetDeadline(time.Now().Add(time.Second))
-	clientStream.CloseWrite()
-	// write after close
-	buf := make([]byte, 10)
-	n, err = clientStream.Read(buf)
-	if n != 0 || err != errTimeout {
-		t.Fatal("Read after CloseWrite misbehavior")
-	}
-
-	n, err = clientStream.Write(buf)
-	if n != 0 || err != io.ErrClosedPipe {
-		t.Fatal("Write after CloseWrite misbehavior")
-	}
-
-	err = clientStream.Close()
-	n, err = clientStream.Read(buf)
-	if n != 0 || err != io.ErrClosedPipe {
-		t.Fatal("Read after Close misbehavior")
-	}
-
-	err = clientStream.Close()
-	if err != io.ErrClosedPipe {
-		t.Fatal("Close after Close misbehavior")
-	}
 }
 
 func handleEchoClient(stream *UDPStream) {
@@ -553,6 +388,241 @@ func sinkClient(nbytes, N int) error {
 	return nil
 }
 
+func testlink(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
+	Logf(INFO, "testing with nodelay parameters, loss:%v delayMin:%v delayMax:%v nodelay:%v interval:%v resend:%v nc:%v",
+		loss, delayMin, delayMax, nodelay, interval, resend, nc)
+
+	tunnelSimulate(clientTunnels, loss, delayMin, delayMax)
+	tunnelSimulate(serverTunnels, loss, delayMin, delayMax)
+
+	go server(t, nodelay, interval, resend, nc)
+	client(t, nodelay, interval, resend, nc)
+
+	tunnelSimulate(clientTunnels, 0, 0, 0)
+	tunnelSimulate(serverTunnels, 0, 0, 0)
+}
+
+func testLossyConn1(t *testing.T) {
+	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
+	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
+	testlink(t, 0.1, 10, 20, 1, 10, 2, 1)
+}
+
+func testLossyConn2(t *testing.T) {
+	Logf(INFO, "testing loss rate 0.2, rtt 20-40ms")
+	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
+	testlink(t, 0.2, 10, 20, 1, 10, 2, 1)
+}
+
+func testLossyConn3(t *testing.T) {
+	Logf(INFO, "testing loss rate 0.3, rtt 20-40ms")
+	Logf(INFO, "testing link with nodelay parameters:1 10 2 1")
+	testlink(t, 0.3, 10, 20, 1, 10, 2, 1)
+}
+
+func testLossyConn4(t *testing.T) {
+	Logf(INFO, "testing loss rate 0.1, rtt 20-40ms")
+	Logf(INFO, "testing link with nodelay parameters:1 10 2 0")
+	testlink(t, 0.1, 10, 20, 1, 10, 2, 0)
+}
+
+func TestLossyConn(t *testing.T) {
+	Logf(INFO, "TestKCP.testLossyConn1")
+	testLossyConn1(t)
+
+	Logf(INFO, "TestKCP.testLossyConn2")
+	testLossyConn2(t)
+
+	Logf(INFO, "TestKCP.testLossyConn3")
+	testLossyConn3(t)
+
+	Logf(INFO, "TestKCP.testLossyConn4")
+	testLossyConn4(t)
+}
+
+func TestLanBroken(t *testing.T) {
+
+	go func() {
+		stream, err := serverTransport.Accept()
+		if err != nil {
+			Logf(ERROR, "echoServer accept err:%v", err)
+		}
+		tunnel := stream.tunnels[0]
+		tunnel.Simulate(100, 0, 0)
+		handleEchoClient(stream)
+		tunnel.Simulate(0, 0, 0)
+	}()
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+	tunnel := stream.tunnels[0]
+	tunnel.Simulate(100, 0, 0)
+
+	const N = 100
+	buf := make([]byte, 10)
+	for i := 0; i < N; i++ {
+		msg := fmt.Sprintf("hello%v", i)
+		stream.Write([]byte(msg))
+		if n, err := stream.Read(buf); err == nil {
+			if string(buf[:n]) != msg {
+				t.Fatal("TestSendRecv msg not equal", err)
+			}
+		} else {
+			t.Fatal("TestSendRecv", err)
+		}
+	}
+	tunnel.Simulate(0, 0, 0)
+}
+
+func TestTimeout(t *testing.T) {
+	go echoServer()
+
+	buf := make([]byte, 10)
+	//timeout
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+
+	stream.SetDeadline(time.Now().Add(time.Second))
+	<-time.After(2 * time.Second)
+	n, err := stream.Read(buf)
+	if n != 0 || err == nil {
+		t.Fail()
+	}
+	Logf(INFO, "TestTimeout err:%v", err)
+}
+
+func TestSendRecv(t *testing.T) {
+	go echoServer()
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+
+	const N = 100
+	buf := make([]byte, 10)
+	for i := 0; i < N; i++ {
+		msg := fmt.Sprintf("hello%v", i)
+		stream.Write([]byte(msg))
+		if n, err := stream.Read(buf); err == nil {
+			if string(buf[:n]) != msg {
+				t.Fatal("TestSendRecv msg not equal", err)
+			}
+		} else {
+			t.Fatal("TestSendRecv", err)
+		}
+	}
+}
+
+func tinyRecvServer(t *testing.T) {
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		Logf(ERROR, "echoServer accept err:%v", err)
+	}
+	defer stream.Close()
+
+	buf := make([]byte, 2)
+	for {
+		n, err := stream.Read(buf)
+		if err != nil {
+			return
+		}
+		stream.Write(buf[:n])
+	}
+}
+
+func TestTinyBufferReceiver(t *testing.T) {
+	go tinyRecvServer(t)
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+
+	const N = 100
+	snd := byte(0)
+	fillBuffer := func(buf []byte) {
+		for i := 0; i < len(buf); i++ {
+			buf[i] = snd
+			snd++
+		}
+	}
+
+	rcv := byte(0)
+	check := func(buf []byte) bool {
+		for i := 0; i < len(buf); i++ {
+			if buf[i] != rcv {
+				return false
+			}
+			rcv++
+		}
+		return true
+	}
+	sndbuf := make([]byte, 7)
+	rcvbuf := make([]byte, 7)
+	for i := 0; i < N; i++ {
+		fillBuffer(sndbuf)
+		stream.Write(sndbuf)
+		if n, err := io.ReadFull(stream, rcvbuf); err == nil {
+			if !check(rcvbuf[:n]) {
+				t.Fail()
+			}
+		} else {
+			checkError(t, err)
+		}
+	}
+}
+
+func TestClose(t *testing.T) {
+	go echoServer()
+
+	var n int
+	var err error
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+	stream.SetDeadline(time.Now().Add(time.Second))
+
+	buf := make([]byte, 10)
+	n, err = stream.Write(buf)
+	if n == 0 || err != nil {
+		t.Fatalf("Write misbehavior. err:%v", err)
+	}
+
+	stream.CloseWrite()
+	n, err = stream.Read(buf[:5])
+	if n == 0 || err != nil {
+		t.Fatalf("Read after CloseWrite misbehavior. err:%v", err)
+	}
+
+	n, err = stream.Write(buf)
+	if n != 0 || err != io.ErrClosedPipe {
+		t.Fatal("Write after CloseWrite misbehavior")
+	}
+
+	err = stream.Close()
+	n, err = stream.Read(buf)
+	if n != 0 || err != io.ErrClosedPipe {
+		t.Fatal("Read after Close misbehavior")
+	}
+
+	err = stream.Close()
+	if err != io.ErrClosedPipe {
+		t.Fatal("Close after Close misbehavior")
+	}
+}
+
 func TestSNMP(t *testing.T) {
 	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
 	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
@@ -639,6 +709,12 @@ func TestAcceptBackuplog(t *testing.T) {
 }
 
 func TestGlobalParallel(t *testing.T) {
+	hpc := clientTransport.pc.getHostParallel("127.0.0.1")
+	hpc.reset()
+
+	hps := serverTransport.pc.getHostParallel("127.0.0.1")
+	hps.reset()
+
 	clientTunnels[0].Simulate(100, 0, 0)
 	serverTunnels[0].Simulate(100, 0, 0)
 
@@ -658,22 +734,9 @@ func TestGlobalParallel(t *testing.T) {
 			}
 		}()
 	}
-
-	parallel := false
-	go func() {
-		hp := clientTransport.pc.getHostParallel("127.0.0.1")
-		for {
-			time.Sleep(time.Second)
-			parallel = hp.isParallel()
-			if parallel {
-				Logf(INFO, "enter global parallel")
-				break
-			}
-		}
-	}()
 	wg.Wait()
 
-	if !parallel {
+	if !hpc.isParallel() {
 		t.Fatalf("does not enter global parallel")
 	}
 }
@@ -921,6 +984,42 @@ func BenchmarkFlush(b *testing.B) {
 		mu.Lock()
 		kcp.flush(false)
 		mu.Unlock()
+	}
+}
+
+func BenchmarkMsgPushAndPop(b *testing.B) {
+	tunnel, _ := NewUDPTunnel("127.0.0.1:0", nil)
+	tunnel.Close()
+
+	streamCount := 100
+
+	msgss := make([][]ipv4.Message, streamCount)
+	for i := 0; i < streamCount; i++ {
+		msgCount := rand.Intn(5) + 1
+		addr, _ := net.ResolveUDPAddr("udp", "127.0.0.1:"+strconv.Itoa(rand.Intn(10)+1))
+		msgs := make([]ipv4.Message, 0)
+		for j := 0; j < msgCount; j++ {
+			msgs = append(msgs, ipv4.Message{Addr: addr})
+		}
+		msgss[i] = msgs
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	var msgssR [][]ipv4.Message
+	for n := 0; n < b.N; n++ {
+		wg := sync.WaitGroup{}
+		wg.Add(streamCount)
+		for i := 0; i < streamCount; i++ {
+			go func(idx int) {
+				defer wg.Done()
+				tunnel.pushMsgs(msgss[idx])
+			}(i)
+		}
+		wg.Wait()
+		tunnel.popMsgss(&msgssR)
+		msgssR = msgssR[:0]
 	}
 }
 

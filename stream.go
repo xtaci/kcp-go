@@ -722,11 +722,17 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
-	for i := 0; i < appendCount; i++ {
+
+	msg := ipv4.Message{}
+	copy(buf, s.uuid[:])
+	msg.Buffers = [][]byte{buf}
+	msg.Addr = s.remotes[0]
+	s.msgss[0] = append(s.msgss[0], msg)
+
+	for i := 1; i < appendCount; i++ {
 		msg := ipv4.Message{}
 		bts := xmitBuf.Get().([]byte)[:len(buf)]
-		copy(bts, s.uuid[:])
-		copy(bts[gouuid.Size:], buf[gouuid.Size:])
+		copy(bts, buf)
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remotes[i]
 		s.msgss[i] = append(s.msgss[i], msg)

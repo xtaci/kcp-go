@@ -23,6 +23,7 @@ func (t *UDPTunnel) writeSingle(msgs []ipv4.Message) {
 }
 
 func (t *UDPTunnel) defaultWriteLoop() {
+	var msgss [][]ipv4.Message
 	for {
 		select {
 		case <-t.die:
@@ -30,10 +31,11 @@ func (t *UDPTunnel) defaultWriteLoop() {
 		case <-t.chFlush:
 		}
 
-		msgss := t.popMsgss()
+		t.popMsgss(&msgss)
 		for _, msgs := range msgss {
 			t.writeSingle(msgs)
 		}
 		t.releaseMsgss(msgss)
+		msgss = msgss[:0]
 	}
 }

@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"encoding/binary"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -757,17 +758,25 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	seg.wnd = kcp.wnd_unused()
 	seg.una = kcp.rcv_nxt
 
-	buffer := kcp.buffer
-	ptr := buffer[kcp.reserved:] // keep n bytes untouched
+	var buffer []byte
+	var ptr []byte
 
 	var xmitMax uint32
 
+	makeBuffer := func() {
+		buffer = xmitBuf.Get().([]byte)[:kcp.mtu]
+		ptr = buffer[kcp.reserved:] // keep n bytes untouched
+	}
+
 	// makeSpace makes room for writing
 	makeSpace := func(space int) {
+		if cap(buffer) == 0 {
+			makeBuffer()
+		}
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
 			kcp.output(buffer, size, xmitMax)
-			ptr = buffer[kcp.reserved:]
+			makeBuffer()
 			xmitMax = 0
 		}
 	}
@@ -901,7 +910,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		} else if _itimediff(current, segment.resendts) >= 0 { // RTO
 			needsend = true
 			if kcp.nodelay == 0 {
-				segment.rto += kcp.rx_rto
+				segment.rto += uint32(math.Max(float64(segment.rto), float64(kcp.rx_rto)))
+			} else if kcp.nodelay == 1 {
+				segment.rto += segment.rto / 2
 			} else {
 				segment.rto += kcp.rx_rto / 2
 			}

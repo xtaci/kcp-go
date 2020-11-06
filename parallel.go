@@ -73,6 +73,8 @@ func newHostParallel(host string, p *parallelCtrl) *hostParallel {
 }
 
 func (h *hostParallel) reset() {
+	Logf(WARN, "hostParallel::reset. host:%v stream:%v", h.host, h.streams)
+
 	for i := 0; i < len(h.ringCounter); i++ {
 		atomic.StoreInt64(&h.ringCounter[i], 0)
 	}

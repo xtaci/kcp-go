@@ -18,8 +18,9 @@ var (
 type input_callback func(tunnel *UDPTunnel, data []byte, addr net.Addr)
 
 type MsgQueue struct {
-	msgs []ipv4.Message
-	mu   sync.Mutex
+	mu    sync.Mutex
+	msgss [2][]ipv4.Message
+	wIdx  int
 }
 
 type (
@@ -116,8 +117,6 @@ func (t *UDPTunnel) Close() error {
 	// 2. Close
 	// 3. pushMsgs
 	close(t.die)
-	msgss := t.popMsgss()
-	t.releaseMsgss(msgss)
 	t.conn.Close()
 	return nil
 }
@@ -146,7 +145,9 @@ func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
 		t.mu.Lock()
 		msgq, ok = t.msgsm[target]
 		if !ok {
-			t.msgsm[target] = &MsgQueue{msgs: msgs}
+			msgq := &MsgQueue{}
+			t.msgsm[target] = msgq
+			msgq.msgss[msgq.wIdx] = append(msgq.msgss[msgq.wIdx], msgs...)
 			t.mu.Unlock()
 			t.notifyFlush()
 			return
@@ -155,32 +156,24 @@ func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
 	}
 
 	msgq.mu.Lock()
-	msgq.msgs = append(msgq.msgs, msgs...)
+	msgq.msgss[msgq.wIdx] = append(msgq.msgss[msgq.wIdx], msgs...)
 	msgq.mu.Unlock()
 	t.notifyFlush()
-
-	// t.mu.Lock()
-	// t.msgss = append(t.msgss, msgs)
-	// t.mu.Unlock()
-	// t.notifyFlush()
 }
 
-func (t *UDPTunnel) popMsgss() (msgss [][]ipv4.Message) {
+func (t *UDPTunnel) popMsgss(msgss *[][]ipv4.Message) {
 	t.mu.RLock()
 	for _, msgq := range t.msgsm {
 		msgq.mu.Lock()
-		msgs := msgq.msgs
-		msgq.msgs = make([]ipv4.Message, 0)
+		msgs := msgq.msgss[msgq.wIdx]
+		msgq.wIdx = (msgq.wIdx + 1) % 2
+		msgq.msgss[msgq.wIdx] = msgq.msgss[msgq.wIdx][:0]
 		msgq.mu.Unlock()
-		msgss = append(msgss, msgs)
+		if len(msgs) != 0 {
+			*msgss = append(*msgss, msgs)
+		}
 	}
 	t.mu.RUnlock()
-
-	// t.mu.Lock()
-	// msgss = t.msgss
-	// t.msgss = make([][]ipv4.Message, 0)
-	// t.mu.Unlock()
-	return msgss
 }
 
 func (t *UDPTunnel) releaseMsgss(msgss [][]ipv4.Message) {
