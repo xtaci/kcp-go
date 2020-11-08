@@ -998,6 +998,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 	}
 
+	if kcp.rmt_wnd != 0 && kcp.WaitSnd() == 0 {
+		return 0
+	}
 	return uint32(minrto)
 }
 

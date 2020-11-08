@@ -805,14 +805,8 @@ func (fs *fileToStream) Read(b []byte) (n int, err error) {
 	return n, err
 }
 
-func FileTransferClient(t *testing.T, lf io.Reader, rFileHash []byte) error {
-	Logf(INFO, "FileTransferClient start")
-
-	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
-	if err != nil {
-		t.Fatalf("clientTransport open stream %v", err)
-	}
-	defer stream.Close()
+func FileTransfer(t *testing.T, stream *UDPStream, lf io.Reader, rFileHash []byte) error {
+	Logf(INFO, "FileTransfer start")
 
 	// bridge connection
 	shutdown := make(chan bool, 2)
@@ -822,7 +816,7 @@ func FileTransferClient(t *testing.T, lf io.Reader, rFileHash []byte) error {
 		iobridge(fs, stream)
 		shutdown <- true
 
-		Logf(INFO, "FileTransferClient file send finish")
+		Logf(INFO, "FileTransfer file send finish. not hash:%v", rFileHash)
 	}()
 
 	go func() {
@@ -830,48 +824,11 @@ func FileTransferClient(t *testing.T, lf io.Reader, rFileHash []byte) error {
 		iobridge(stream, h)
 		recvHash := h.Sum(nil)
 		if !bytes.Equal(rFileHash, recvHash) {
-			t.Fatalf("client recv hash not equal fileHash:%v recvHash:%v", rFileHash, recvHash)
+			t.Fatalf("FileTransfer recv hash not equal. fileHash:%v recvHash:%v", rFileHash, recvHash)
 		}
 		shutdown <- true
 
-		Logf(INFO, "FileTransferClient file recv finish")
-	}()
-
-	<-shutdown
-	<-shutdown
-	return nil
-}
-
-func FileTransferServer(t *testing.T, rf io.Reader, lFileHash []byte) error {
-	Logf(INFO, "FileTransferServer start")
-
-	stream, err := serverTransport.Accept()
-	if err != nil {
-		t.Fatalf("server Accept stream %v", err)
-	}
-	defer stream.Close()
-
-	// bridge connection
-	shutdown := make(chan struct{}, 2)
-
-	go func() {
-		h := md5.New()
-		iobridge(stream, h)
-		recvHash := h.Sum(nil)
-		if !bytes.Equal(lFileHash, recvHash) {
-			t.Fatalf("server recv hash not equal fileHash:%v recvHash:%v", lFileHash, recvHash)
-		}
-		shutdown <- struct{}{}
-
-		Logf(INFO, "FileTransferServer file recv finish")
-	}()
-
-	go func() {
-		fs := &fileToStream{rf, stream}
-		iobridge(fs, stream)
-		shutdown <- struct{}{}
-
-		Logf(INFO, "FileTransferServer file send finish")
+		Logf(INFO, "FileTransfer file recv finish. fileHash:%v", rFileHash)
 	}()
 
 	<-shutdown
@@ -899,26 +856,48 @@ func TestFileTransfer(t *testing.T) {
 	lh := md5.New()
 	_, err := io.Copy(lh, lReader)
 	lFileHash := lh.Sum(nil)
-	Logf(INFO, "file:%v hash:%v err:%v", lFile, lFileHash, err)
+	Logf(INFO, "lFileLen:%v hash:%v err:%v", len(lFile), lFileHash, err)
 
 	rh := md5.New()
 	_, err = io.Copy(rh, rReader)
 	rFileHash := rh.Sum(nil)
-	Logf(INFO, "file:%v hash:%v err:%v", rFile, rFileHash, err)
+	Logf(INFO, "rFileLen:%v hash:%v err:%v", len(rFile), rFileHash, err)
 
 	lReader.Seek(0, io.SeekStart)
 	rReader.Seek(0, io.SeekStart)
 
+	var serverStream *UDPStream
+	var clientStream *UDPStream
+
+	go func() {
+		clientStream, err = clientTransport.Open(clientSel.PickAddrs(ipsCount))
+		if err != nil {
+			t.Fatalf("FileTransferClient open stream %v", err)
+		}
+	}()
+
+	go func() {
+		serverStream, err = serverTransport.Accept()
+		if err != nil {
+			t.Fatalf("FileTransferServer Accept stream %v", err)
+		}
+	}()
+
+	for {
+		if serverStream != nil && clientStream != nil {
+			break
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+
 	finish := make(chan struct{}, 2)
 	go func() {
-		FileTransferServer(t, rReader, lFileHash)
+		FileTransfer(t, serverStream, rReader, lFileHash)
 		finish <- struct{}{}
 	}()
 
-	time.Sleep(time.Millisecond * 300)
-
 	go func() {
-		FileTransferClient(t, lReader, rFileHash)
+		FileTransfer(t, clientStream, lReader, rFileHash)
 		finish <- struct{}{}
 	}()
 
