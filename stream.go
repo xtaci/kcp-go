@@ -43,7 +43,7 @@ const (
 )
 
 var (
-	DefaultParallelXmit = 3
+	DefaultParallelXmit = 4
 	DefaultParallelTime = time.Second * 60
 )
 
