@@ -37,14 +37,12 @@ const (
 )
 
 const (
-	FlagOffset        = gouuid.Size + IKCP_OVERHEAD
-	CleanTimeout      = time.Second * 5
-	HeartbeatInterval = time.Second * 30
-)
-
-var (
+	FlagOffset          = gouuid.Size + IKCP_OVERHEAD
+	CleanTimeout        = time.Second * 5
+	HeartbeatInterval   = time.Second * 30
 	DefaultParallelXmit = 4
 	DefaultParallelTime = time.Second * 30
+	DefaultDeadLink     = 10
 )
 
 type clean_callback func(uuid gouuid.UUID)
@@ -158,6 +156,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
+	stream.kcp.dead_link = DefaultDeadLink
 
 	stream.cleanTimer.Stop()
 	go stream.update()
