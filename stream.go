@@ -44,7 +44,7 @@ const (
 
 var (
 	DefaultParallelXmit = 4
-	DefaultParallelTime = time.Second * 60
+	DefaultParallelTime = time.Second * 30
 )
 
 type clean_callback func(uuid gouuid.UUID)
