@@ -157,6 +157,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
 	stream.kcp.dead_link = DefaultDeadLink
+	stream.kcp.cwnd = 1
 
 	stream.cleanTimer.Stop()
 	go stream.update()
@@ -423,7 +424,6 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			if needFlush {
 				s.flush()
 			}
-			//notify flush timer
 			s.notifyFlushEvent()
 
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
