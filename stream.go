@@ -521,8 +521,6 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return errDialParam
 	}
 
-	s.parallelExpire = time.Now().Add(timeout)
-
 	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
 
 	dialTimer := time.NewTimer(timeout)
@@ -556,8 +554,6 @@ func (s *UDPStream) accept() (err error) {
 		return io.EOF
 	default:
 	}
-
-	s.parallelExpire = time.Now().Add(DefaultDialTimeout)
 
 	s.mu.Lock()
 	size := s.kcp.PeekSize()
@@ -597,8 +593,6 @@ func (s *UDPStream) establish() {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	s.parallelExpire = time.Time{}
 
 	if s.pc != nil {
 		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
@@ -694,7 +688,7 @@ func (s *UDPStream) flush() (interval uint32) {
 }
 
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
-	if s.parallelXmit == 0 {
+	if s.parallelXmit == 0 || s.state == StateNone {
 		return len(s.tunnels)
 	} else if s.hp != nil && s.hp.isParallel() {
 		return len(s.tunnels)
