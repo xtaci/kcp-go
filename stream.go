@@ -712,12 +712,12 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 }
 
 func (s *UDPStream) output(buf []byte, xmitMax uint32) {
-	// Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v", s.uuid, s.accepted, len(buf), xmitMax)
-
 	appendCount := s.parallelTun(xmitMax)
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
+
+	// Logf(DEBUG, "UDPStream::output uuid:%v accepted:%v len:%v xmitMax:%v appendCount:%v", s.uuid, s.accepted, len(buf), xmitMax, appendCount)
 
 	msg := ipv4.Message{}
 	copy(buf, s.uuid[:])

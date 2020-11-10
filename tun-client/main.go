@@ -325,7 +325,7 @@ func main() {
 		},
 		cli.IntFlag{
 			Name:  "parallelXmit",
-			Value: 5,
+			Value: 4,
 			Usage: "parallel xmit",
 		},
 	}
