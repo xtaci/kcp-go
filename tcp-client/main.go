@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"math/rand"
 	"net"
 	"os"
 	"sync"
@@ -23,6 +24,15 @@ type client struct {
 	maxCost time.Duration
 }
 
+var clientnum = flag.Int("clientnum", 50, "input client number")
+var msgcount = flag.Int("msgcount", 1000, "input msg count")
+var msglen = flag.Int("msglen", 100, "input msg length")
+var targetAddr = flag.String("targetAddr", "127.0.0.1:7900", "input target address")
+var proxyAddr = flag.String("proxyAddr", "127.0.0.1:7890", "input proxy address")
+var proxyAddrD = flag.String("proxyAddrD", "127.0.0.1:7891", "input proxy address direct")
+var connectWay = flag.Int("connectWay", 0, "udp proxy, tcp proxy, direct")
+var sendInterval = flag.Int("sendInterval", 0, "msg send interval millisecond")
+
 func echoTester(c *client, msglen, msgcount int) (err error) {
 	start := time.Now()
 	fmt.Printf("echoTester start c:%v msglen:%v msgcount:%v start:%v\n", c.LocalAddr(), msglen, msgcount, start.Format("2006-01-02 15:04:05.000"))
@@ -32,6 +42,11 @@ func echoTester(c *client, msglen, msgcount int) (err error) {
 
 	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {
+		if *sendInterval != 0 {
+			interval := rand.Intn(*sendInterval*2 + 1)
+			time.Sleep(time.Duration(interval) * time.Millisecond)
+		}
+
 		// send packet
 		start := time.Now()
 		_, err = c.Write(buf)
@@ -125,14 +140,6 @@ func TestClientEcho(clientnum, msgcount, msglen int, remoteAddr string, finish *
 	}
 }
 
-var clientnum = flag.Int("clientnum", 50, "input client number")
-var msgcount = flag.Int("msgcount", 1000, "input msg count")
-var msglen = flag.Int("msglen", 100, "input msg length")
-var targetAddr = flag.String("targetAddr", "127.0.0.1:7900", "input target address")
-var proxyAddr = flag.String("proxyAddr", "127.0.0.1:7890", "input proxy address")
-var proxyAddrD = flag.String("proxyAddrD", "127.0.0.1:7891", "input proxy address direct")
-var connectWay = flag.Int("connectWay", 0, "udp proxy, tcp proxy, direct")
-
 func main() {
 	flag.Parse()
 
@@ -143,6 +150,7 @@ func main() {
 	fmt.Printf("proxyAddr:%v\n", *proxyAddr)
 	fmt.Printf("proxyAddrD:%v\n", *proxyAddrD)
 	fmt.Printf("connectWay:%v\n", *connectWay)
+	fmt.Printf("sendInterval:%v\n", *sendInterval)
 
 	if *connectWay == 1 {
 		TestClientEcho(*clientnum, *msgcount, *msglen, *proxyAddr, nil)
