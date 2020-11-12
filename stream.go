@@ -618,7 +618,8 @@ func (s *UDPStream) reset() {
 
 // sess update to trigger protocol
 func (s *UDPStream) update() {
-	var flushTimer <-chan time.Time
+	var flushTimer *time.Timer
+	var flushTimerCh <-chan time.Time
 
 	for {
 		select {
@@ -627,6 +628,9 @@ func (s *UDPStream) update() {
 			s.mu.Lock()
 			s.kcp.ReleaseTX()
 			s.mu.Unlock()
+			if flushTimer != nil {
+				flushTimer.Stop()
+			}
 			s.cleancb(s.uuid)
 			return
 		case <-s.hrtTicker.C:
@@ -634,13 +638,16 @@ func (s *UDPStream) update() {
 			s.WriteFlag(HRT, nil)
 		case <-s.chFlushEvent:
 			if flushTimer == nil {
-				flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond).C
+				flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond)
+				flushTimerCh = flushTimer.C
 			}
-		case <-flushTimer:
+		case <-flushTimerCh:
 			if interval := s.flush(); interval != 0 {
-				flushTimer = time.NewTimer(time.Duration(interval) * time.Millisecond).C
+				flushTimer = time.NewTimer(time.Duration(interval) * time.Millisecond)
+				flushTimerCh = flushTimer.C
 			} else {
 				flushTimer = nil
+				flushTimerCh = nil
 			}
 		}
 	}
