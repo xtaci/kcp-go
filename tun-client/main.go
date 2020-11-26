@@ -328,6 +328,31 @@ func main() {
 			Value: 4,
 			Usage: "parallel xmit",
 		},
+		cli.IntFlag{
+			Name:  "testStreamCount",
+			Value: 0,
+			Usage: "test stream count",
+		},
+		cli.IntFlag{
+			Name:  "testMsgCount",
+			Value: 0,
+			Usage: "self msg count",
+		},
+		cli.IntFlag{
+			Name:  "testMsgLen",
+			Value: 0,
+			Usage: "test msg len",
+		},
+		cli.IntFlag{
+			Name:  "testSendInterval",
+			Value: 0,
+			Usage: "test send interval",
+		},
+		cli.IntFlag{
+			Name:  "testEchoInterval",
+			Value: 0,
+			Usage: "test echo interval",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		listenAddr := c.String("listenAddr")
@@ -359,6 +384,11 @@ func main() {
 		noResend := c.Int("noResend")
 		timeout := c.Int("timeout")
 		parallelXmit := c.Int("parallelXmit")
+		testStreamCount := c.Int("testStreamCount")
+		testMsgCount := c.Int("testMsgCount")
+		testMsgLen := c.Int("testMsgLen")
+		testSendInterval := c.Int("testSendInterval")
+		testEchoInterval := c.Int("testEchoInterval")
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -383,6 +413,11 @@ func main() {
 		fmt.Printf("Action noResend:%v\n", noResend)
 		fmt.Printf("Action timeout:%v\n", timeout)
 		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
+		fmt.Printf("Action testStreamCount:%v\n", testStreamCount)
+		fmt.Printf("Action testMsgCount:%v\n", testMsgCount)
+		fmt.Printf("Action testMsgLen:%v\n", testMsgLen)
+		fmt.Printf("Action testSendInterval:%v\n", testSendInterval)
+		fmt.Printf("Action testEchoInterval:%v\n", testEchoInterval)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -435,7 +470,7 @@ func main() {
 
 		go func() {
 			for {
-				time.Sleep(time.Second * 10)
+				time.Sleep(time.Second * 30)
 				headers := kcp.DefaultSnmp.Header()
 				values := kcp.DefaultSnmp.ToSlice()
 				fmt.Printf("------------- snmp result -------------\n")
@@ -453,12 +488,12 @@ func main() {
 				go func() {
 					start := time.Now()
 					targetConn, err := net.Dial("tcp", targetAddr)
-					fmt.Println("Open TCPStream cost:", time.Since(start))
 					if err != nil {
-						fmt.Println("Open TCPStream err", err)
-						panic("transport Open")
+						kcp.Logf(kcp.ERROR, "Open TCPStream err:%v", err)
+						return
 					}
-					go handleRawClient(targetConn.(*net.TCPConn), conn)
+					kcp.Logf(kcp.WARN, "Open TCPStream. cost:%v", time.Since(start))
+					handleRawClient(targetConn.(*net.TCPConn), conn)
 				}()
 			}
 		}()
@@ -466,32 +501,54 @@ func main() {
 		localIdx := 0
 		remoteIdx := 0
 
+		newUDPStream := func() (stream *kcp.UDPStream, err error) {
+			tunLocals := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunLocals = append(tunLocals, locals[localIdx%len(locals)])
+				localIdx++
+			}
+			tunRemotes := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
+				remoteIdx++
+			}
+			start := time.Now()
+			stream, err = transport.OpenTimeout(tunLocals, tunRemotes, time.Duration(timeout)*time.Millisecond)
+			if err != nil {
+				kcp.Logf(kcp.ERROR, "OpenTimeout failed. err:%v \n", err)
+				return nil, err
+			}
+			stream.SetWindowSize(wndSize, wndSize)
+			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
+			stream.SetParallelXmit(uint32(parallelXmit))
+
+			kcp.Logf(kcp.WARN, "Open UDPStream. uuid:%v cost:%v", stream.GetUUID(), time.Since(start))
+			return stream, nil
+		}
+
+		testOpt := &testOption{
+			streamCount:  testStreamCount,
+			msgCount:     testMsgCount,
+			msgLength:    testMsgLen,
+			sendInterval: testSendInterval,
+			echoInterval: testEchoInterval,
+			openStream:   newUDPStream,
+		}
+		if testStreamCount != 0 && testMsgCount != 0 && testMsgLen != 0 {
+			go handleStreamTest(testOpt)
+		}
+
 		for {
 			conn, err := listener.AcceptTCP()
-			checkError(err)
-
+			if err != nil {
+				continue
+			}
 			go func() {
-				tunLocals := []string{}
-				for i := 0; i < transmitTuns; i++ {
-					tunLocals = append(tunLocals, locals[localIdx%len(locals)])
-					localIdx++
-				}
-				tunRemotes := []string{}
-				for i := 0; i < transmitTuns; i++ {
-					tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
-					remoteIdx++
-				}
-				start := time.Now()
-				stream, err := transport.OpenTimeout(tunLocals, tunRemotes, time.Duration(timeout)*time.Millisecond)
+				stream, err := newUDPStream()
 				if err != nil {
-					fmt.Println("Open UDPStream err", err)
-					panic("Open UDPStream failed")
+					return
 				}
-				fmt.Println("Open UDPStream cost", stream.GetUUID(), time.Since(start))
-				stream.SetWindowSize(wndSize, wndSize)
-				stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-				stream.SetParallelXmit(uint32(parallelXmit))
-				go handleClient(stream, conn)
+				handleClient(stream, conn)
 			}()
 		}
 		return nil

@@ -1,8 +1,10 @@
 package main
 
 import (
+	"encoding/binary"
 	"fmt"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -171,6 +173,37 @@ func handleClient(s *kcp.UDPStream, conn *net.TCPConn) {
 	<-shutdown
 }
 
+// handleClient aggregates connection p1 on mux with 'writeLock'
+func handleClientEcho(s *kcp.UDPStream) {
+	kcp.Logf(kcp.INFO, "handleClient start stream:%v remote:%v", s.GetUUID())
+	defer kcp.Logf(kcp.INFO, "handleClient end stream:%v remote:%v", s.GetUUID())
+
+	defer s.Close()
+
+	buf := bufPool.Get().(*[]byte)
+	defer bufPool.Put(buf)
+
+	for {
+		n, err := s.Read(*buf)
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
+			break
+		}
+
+		testEchoInterval := int(binary.LittleEndian.Uint32(*buf))
+		if testEchoInterval != 0 {
+			interval := rand.Intn(testEchoInterval*2 + 1)
+			time.Sleep(time.Duration(interval) * time.Millisecond)
+		}
+
+		_, err = s.Write((*buf)[:n])
+		if err != nil {
+			kcp.Logf(kcp.ERROR, "toTcpStreamBridge writing err:%v", err)
+			break
+		}
+	}
+}
+
 func main() {
 	myApp := cli.NewApp()
 	myApp.Name = "tun-client"
@@ -265,6 +298,11 @@ func main() {
 			Value: 4,
 			Usage: "parallel xmit",
 		},
+		cli.IntFlag{
+			Name:  "testEcho",
+			Value: 1,
+			Usage: "test echo",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		targetAddr := c.String("targetAddr")
@@ -297,6 +335,7 @@ func main() {
 		tunnelProcessorCount := c.Int("tunnelProcessorCount")
 		noResend := c.Int("noResend")
 		parallelXmit := c.Int("parallelXmit")
+		testEcho := c.Int("testEcho")
 
 		fmt.Printf("Action targetAddr:%v\n", targetAddr)
 		fmt.Printf("Action localIp:%v\n", localIp)
@@ -314,6 +353,7 @@ func main() {
 		fmt.Printf("Action tunnelProcessorCount:%v\n", tunnelProcessorCount)
 		fmt.Printf("Action noResend:%v\n", noResend)
 		fmt.Printf("Action parallelXmit:%v\n", parallelXmit)
+		fmt.Printf("Action testEcho:%v\n", testEcho)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -343,7 +383,7 @@ func main() {
 
 		go func() {
 			for {
-				time.Sleep(time.Second * 10)
+				time.Sleep(time.Second * 30)
 				headers := kcp.DefaultSnmp.Header()
 				values := kcp.DefaultSnmp.ToSlice()
 				fmt.Printf("------------- snmp result -------------\n")
@@ -357,14 +397,20 @@ func main() {
 		for {
 			stream, err := transport.Accept()
 			checkError(err)
+			stream.SetWindowSize(wndSize, wndSize)
+			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
+			stream.SetParallelXmit(uint32(parallelXmit))
 			go func() {
-				stream.SetWindowSize(wndSize, wndSize)
-				stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-				stream.SetParallelXmit(uint32(parallelXmit))
-				conn, err := net.Dial("tcp", targetAddr)
-				checkError(err)
-				tcpConn := conn.(*net.TCPConn)
-				go handleClient(stream, tcpConn)
+				if testEcho == 0 {
+					conn, err := net.Dial("tcp", targetAddr)
+					if err != nil {
+						kcp.Logf(kcp.ERROR, "open TCPStream failed. err:%v", err)
+						return
+					}
+					handleClient(stream, conn.(*net.TCPConn))
+				} else {
+					handleClientEcho(stream)
+				}
 			}()
 		}
 		return nil
