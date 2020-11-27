@@ -793,27 +793,31 @@ func iobridge(src io.Reader, dst io.Writer) {
 }
 
 type fileToStream struct {
-	src    io.Reader
-	stream *UDPStream
+	src  io.Reader
+	conn net.Conn
 }
 
 func (fs *fileToStream) Read(b []byte) (n int, err error) {
 	n, err = fs.src.Read(b)
 	if err == io.EOF {
-		fs.stream.CloseWrite()
+		if stream, ok := fs.conn.(*UDPStream); ok {
+			stream.CloseWrite()
+		} else if tcpconn, ok := fs.conn.(*net.TCPConn); ok {
+			tcpconn.CloseWrite()
+		}
 	}
 	return n, err
 }
 
-func FileTransfer(t *testing.T, stream *UDPStream, lf io.Reader, rFileHash []byte) error {
+func FileTransfer(t *testing.T, conn net.Conn, lf io.Reader, rFileHash []byte) error {
 	Logf(INFO, "FileTransfer start")
 
 	// bridge connection
 	shutdown := make(chan bool, 2)
 
 	go func() {
-		fs := &fileToStream{lf, stream}
-		iobridge(fs, stream)
+		fs := &fileToStream{lf, conn}
+		iobridge(fs, conn)
 		shutdown <- true
 
 		Logf(INFO, "FileTransfer file send finish. not hash:%v", rFileHash)
@@ -821,7 +825,7 @@ func FileTransfer(t *testing.T, stream *UDPStream, lf io.Reader, rFileHash []byt
 
 	go func() {
 		h := md5.New()
-		iobridge(stream, h)
+		iobridge(conn, h)
 		recvHash := h.Sum(nil)
 		if !bytes.Equal(rFileHash, recvHash) {
 			t.Fatalf("FileTransfer recv hash not equal. fileHash:%v recvHash:%v", rFileHash, recvHash)
@@ -847,10 +851,74 @@ func randString(n int) string {
 	return string(b)
 }
 
+func TestTcpFileTransfer(t *testing.T) {
+	lFile := randString(1024 * 512)
+	lReader := strings.NewReader(lFile)
+	rFile := randString(1024 * 1024 * 1000)
+	rReader := strings.NewReader(rFile)
+
+	lh := md5.New()
+	_, err := io.Copy(lh, lReader)
+	lFileHash := lh.Sum(nil)
+	Logf(INFO, "lFileLen:%v hash:%v err:%v", len(lFile), lFileHash, err)
+
+	rh := md5.New()
+	_, err = io.Copy(rh, rReader)
+	rFileHash := rh.Sum(nil)
+	Logf(INFO, "rFileLen:%v hash:%v err:%v", len(rFile), rFileHash, err)
+
+	lReader.Seek(0, io.SeekStart)
+	rReader.Seek(0, io.SeekStart)
+
+	l, err := net.Listen("tcp", "100.100.35.71:")
+	if err != nil {
+		t.Fatalf("Listen failed. err: %v", err)
+	}
+
+	var serverConn net.Conn
+	var clientConn net.Conn
+
+	go func() {
+		clientConn, err = net.Dial("tcp", l.Addr().String())
+		if err != nil {
+			fmt.Println("Error connecting:", err)
+			os.Exit(1)
+		}
+	}()
+
+	go func() {
+		serverConn, err = l.Accept()
+		if err != nil {
+			t.Fatalf("FileTransferServer Accept stream %v", err)
+		}
+	}()
+
+	for {
+		if serverConn != nil && clientConn != nil {
+			break
+		}
+		time.Sleep(time.Millisecond * 100)
+	}
+
+	finish := make(chan struct{}, 2)
+	go func() {
+		FileTransfer(t, serverConn, rReader, lFileHash)
+		finish <- struct{}{}
+	}()
+
+	go func() {
+		FileTransfer(t, clientConn, lReader, rFileHash)
+		finish <- struct{}{}
+	}()
+
+	<-finish
+	<-finish
+}
+
 func TestFileTransfer(t *testing.T) {
 	lFile := randString(1024 * 512)
 	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024)
+	rFile := randString(1024 * 1024 * 100)
 	rReader := strings.NewReader(rFile)
 
 	lh := md5.New()
@@ -874,6 +942,7 @@ func TestFileTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileTransferClient open stream %v", err)
 		}
+		clientStream.SetWindowSize(256, 256)
 	}()
 
 	go func() {
@@ -881,6 +950,7 @@ func TestFileTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileTransferServer Accept stream %v", err)
 		}
+		serverStream.SetWindowSize(256, 256)
 	}()
 
 	for {
