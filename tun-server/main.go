@@ -19,6 +19,8 @@ import (
 var logs [5]*log.Logger
 
 func init() {
+	rand.Seed(time.Now().Unix())
+
 	Debug := log.New(os.Stdout,
 		"DEBUG: ",
 		log.Ldate|log.Lmicroseconds)
@@ -382,14 +384,25 @@ func main() {
 		}
 
 		go func() {
+			var intervalSeconds uint64 = 10
+			var lastOutSegs uint64 = 0
+			var lastInSegs uint64 = 0
 			for {
-				time.Sleep(time.Second * 30)
+				time.Sleep(time.Duration(intervalSeconds) * time.Second)
+				OutSegs := atomic.LoadUint64(&kcp.DefaultSnmp.OutSegs)
+				InSegs := atomic.LoadUint64(&kcp.DefaultSnmp.InSegs)
+				outPerS := (OutSegs - lastOutSegs) / intervalSeconds
+				inPerS := (InSegs - lastInSegs) / intervalSeconds
+				lastOutSegs = OutSegs
+				lastInSegs = InSegs
 				headers := kcp.DefaultSnmp.Header()
 				values := kcp.DefaultSnmp.ToSlice()
 				fmt.Printf("------------- snmp result -------------\n")
 				for i := 0; i < len(headers); i++ {
 					fmt.Printf("snmp header:%v value:%v \n", headers[i], values[i])
 				}
+				fmt.Printf("snmp outSegs per seconds:%v \n", outPerS)
+				fmt.Printf("snmp inSegs per seconds:%v \n", inPerS)
 				fmt.Printf("------------- snmp result -------------\n\n")
 			}
 		}()

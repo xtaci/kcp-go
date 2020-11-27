@@ -1,10 +1,12 @@
 package main
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -19,6 +21,8 @@ import (
 var logs [5]*log.Logger
 
 func init() {
+	rand.Seed(time.Now().Unix())
+
 	Debug := log.New(os.Stdout,
 		"DEBUG: ",
 		log.Ldate|log.Lmicroseconds)
@@ -469,14 +473,25 @@ func main() {
 		checkError(err)
 
 		go func() {
+			var intervalSeconds uint64 = 10
+			var lastOutSegs uint64 = 0
+			var lastInSegs uint64 = 0
 			for {
-				time.Sleep(time.Second * 30)
+				time.Sleep(time.Duration(intervalSeconds) * time.Second)
+				OutSegs := atomic.LoadUint64(&kcp.DefaultSnmp.OutSegs)
+				InSegs := atomic.LoadUint64(&kcp.DefaultSnmp.InSegs)
+				outPerS := (OutSegs - lastOutSegs) / intervalSeconds
+				inPerS := (InSegs - lastInSegs) / intervalSeconds
+				lastOutSegs = OutSegs
+				lastInSegs = InSegs
 				headers := kcp.DefaultSnmp.Header()
 				values := kcp.DefaultSnmp.ToSlice()
 				fmt.Printf("------------- snmp result -------------\n")
 				for i := 0; i < len(headers); i++ {
 					fmt.Printf("snmp header:%v value:%v \n", headers[i], values[i])
 				}
+				fmt.Printf("snmp outSegs per seconds:%v \n", outPerS)
+				fmt.Printf("snmp inSegs per seconds:%v \n", inPerS)
 				fmt.Printf("------------- snmp result -------------\n\n")
 			}
 		}()
@@ -555,4 +570,128 @@ func main() {
 	}
 
 	myApp.Run(os.Args)
+}
+
+type client struct {
+	*kcp.UDPStream
+	count   int
+	cost    float64
+	maxCost time.Duration
+}
+
+func echoTester(c *client, msglen, msgcount, sendInterval, echoInterval int) (err error) {
+	start := time.Now()
+	kcp.Logf(kcp.WARN, "echoTester start c:%v msglen:%v msgcount:%v start:%v\n", c.LocalAddr(), msglen, msgcount, start.Format("2006-01-02 15:04:05.000"))
+	defer func() {
+		kcp.Logf(kcp.WARN, "echoTester end c:%v msglen:%v msgcount:%v count:%v cost:%v elasp:%v err:%v \n", c.LocalAddr(), msglen, msgcount, c.count, c.cost, time.Since(start), err)
+	}()
+
+	buf := make([]byte, msglen)
+	binary.LittleEndian.PutUint32(buf, uint32(echoInterval))
+	for i := 0; i < msgcount; i++ {
+		if sendInterval != 0 {
+			interval := rand.Intn(sendInterval*2 + 1)
+			time.Sleep(time.Duration(interval) * time.Millisecond)
+		}
+
+		// send packet
+		start := time.Now()
+		_, err = c.Write(buf)
+		if err != nil {
+			return err
+		}
+
+		// receive packet
+		nrecv := 0
+		var n int
+		for {
+			n, err = c.Read(buf)
+			if err != nil {
+				return err
+			}
+			nrecv += n
+			if nrecv == msglen {
+				break
+			}
+		}
+		costTmp := time.Since(start)
+		cost := float64(costTmp.Nanoseconds()) / (1000 * 1000)
+		c.cost += cost
+		if costTmp > c.maxCost {
+			c.maxCost = costTmp
+		}
+		c.count += 1
+	}
+	return nil
+}
+
+func TestClientEcho(clientnum, msgcount, msglen, sendInterval, echoInterval int, openStream func() (*kcp.UDPStream, error)) {
+	baseSleep := time.Second * 2
+	extraSleep := time.Duration(clientnum*3/2) * time.Millisecond
+
+	batch := 100
+	batchCount := (clientnum + batch - 1) / batch
+	batchSleep := extraSleep / time.Duration(batchCount)
+
+	clients := make([]*client, clientnum)
+
+	kcp.Logf(kcp.WARN, "TestClientEcho clientnum:%v batchCount:%v batchSleep:%v", clientnum, batchCount, batchSleep)
+
+	var wg sync.WaitGroup
+	wg.Add(clientnum)
+
+	for i := 0; i < batchCount; i++ {
+		batchNum := batch
+		if i == batchCount-1 {
+			batchNum = clientnum - i*batch
+		}
+
+		kcp.Logf(kcp.WARN, "TestClientEcho clientnum:%v batchIdx:%v batchNum:%v", clientnum, i, batchNum)
+
+		for j := 0; j < batchNum; j++ {
+			go func(batchIdx, idx int) {
+				defer wg.Done()
+				stream, err := openStream()
+				checkError(err)
+				c := &client{
+					UDPStream: stream,
+				}
+				clients[batchIdx*batch+idx] = c
+				time.Sleep(baseSleep + extraSleep - time.Duration(batchIdx)*batchSleep)
+				echoTester(c, msglen, msgcount, sendInterval, echoInterval)
+			}(i, j)
+		}
+		time.Sleep(batchSleep)
+	}
+	wg.Wait()
+
+	var avgCostA float64
+	var maxCost time.Duration
+	echocount := 0
+	for _, c := range clients {
+		if c.count != 0 {
+			avgCostA += (c.cost / float64(c.count))
+			echocount += c.count
+			if c.maxCost > maxCost {
+				maxCost = c.maxCost
+			}
+		}
+		c.Close()
+	}
+	avgCost := avgCostA / float64(len(clients))
+
+	kcp.Logf(kcp.WARN, "TestClientEcho clientnum:%v msgcount:%v msglen:%v echocount:%v avgCost:%v maxCost:%v", clientnum, msgcount, msglen, echocount, avgCost, maxCost)
+}
+
+type testOption struct {
+	streamCount  int
+	msgCount     int
+	msgLength    int
+	sendInterval int
+	echoInterval int
+	openStream   func() (*kcp.UDPStream, error)
+}
+
+func handleStreamTest(opt *testOption) {
+	TestClientEcho(opt.streamCount, opt.msgCount, opt.msgLength, opt.sendInterval, opt.echoInterval, opt.openStream)
 }
