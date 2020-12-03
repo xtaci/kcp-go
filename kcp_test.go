@@ -221,7 +221,7 @@ func server(t *testing.T, nodelay, interval, resend, nc int) {
 	buf := make([]byte, 65536)
 	for {
 		n, err := stream.Read(buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			return
 		}
 		stream.Write(buf[:n])
@@ -263,7 +263,7 @@ func handleEchoClient(stream *UDPStream) {
 	buf := make([]byte, 65536)
 	for {
 		n, err := stream.Read(buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			return
 		}
 		stream.Write(buf[:n])
@@ -319,7 +319,7 @@ func echoTester(stream *UDPStream, msglen, msgcount int) error {
 		nrecv := 0
 		for {
 			n, err := stream.Read(buf)
-			if err != nil {
+			if n == 0 && err != nil {
 				return err
 			}
 			nrecv += n
@@ -466,7 +466,7 @@ func TestLanBroken(t *testing.T) {
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		stream.Write([]byte(msg))
-		if n, err := stream.Read(buf); err == nil {
+		if n, err := stream.Read(buf); n != 0 {
 			if string(buf[:n]) != msg {
 				t.Fatal("TestSendRecv msg not equal", err)
 			}
@@ -511,7 +511,7 @@ func TestSendRecv(t *testing.T) {
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		stream.Write([]byte(msg))
-		if n, err := stream.Read(buf); err == nil {
+		if n, err := stream.Read(buf); n != 0 {
 			if string(buf[:n]) != msg {
 				t.Fatal("TestSendRecv msg not equal", err)
 			}
@@ -531,7 +531,7 @@ func tinyRecvServer(t *testing.T) {
 	buf := make([]byte, 2)
 	for {
 		n, err := stream.Read(buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			return
 		}
 		stream.Write(buf[:n])
@@ -581,6 +581,79 @@ func TestTinyBufferReceiver(t *testing.T) {
 	}
 }
 
+func randomSendServer(t *testing.T, size int, sizeMax int) {
+	stream, err := serverTransport.Accept()
+	if err != nil {
+		Logf(ERROR, "echoServer accept err:%v", err)
+	}
+	defer stream.Close()
+
+	buf := make([]byte, size)
+	for i := 0; i < len(buf); i++ {
+		buf[i] = byte((i % 256))
+	}
+
+	sendSizeMax := sizeMax
+	totalSendSize := 0
+
+	for {
+		sendSize := rand.Intn(sendSizeMax)
+		if totalSendSize+sendSize > size {
+			sendSize = size - totalSendSize
+		}
+		stream.Write(buf[totalSendSize : totalSendSize+sendSize])
+		totalSendSize += sendSize
+		if totalSendSize >= size {
+			break
+		}
+	}
+}
+
+func TestRandomBufferReceiver(t *testing.T) {
+	size := 1024 * 1024
+	sizeMax := 1024 * 128
+	go randomSendServer(t, size, sizeMax)
+
+	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream.Close()
+
+	rcevSizeMax := sizeMax
+	totalRecvSize := 0
+	buf := make([]byte, size)
+	maxN := 0
+	for {
+		recvSize := rand.Intn(rcevSizeMax)
+		if totalRecvSize+recvSize > size {
+			recvSize = size - totalRecvSize
+		}
+		n, err := stream.Read(buf[totalRecvSize : totalRecvSize+recvSize])
+		recvSize = n
+		if n > maxN {
+			maxN = n
+		}
+		if err != nil {
+			t.Fatalf("read size wrong or err is not nil. n:%v recvSize:%v err:%v", n, recvSize, err)
+		}
+		for i := totalRecvSize; i < totalRecvSize+recvSize; i++ {
+			if buf[i] != byte(i%256) {
+				t.Fatalf("random buf read faild. i:%v value:%v target:%v", i, buf[i], byte(i%256))
+			}
+		}
+		totalRecvSize += recvSize
+		if totalRecvSize >= size {
+			break
+		}
+	}
+	n, err := stream.Read(buf)
+	if n != 0 {
+		t.Fatalf("read size wrong or err is not eof. n:%v err:%v", n, err)
+	}
+	log.Printf("maxN:%v", maxN)
+}
+
 func TestClose(t *testing.T) {
 	go echoServer()
 
@@ -602,8 +675,8 @@ func TestClose(t *testing.T) {
 
 	stream.CloseWrite()
 	n, err = stream.Read(buf[:5])
-	if n == 0 || err != nil {
-		t.Fatalf("Read after CloseWrite misbehavior. err:%v", err)
+	if n == 0 {
+		t.Fatalf("Read after CloseWrite misbehavior. n:%v err:%v", n, err)
 	}
 
 	n, err = stream.Write(buf)
@@ -776,7 +849,7 @@ func iobridge(src io.Reader, dst io.Writer) {
 	buf := bufPool.Get().(*[]byte)
 	for {
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			Logf(INFO, "iobridge reading err:%v n:%v", err, n)
 			break
 		}
@@ -851,10 +924,10 @@ func randString(n int) string {
 	return string(b)
 }
 
-func TestTcpFileTransfer(t *testing.T) {
+func TestTCPFileTransfer(t *testing.T) {
 	lFile := randString(1024 * 512)
 	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 1000)
+	rFile := randString(1024 * 1024 * 16)
 	rReader := strings.NewReader(rFile)
 
 	lh := md5.New()
@@ -915,10 +988,10 @@ func TestTcpFileTransfer(t *testing.T) {
 	<-finish
 }
 
-func TestFileTransfer(t *testing.T) {
-	lFile := randString(1024 * 512)
+func TestUDPFileTransfer(t *testing.T) {
+	lFile := randString(1024)
 	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 100)
+	rFile := randString(1024 * 1024 * 16)
 	rReader := strings.NewReader(rFile)
 
 	lh := md5.New()
@@ -942,7 +1015,8 @@ func TestFileTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileTransferClient open stream %v", err)
 		}
-		clientStream.SetWindowSize(256, 256)
+		clientStream.SetNoDelay(1, 20, 2, 1)
+		clientStream.SetWindowSize(32, 64)
 	}()
 
 	go func() {
@@ -950,7 +1024,8 @@ func TestFileTransfer(t *testing.T) {
 		if err != nil {
 			t.Fatalf("FileTransferServer Accept stream %v", err)
 		}
-		serverStream.SetWindowSize(256, 256)
+		serverStream.SetNoDelay(1, 20, 2, 1)
+		serverStream.SetWindowSize(32, 64)
 	}()
 
 	for {

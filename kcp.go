@@ -1165,6 +1165,10 @@ func (kcp *KCP) remove_front(q []segment, n int) []segment {
 	return q[n:]
 }
 
+func (kcp *KCP) probe_ask_tell() bool {
+	return (kcp.probe & IKCP_ASK_TELL) != 0
+}
+
 // Release all cached outgoing segments
 func (kcp *KCP) ReleaseTX() {
 	for k := range kcp.snd_queue {

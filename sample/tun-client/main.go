@@ -1,21 +1,33 @@
 package main
 
 import (
+	"crypto/md5"
+	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"log"
 	"math/rand"
 	"net"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	kcp "github.com/ldcsoftware/kcp-go"
 	"github.com/urfave/cli"
+)
+
+const (
+	DefaultTest = iota
+	FileTransferTest
+	StreamEchoTest
+	CmdMax
 )
 
 var logs [5]*log.Logger
@@ -67,7 +79,7 @@ func toUdpStreamBridge(dst *kcp.UDPStream, src *net.TCPConn) (wcount int, wcost 
 	for {
 		start := 0
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "toUdpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
@@ -91,7 +103,7 @@ func toTcpStreamBridge(dst *net.TCPConn, src *kcp.UDPStream) (wcount int, wcost 
 
 	for {
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "toTcpStreamBridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
@@ -115,7 +127,7 @@ func iobridge(dst io.Writer, src io.Reader) (wcount int, wcost float64, err erro
 
 	for {
 		n, err := src.Read(*buf)
-		if err != nil {
+		if n == 0 && err != nil {
 			kcp.Logf(kcp.ERROR, "iobridge reading err:%v n:%v", err, n)
 			return wcount, wcost, err
 		}
@@ -283,6 +295,11 @@ func main() {
 			Value: "127.0.0.1:7900",
 			Usage: "target address",
 		},
+		cli.StringFlag{
+			Name:  "cmdAddr",
+			Value: "0.0.0.0:23000",
+			Usage: "cmd address",
+		},
 		cli.IntFlag{
 			Name:  "logLevel",
 			Value: 2,
@@ -357,11 +374,22 @@ func main() {
 			Value: 0,
 			Usage: "test echo interval",
 		},
+		cli.IntFlag{
+			Name:  "testSendFileSize",
+			Value: 0,
+			Usage: "test send file size",
+		},
+		cli.IntFlag{
+			Name:  "testRecvFileSize",
+			Value: 0,
+			Usage: "test recv file size",
+		},
 	}
 	myApp.Action = func(c *cli.Context) error {
 		listenAddr := c.String("listenAddr")
 		listenAddrD := c.String("listenAddrD")
 		targetAddr := c.String("targetAddr")
+		cmdAddr := c.String("cmdAddr")
 
 		localIp := c.String("localIp")
 		lPortS := c.String("localPortS")
@@ -393,6 +421,8 @@ func main() {
 		testMsgLen := c.Int("testMsgLen")
 		testSendInterval := c.Int("testSendInterval")
 		testEchoInterval := c.Int("testEchoInterval")
+		testSendFileSize := c.Int("testSendFileSize")
+		testRecvFileSize := c.Int("testRecvFileSize")
 
 		transmitTunsS := c.String("transmitTuns")
 		transmitTuns, err := strconv.Atoi(transmitTunsS)
@@ -401,6 +431,7 @@ func main() {
 		fmt.Printf("Action listenAddr:%v\n", listenAddr)
 		fmt.Printf("Action listenAddrD:%v\n", listenAddrD)
 		fmt.Printf("Action targetAddr:%v\n", targetAddr)
+		fmt.Printf("Action cmdAddr:%v\n", cmdAddr)
 		fmt.Printf("Action localIp:%v\n", localIp)
 		fmt.Printf("Action localPortS:%v\n", localPortS)
 		fmt.Printf("Action localPortE:%v\n", localPortE)
@@ -422,6 +453,8 @@ func main() {
 		fmt.Printf("Action testMsgLen:%v\n", testMsgLen)
 		fmt.Printf("Action testSendInterval:%v\n", testSendInterval)
 		fmt.Printf("Action testEchoInterval:%v\n", testEchoInterval)
+		fmt.Printf("Action testSendFileSize:%v\n", testSendFileSize)
+		fmt.Printf("Action testRecvFileSize:%v\n", testRecvFileSize)
 
 		kcp.Logf = func(lvl kcp.LogLevel, f string, args ...interface{}) {
 			if int(lvl) >= logLevel {
@@ -462,15 +495,56 @@ func main() {
 			remotes = append(remotes, remoteIp+":"+strconv.Itoa(portS))
 		}
 
-		addr, err := net.ResolveTCPAddr("tcp", listenAddr)
-		checkError(err)
-		listener, err := net.ListenTCP("tcp", addr)
-		checkError(err)
+		localIdx := 0
+		remoteIdx := 0
 
-		addrD, err := net.ResolveTCPAddr("tcp", listenAddrD)
-		checkError(err)
-		listenerD, err := net.ListenTCP("tcp", addrD)
-		checkError(err)
+		newUDPStream := func() (stream *kcp.UDPStream, err error) {
+			tunLocals := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunLocals = append(tunLocals, locals[localIdx%len(locals)])
+				localIdx++
+			}
+			tunRemotes := []string{}
+			for i := 0; i < transmitTuns; i++ {
+				tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
+				remoteIdx++
+			}
+			start := time.Now()
+			stream, err = transport.OpenTimeout(tunLocals, tunRemotes, time.Duration(timeout)*time.Millisecond)
+			if err != nil {
+				kcp.Logf(kcp.ERROR, "OpenTimeout failed. err:%v \n", err)
+				return nil, err
+			}
+			stream.SetWindowSize(wndSize, wndSize*2)
+			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
+			stream.SetParallelXmit(uint32(parallelXmit))
+
+			kcp.Logf(kcp.WARN, "Open UDPStream. uuid:%v cost:%v", stream.GetUUID(), time.Since(start))
+			return stream, nil
+		}
+
+		setCmd := func(cmd int, params ...int) {
+			cmdStr := fmt.Sprintf("%v", cmd)
+			for i := 0; i < len(params); i++ {
+				cmdStr += " "
+				cmdStr += fmt.Sprintf("%v", params[i])
+			}
+			cmdStr += "\n"
+			log.Printf("set cmd:%v", cmdStr)
+
+			cmdConn, err := net.Dial("tcp", cmdAddr)
+			if err != nil {
+				log.Fatalf("set cmd err:%v", err)
+				return
+			}
+			defer cmdConn.Close()
+			n, err := cmdConn.Write([]byte(cmdStr))
+			if n == 0 || err != nil {
+				log.Fatalf("cmd write n:%v err:%v", n, err)
+				return
+			}
+			time.Sleep(time.Second)
+		}
 
 		go func() {
 			var intervalSeconds uint64 = 10
@@ -497,6 +571,11 @@ func main() {
 		}()
 
 		go func() {
+			addrD, err := net.ResolveTCPAddr("tcp", listenAddrD)
+			checkError(err)
+			listenerD, err := net.ListenTCP("tcp", addrD)
+			checkError(err)
+
 			for {
 				conn, err := listenerD.AcceptTCP()
 				checkError(err)
@@ -513,60 +592,48 @@ func main() {
 			}
 		}()
 
-		localIdx := 0
-		remoteIdx := 0
+		go func() {
+			addr, err := net.ResolveTCPAddr("tcp", listenAddr)
+			checkError(err)
+			listener, err := net.ListenTCP("tcp", addr)
+			checkError(err)
 
-		newUDPStream := func() (stream *kcp.UDPStream, err error) {
-			tunLocals := []string{}
-			for i := 0; i < transmitTuns; i++ {
-				tunLocals = append(tunLocals, locals[localIdx%len(locals)])
-				localIdx++
-			}
-			tunRemotes := []string{}
-			for i := 0; i < transmitTuns; i++ {
-				tunRemotes = append(tunRemotes, remotes[remoteIdx%len(remotes)])
-				remoteIdx++
-			}
-			start := time.Now()
-			stream, err = transport.OpenTimeout(tunLocals, tunRemotes, time.Duration(timeout)*time.Millisecond)
-			if err != nil {
-				kcp.Logf(kcp.ERROR, "OpenTimeout failed. err:%v \n", err)
-				return nil, err
-			}
-			stream.SetWindowSize(wndSize, wndSize)
-			stream.SetNoDelay(kcp.FastStreamOption.Nodelay, interval, kcp.FastStreamOption.Resend, kcp.FastStreamOption.Nc)
-			stream.SetParallelXmit(uint32(parallelXmit))
-
-			kcp.Logf(kcp.WARN, "Open UDPStream. uuid:%v cost:%v", stream.GetUUID(), time.Since(start))
-			return stream, nil
-		}
-
-		testOpt := &testOption{
-			streamCount:  testStreamCount,
-			msgCount:     testMsgCount,
-			msgLength:    testMsgLen,
-			sendInterval: testSendInterval,
-			echoInterval: testEchoInterval,
-			openStream:   newUDPStream,
-		}
-		if testStreamCount != 0 && testMsgCount != 0 && testMsgLen != 0 {
-			go handleStreamTest(testOpt)
-		}
-
-		for {
-			conn, err := listener.AcceptTCP()
-			if err != nil {
-				continue
-			}
-			go func() {
-				stream, err := newUDPStream()
+			for {
+				conn, err := listener.AcceptTCP()
 				if err != nil {
-					return
+					continue
 				}
-				handleClient(stream, conn)
-			}()
+				go func() {
+					stream, err := newUDPStream()
+					if err != nil {
+						return
+					}
+					handleClient(stream, conn)
+				}()
+			}
+		}()
+
+		if testStreamCount != 0 && testMsgCount != 0 && testMsgLen != 0 {
+			testOpt := &streamEchoTestOption{
+				streamCount:  testStreamCount,
+				msgCount:     testMsgCount,
+				msgLength:    testMsgLen,
+				sendInterval: testSendInterval,
+				echoInterval: testEchoInterval,
+			}
+			setCmd(StreamEchoTest)
+			handleStreamTest(testOpt, newUDPStream)
 		}
-		return nil
+
+		if testSendFileSize != 0 && testRecvFileSize != 0 {
+			testOpt := &fileTransferTestOption{
+				size: testSendFileSize,
+			}
+			setCmd(FileTransferTest, testRecvFileSize)
+			handleFileTransfer(testOpt, newUDPStream)
+		}
+
+		select {}
 	}
 
 	myApp.Run(os.Args)
@@ -606,7 +673,7 @@ func echoTester(c *client, msglen, msgcount, sendInterval, echoInterval int) (er
 		var n int
 		for {
 			n, err = c.Read(buf)
-			if err != nil {
+			if n == 0 && err != nil {
 				return err
 			}
 			nrecv += n
@@ -683,15 +750,183 @@ func TestClientEcho(clientnum, msgcount, msglen, sendInterval, echoInterval int,
 	kcp.Logf(kcp.WARN, "TestClientEcho clientnum:%v msgcount:%v msglen:%v echocount:%v avgCost:%v maxCost:%v", clientnum, msgcount, msglen, echocount, avgCost, maxCost)
 }
 
-type testOption struct {
+type streamEchoTestOption struct {
 	streamCount  int
 	msgCount     int
 	msgLength    int
 	sendInterval int
 	echoInterval int
-	openStream   func() (*kcp.UDPStream, error)
 }
 
-func handleStreamTest(opt *testOption) {
-	TestClientEcho(opt.streamCount, opt.msgCount, opt.msgLength, opt.sendInterval, opt.echoInterval, opt.openStream)
+func handleStreamTest(opt *streamEchoTestOption, openStream func() (*kcp.UDPStream, error)) {
+	TestClientEcho(opt.streamCount, opt.msgCount, opt.msgLength, opt.sendInterval, opt.echoInterval, openStream)
+}
+
+type CloseWriteConn interface {
+	CloseWrite() error
+}
+
+type nwriter struct {
+	n int
+}
+
+func (nw *nwriter) Write(b []byte) (n int, err error) {
+	nw.n += len(b)
+	return n, err
+}
+
+type fileToStream struct {
+	src  io.ReadSeeker
+	conn CloseWriteConn
+	md5  string
+	once bool
+	hmd5 hash.Hash
+}
+
+type fileInfo struct {
+	Md5  string `json:"md5"`
+	Size int    `json:"size"`
+}
+
+func (fs *fileToStream) Read(b []byte) (n int, err error) {
+	if !fs.once {
+		fs.once = true
+
+		fs.hmd5 = md5.New()
+		nw := &nwriter{}
+		mw := io.MultiWriter(fs.hmd5, nw)
+		_, err := io.Copy(mw, fs.src)
+		tempHash := fs.hmd5.Sum(nil)
+		fs.md5 = base64.StdEncoding.EncodeToString(tempHash)
+		fs.src.Seek(0, io.SeekStart)
+
+		fi := fileInfo{
+			Md5:  fs.md5,
+			Size: nw.n,
+		}
+		fib, err := json.Marshal(fi)
+		if err != nil {
+			log.Fatal("file info marshal failed. err:%v", err)
+		}
+
+		binary.LittleEndian.PutUint32(b, uint32(len(fib)))
+		n = copy(b[4:], fib)
+		if len(fib) != n {
+			log.Fatalf("fileToStream write md5 failed. err:%v", err)
+		}
+		n += 4
+
+		log.Printf("fileToStream size:%v md5:%v n:%v", nw.n, fs.md5, n)
+		return n, nil
+	}
+	n, err = fs.src.Read(b)
+	if err == io.EOF {
+		fs.conn.CloseWrite()
+	}
+	return n, err
+}
+
+type streamToFile struct {
+	size     int
+	md5      string
+	once     bool
+	recvSize int
+	recvMd5  string
+	hmd5     hash.Hash
+}
+
+func (sf *streamToFile) Write(b []byte) (n int, err error) {
+	if !sf.once {
+		sf.once = true
+
+		if len(b) < 4 {
+			log.Fatalf("b less than 4")
+		}
+		filen := int(binary.LittleEndian.Uint32(b))
+		if len(b) < 4+filen {
+			log.Fatalf("b less then need:%v got:%v", 4+filen, len(b))
+		}
+
+		fi := fileInfo{}
+		err := json.Unmarshal(b[4:4+filen], &fi)
+		if err != nil {
+			log.Fatal("file info unmarshal failed. err:%v", err)
+		}
+		sf.recvMd5 = fi.Md5
+		sf.recvSize = fi.Size
+		sf.hmd5 = md5.New()
+		n = filen + 4
+
+		log.Printf("streamToFile recvSize:%v recvMd5:%v n:%v left:%v \n", fi.Size, fi.Md5, n, len(b)-n)
+		if n >= len(b) {
+			return n, nil
+		} else {
+			b = b[n:]
+		}
+	}
+	if len(sf.md5) != 0 {
+		log.Fatalf("file recv wrong, md5 alreaddy calc. n:%v \n", len(b))
+	}
+
+	sf.size += len(b)
+	nn, err := sf.hmd5.Write(b)
+	n += nn
+	if sf.size >= sf.recvSize {
+		sf.md5 = base64.StdEncoding.EncodeToString(sf.hmd5.Sum(nil))
+	}
+	return n, err
+}
+
+var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
+
+func randString(n int) string {
+	rand.Seed(time.Now().UnixNano())
+	b := make([]rune, n)
+	for i := range b {
+		b[i] = letterRunes[rand.Intn(len(letterRunes))]
+	}
+	return string(b)
+}
+
+type fileTransferTestOption struct {
+	size int
+}
+
+func handleFileTransfer(opt *fileTransferTestOption, openStream func() (*kcp.UDPStream, error)) {
+	file := randString(opt.size)
+	reader := strings.NewReader(file)
+
+	conn, err := openStream()
+	if err != nil {
+		fmt.Println("Error connecting:", err)
+		os.Exit(1)
+	}
+	defer conn.Close()
+
+	shutdown := make(chan bool, 2)
+
+	//send file
+	go func() {
+		fs := &fileToStream{src: reader, conn: conn}
+		iobridge(conn, fs)
+		log.Printf("handleFileTransfer file send finish. md5:%v \n", fs.md5)
+
+		shutdown <- true
+	}()
+
+	//recv file
+	go func() {
+		sf := &streamToFile{}
+		iobridge(sf, conn)
+		log.Printf("handleFileTransfer file recv finish. recvSize:%v recvMd5:%v size:%v md5:%v equal:%v \n",
+			sf.recvSize, sf.recvMd5, sf.size, sf.md5, sf.recvMd5 == sf.md5)
+
+		shutdown <- true
+	}()
+
+	<-shutdown
+	<-shutdown
+
+	log.Printf("handleFileTransfer finish \n")
+	time.Sleep(time.Second * 5)
 }

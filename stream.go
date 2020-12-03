@@ -37,12 +37,14 @@ const (
 )
 
 const (
-	FlagOffset          = gouuid.Size + IKCP_OVERHEAD
-	CleanTimeout        = time.Second * 5
-	HeartbeatInterval   = time.Second * 30
-	DefaultParallelXmit = 4
-	DefaultParallelTime = time.Second * 30
-	DefaultDeadLink     = 10
+	FlagOffset             = gouuid.Size + IKCP_OVERHEAD
+	CleanTimeout           = time.Second * 5
+	HeartbeatInterval      = time.Second * 30
+	DefaultParallelXmit    = 4
+	DefaultParallelTime    = time.Second * 30
+	DefaultDeadLink        = 10
+	DefaultAckNoDelayRatio = 0.7
+	DefaultAckNoDelayCount = 60
 )
 
 type clean_callback func(uuid gouuid.UUID)
@@ -88,7 +90,7 @@ type (
 		chDialEvent    chan struct{} // notify Dial() has finished
 		chReadEvent    chan struct{} // notify Read() can be called without blocking
 		chWriteEvent   chan struct{} // notify Write() can be called without blocking
-		chFlushEvent   chan struct{} // notify start flush timer
+		chFlushEvent   chan bool     // notify start flush timer
 
 		// packets waiting to be sent on wire
 		msgss [][]ipv4.Message
@@ -100,6 +102,9 @@ type (
 
 		pc *parallelCtrl
 		hp *hostParallel
+
+		ackNoDelayRatio float32
+		ackNoDelayCount uint32
 	}
 )
 
@@ -132,7 +137,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.chDialEvent = make(chan struct{}, 1)
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
-	stream.chFlushEvent = make(chan struct{}, 1)
+	stream.chFlushEvent = make(chan bool, 1)
 	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
@@ -149,6 +154,8 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
 	stream.pc = pc
+	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
+	stream.ackNoDelayCount = DefaultAckNoDelayCount
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -294,6 +301,13 @@ func (s *UDPStream) WaitSnd() int {
 	return s.kcp.WaitSnd()
 }
 
+func (s *UDPStream) SetAckNoDelayThreshold(ackNoDelayRatio float32, ackNoDelayCount uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ackNoDelayRatio = ackNoDelayRatio
+	s.ackNoDelayCount = ackNoDelayCount
+}
+
 // GetConv gets conversation id of a session
 func (s *UDPStream) GetConv() uint32      { return s.kcp.conv }
 func (s *UDPStream) GetUUID() gouuid.UUID { return s.uuid }
@@ -312,32 +326,47 @@ func (s *UDPStream) Read(b []byte) (n int, err error) {
 
 	for {
 		s.mu.Lock()
-		if len(s.bufptr) > 0 { // copy from buffer into b, ctrl msg should not cache into this
-			n = copy(b, s.bufptr)
-			s.bufptr = s.bufptr[n:]
-			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
-			return n, nil
-		}
-
-		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
-			// if necessary resize the stream buffer to guarantee a sufficent buffer space
-			if cap(s.recvbuf) < size {
-				s.recvbuf = make([]byte, size)
+		for {
+			if len(s.bufptr) > 0 { // copy from buffer into b, ctrl msg should not cache into this
+				copyn := copy(b[n:], s.bufptr)
+				s.bufptr = s.bufptr[copyn:]
+				n += copyn
+				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
+				if n == len(b) {
+					s.notifyFlushEvent(s.kcp.probe_ask_tell())
+					s.mu.Unlock()
+					return n, nil
+				}
 			}
 
-			// resize the length of recvbuf to correspond to data size
-			s.recvbuf = s.recvbuf[:size]
-			s.kcp.Recv(s.recvbuf)
-			flag := s.recvbuf[0]
-			n, err := s.cmdRead(flag, s.recvbuf[1:], b)
-			s.bufptr = s.recvbuf[n+1:]
-			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
-			if flag != PSH {
-				n = 0
+			if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
+				// if necessary resize the stream buffer to guarantee a sufficent buffer space
+				if cap(s.recvbuf) < size {
+					s.recvbuf = make([]byte, size)
+				}
+
+				// resize the length of recvbuf to correspond to data size
+				s.recvbuf = s.recvbuf[:size]
+				s.kcp.Recv(s.recvbuf)
+				flag := s.recvbuf[0]
+				copyn, err := s.cmdRead(flag, s.recvbuf[1:], b[n:])
+				s.bufptr = s.recvbuf[copyn+1:]
+				if flag == PSH {
+					n += copyn
+				}
+				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(copyn))
+				if n == len(b) || err != nil {
+					s.notifyFlushEvent(s.kcp.probe_ask_tell())
+					s.mu.Unlock()
+					return n, err
+				}
+			} else if n > 0 {
+				s.notifyFlushEvent(s.kcp.probe_ask_tell())
+				s.mu.Unlock()
+				return n, nil
+			} else {
+				break
 			}
-			return n, err
 		}
 
 		// deadline for current reading operation
@@ -419,12 +448,9 @@ func (s *UDPStream) WriteBuffer(flag byte, b []byte, heartbeat bool) (n int, err
 			}
 
 			waitsnd = s.kcp.WaitSnd()
-			needFlush := waitsnd >= int(s.kcp.snd_wnd) || waitsnd >= int(s.kcp.rmt_wnd) || !s.writeDelay
+			immediately := waitsnd >= int(s.kcp.snd_wnd) || waitsnd >= int(s.kcp.rmt_wnd) || !s.writeDelay
 			s.mu.Unlock()
-			if needFlush {
-				s.flush()
-			}
-			s.notifyFlushEvent()
+			s.notifyFlushEvent(immediately)
 
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
 
@@ -636,10 +662,23 @@ func (s *UDPStream) update() {
 		case <-s.hrtTicker.C:
 			Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
 			s.WriteFlag(HRT, nil)
-		case <-s.chFlushEvent:
-			if flushTimer == nil {
-				flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond)
+		case immediately := <-s.chFlushEvent:
+			if !immediately {
+				if flushTimer == nil {
+					flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond)
+					flushTimerCh = flushTimer.C
+				}
+				break
+			}
+			if flushTimer != nil {
+				flushTimer.Stop()
+			}
+			if interval := s.flush(); interval != 0 {
+				flushTimer = time.NewTimer(time.Duration(interval) * time.Millisecond)
 				flushTimerCh = flushTimer.C
+			} else {
+				flushTimer = nil
+				flushTimerCh = nil
 			}
 		case <-flushTimerCh:
 			if interval := s.flush(); interval != 0 {
@@ -743,12 +782,10 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 }
 
 func (s *UDPStream) input(data []byte) {
-	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v", s.uuid, s.accepted, len(data))
-
 	var kcpInErrors uint64
 
 	s.mu.Lock()
-	if ret := s.kcp.Input(data[gouuid.Size:], true, s.ackNoDelay); ret != 0 {
+	if ret := s.kcp.Input(data[gouuid.Size:], true, false); ret != 0 {
 		kcpInErrors++
 	}
 
@@ -764,9 +801,13 @@ func (s *UDPStream) input(data []byte) {
 	if !s.accepted && s.kcp.snd_una == 1 {
 		s.notifyDialEvent()
 	}
-	s.mu.Unlock()
 
-	s.notifyFlushEvent()
+	acklen := len(s.kcp.acklist)
+	immediately := (s.ackNoDelay && acklen > 0) || uint32(acklen) > s.ackNoDelayCount || (float32(acklen)/float32(s.kcp.snd_wnd) > s.ackNoDelayRatio)
+	s.mu.Unlock()
+	s.notifyFlushEvent(immediately)
+
+	// Logf(DEBUG, "UDPStream::input uuid:%v accepted:%v len:%v rmtWnd:%v mmediately:%v", s.uuid, s.accepted, len(data), s.kcp.rmt_wnd, immediately)
 
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
@@ -796,9 +837,9 @@ func (s *UDPStream) notifyWriteEvent() {
 	}
 }
 
-func (s *UDPStream) notifyFlushEvent() {
+func (s *UDPStream) notifyFlushEvent(immediately bool) {
 	select {
-	case s.chFlushEvent <- struct{}{}:
+	case s.chFlushEvent <- immediately:
 	default:
 	}
 }
