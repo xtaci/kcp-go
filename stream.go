@@ -90,7 +90,8 @@ type (
 		chDialEvent    chan struct{} // notify Dial() has finished
 		chReadEvent    chan struct{} // notify Read() can be called without blocking
 		chWriteEvent   chan struct{} // notify Write() can be called without blocking
-		chFlushEvent   chan bool     // notify start flush timer
+		chFlushImmed   chan struct{} // notify start flush timer
+		chFlushDelay   chan struct{} // notify start flush timer
 
 		// packets waiting to be sent on wire
 		msgss [][]ipv4.Message
@@ -137,7 +138,8 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.chDialEvent = make(chan struct{}, 1)
 	stream.chReadEvent = make(chan struct{}, 1)
 	stream.chWriteEvent = make(chan struct{}, 1)
-	stream.chFlushEvent = make(chan bool, 1)
+	stream.chFlushImmed = make(chan struct{}, 1)
+	stream.chFlushDelay = make(chan struct{}, 1)
 	stream.sendbuf = make([]byte, mtuLimit)
 	stream.recvbuf = make([]byte, mtuLimit)
 	stream.uuid = uuid
@@ -662,14 +664,12 @@ func (s *UDPStream) update() {
 		case <-s.hrtTicker.C:
 			Logf(DEBUG, "UDPStream::heartbeat uuid:%v accepted:%v", s.uuid, s.accepted)
 			s.WriteFlag(HRT, nil)
-		case immediately := <-s.chFlushEvent:
-			if !immediately {
-				if flushTimer == nil {
-					flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond)
-					flushTimerCh = flushTimer.C
-				}
-				break
+		case <-s.chFlushDelay:
+			if flushTimer == nil {
+				flushTimer = time.NewTimer(time.Duration(s.kcp.interval) * time.Millisecond)
+				flushTimerCh = flushTimer.C
 			}
+		case <-s.chFlushImmed:
 			if flushTimer != nil {
 				flushTimer.Stop()
 			}
@@ -838,9 +838,16 @@ func (s *UDPStream) notifyWriteEvent() {
 }
 
 func (s *UDPStream) notifyFlushEvent(immediately bool) {
-	select {
-	case s.chFlushEvent <- immediately:
-	default:
+	if immediately {
+		select {
+		case s.chFlushImmed <- struct{}{}:
+		default:
+		}
+	} else {
+		select {
+		case s.chFlushDelay <- struct{}{}:
+		default:
+		}
 	}
 }
 
