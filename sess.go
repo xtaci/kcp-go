@@ -912,13 +912,13 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
-	var timeout <-chan time.Time
+	l.timeout.Stop()
 	if tdeadline, ok := l.rd.Load().(time.Time); ok && !tdeadline.IsZero() {
-		timeout = time.After(time.Until(tdeadline))
+		l.timeout.Reset(tdeadline.Sub(time.Now()))
 	}
 
 	select {
-	case <-timeout:
+	case <-l.timeout.C:
 		return nil, errors.WithStack(errTimeout)
 	case c := <-l.chAccepts:
 		return c, nil
@@ -939,6 +939,12 @@ func (l *Listener) SetDeadline(t time.Time) error {
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (l *Listener) SetReadDeadline(t time.Time) error {
 	l.rd.Store(t)
+
+	l.timeout.Stop()
+	if !t.IsZero() {
+		l.timeout.Reset(t.Sub(time.Now()))
+	}
+
 	return nil
 }
 
@@ -1018,6 +1024,8 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.chSocketReadError = make(chan struct{})
+	l.timeout = time.NewTimer(time.Hour) // get a paused timer, duration doesn't matter
+	l.timeout.Stop()
 	go l.monitor()
 	return l, nil
 }
