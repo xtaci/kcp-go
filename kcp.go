@@ -132,6 +132,7 @@ type segment struct {
 	resendts uint32
 	fastack  uint32
 	acked    uint32 // mark if the seg has acked
+	fts      uint32 // first send out ts
 	data     []byte
 }
 
@@ -430,7 +431,7 @@ func (kcp *KCP) shrink_buf() {
 	}
 }
 
-func (kcp *KCP) parse_ack(sn uint32) {
+func (kcp *KCP) parse_ack(sn, current uint32) {
 	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
 		return
 	}
@@ -442,6 +443,9 @@ func (kcp *KCP) parse_ack(sn uint32) {
 			// and wait until `una` to delete this, then we don't
 			// have to shift the segments behind forward,
 			// which is an expensive operation for large window
+			if seg.acked == 0 && seg.fts != 0 {
+				statAck(_itimediff(current, seg.fts))
+			}
 			seg.acked = 1
 			kcp.delSegment(seg)
 			break
@@ -467,11 +471,14 @@ func (kcp *KCP) parse_fastack(sn, ts uint32) {
 	}
 }
 
-func (kcp *KCP) parse_una(una uint32) {
+func (kcp *KCP) parse_una(una, current uint32) {
 	count := 0
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
+			if seg.fts != 0 {
+				statAck(_itimediff(current, seg.fts))
+			}
 			kcp.delSegment(seg)
 			count++
 		} else {
@@ -613,6 +620,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	var latest uint32 // the latest ack packet
 	var flag int
 	var inSegs uint64
+	current := currentMs()
 
 	for {
 		var ts, sn, length, una, conv uint32
@@ -648,11 +656,11 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		if regular {
 			kcp.rmt_wnd = uint32(wnd)
 		}
-		kcp.parse_una(una)
+		kcp.parse_una(una, current)
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			kcp.parse_ack(sn)
+			kcp.parse_ack(sn, current)
 			kcp.parse_fastack(sn, ts)
 			flag |= 1
 			latest = ts
@@ -893,6 +901,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			needsend = true
 			segment.rto = kcp.rx_rto
 			segment.resendts = current + segment.rto
+			segment.fts = current
 		} else if segment.fastack >= resent { // fast retransmit
 			needsend = true
 			segment.fastack = 0
@@ -927,6 +936,8 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			segment.ts = current
 			segment.wnd = seg.wnd
 			segment.una = seg.una
+
+			statXmitInterval(segment.xmit, _itimediff(current, segment.fts))
 
 			need := IKCP_OVERHEAD + len(segment.data)
 			makeSpace(need)

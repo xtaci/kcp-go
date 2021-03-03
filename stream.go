@@ -101,16 +101,13 @@ type (
 		parallelTime   time.Duration
 		parallelExpire time.Time
 
-		pc *parallelCtrl
-		hp *hostParallel
-
 		ackNoDelayRatio float32
 		ackNoDelayCount uint32
 	}
 )
 
 // newUDPSession create a new udp session for client or server
-func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *parallelCtrl, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
+func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelSelector, cleancb clean_callback) (stream *UDPStream, err error) {
 	tunnels := sel.Pick(remotes)
 	if len(tunnels) == 0 || len(tunnels) != len(remotes) {
 		return nil, errTunnelPick
@@ -155,7 +152,6 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, pc *paralle
 	stream.cleanTimer = time.NewTimer(CleanTimeout)
 	stream.parallelXmit = uint32(DefaultParallelXmit)
 	stream.parallelTime = DefaultParallelTime
-	stream.pc = pc
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
 
@@ -519,9 +515,6 @@ func (s *UDPStream) Close() error {
 	}
 	s.state = StateClosed
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
-	if s.hp != nil {
-		s.hp.dec()
-	}
 	return nil
 }
 
@@ -621,11 +614,6 @@ func (s *UDPStream) establish() {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-
-	if s.pc != nil {
-		s.hp = s.pc.getHostParallel(s.remotes[0].IP.String())
-		s.hp.inc()
-	}
 	s.state = StateEstablish
 }
 
@@ -736,15 +724,10 @@ func (s *UDPStream) flush() (interval uint32) {
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 	if s.parallelXmit == 0 || s.state == StateNone {
 		return len(s.tunnels)
-	} else if s.hp != nil && s.hp.isParallel() {
-		return len(s.tunnels)
 	} else if xmitMax >= s.parallelXmit && s.parallelExpire.IsZero() {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		s.parallelExpire = time.Now().Add(s.parallelTime)
 		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-		if s.hp != nil {
-			s.hp.incParallel()
-		}
 		return len(s.tunnels)
 	} else if s.parallelExpire.IsZero() {
 		return 1

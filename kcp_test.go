@@ -90,10 +90,7 @@ func Init(l LogLevel) {
 	Logf(INFO, "init")
 
 	topt := &TransportOption{
-		DialTimeout:          time.Second * 2,
-		ParallelCheckPeriods: 2,
-		ParallelStreamRate:   0.1,
-		ParallelDuration:     time.Second * 60,
+		DialTimeout: time.Second * 2,
 	}
 
 	var err error
@@ -697,9 +694,15 @@ func TestClose(t *testing.T) {
 }
 
 func TestSNMP(t *testing.T) {
+	if len(DefaultSnmp.Header()) != len(DefaultSnmp.ToSlice()) {
+		t.Fatalf("test snmp header not equal with value")
+	}
+	for i := 0; i < STAT_XMIT_MAX; i++ {
+		statXmitInterval(uint32(i+1), 2)
+	}
+
 	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
 	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
 	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
 
 	currEstab := DefaultSnmp.CurrEstab
@@ -779,39 +782,6 @@ func TestAcceptBackuplog(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-}
-
-func TestGlobalParallel(t *testing.T) {
-	hpc := clientTransport.pc.getHostParallel("127.0.0.1")
-	hpc.reset()
-
-	hps := serverTransport.pc.getHostParallel("127.0.0.1")
-	hps.reset()
-
-	clientTunnels[0].Simulate(100, 0, 0)
-	serverTunnels[0].Simulate(100, 0, 0)
-
-	var wg sync.WaitGroup
-	N := 200
-	wg.Add(N)
-	for i := 0; i < N; i++ {
-		go echoServer()
-	}
-
-	for i := 0; i < N; i++ {
-		go func() {
-			defer wg.Done()
-			err := echoClient(64, 64)
-			if err != nil {
-				t.Fatal("echoClient", err)
-			}
-		}()
-	}
-	wg.Wait()
-
-	if !hpc.isParallel() {
-		t.Fatalf("does not enter global parallel")
-	}
 }
 
 func echoSpeed(b *testing.B, bytes int) {

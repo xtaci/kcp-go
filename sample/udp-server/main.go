@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"time"
 )
 
 var listenAddr = flag.String("listenAddr", "127.0.0.1:7900", "listen address")
@@ -29,52 +28,6 @@ type AA interface {
 }
 
 func main() {
-	a := &A{}
-	var aa AA = a
-	var bb AA = a
-	fmt.Println(aa == bb)
-
-	return
-
-	// var nc net.Conn
-	var conns map[net.Conn]int
-	conns[nil] = 1
-	delete(conns, nil)
-	fmt.Println(len(conns))
-	switch conns[nil] {
-	case 0:
-		fmt.Println(0)
-	default:
-		fmt.Println(1)
-	}
-	return
-
-	var respHeaderTimer <-chan time.Time
-	go func() {
-		time.Sleep(time.Second * 3)
-		fmt.Println("time sleep finish")
-		t := time.NewTimer(time.Second)
-		t.Reset(time.Second)
-		respHeaderTimer = t.C
-
-		time.Sleep(time.Second * 6)
-		fmt.Println("time sleep 6 second finish")
-		t.Reset(time.Second)
-		respHeaderTimer = t.C
-	}()
-
-	for {
-		select {
-		case <-respHeaderTimer:
-			fmt.Println("time expire")
-			respHeaderTimer = nil
-		case <-time.After(time.Second):
-			fmt.Println("time after")
-		}
-	}
-
-	return
-
 	flag.Parse()
 
 	fmt.Printf("listenAddr:%v\n", *listenAddr)

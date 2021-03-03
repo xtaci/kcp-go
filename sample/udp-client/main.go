@@ -5,28 +5,23 @@ import (
 	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
+
+type batchConn interface {
+	WriteBatch(ms []ipv4.Message, flags int) (int, error)
+	ReadBatch(ms []ipv4.Message, flags int) (int, error)
+}
 
 var listenAddr = flag.String("listenAddr", "127.0.0.1:7900", "listen address")
 var targetAddr = flag.String("targetAddr", "127.0.0.1:7900", "target address")
 
-type xxx struct {
-	a int
-	b string
-}
-
-func (x *xxx) String() string {
-	return "a" + x.b
-}
-
 func main() {
-	b := -3
-	a := make([]int, 3)
-	c := a[b:]
-	fmt.Println(len(c))
-	return
 	flag.Parse()
 
 	fmt.Printf("listenAddr:%v\n", *listenAddr)
@@ -38,10 +33,15 @@ func main() {
 		return
 	}
 
-	remoteAddr, err := net.ResolveUDPAddr("udp", *targetAddr)
-	if err != nil {
-		fmt.Println("ResolveUDPAddr error:", err)
-		return
+	addrs := strings.Split(*targetAddr, ",")
+	remoteAddrs := make([]*net.UDPAddr, len(addrs))
+	for i := 0; i < len(addrs); i++ {
+		remoteAddr, err := net.ResolveUDPAddr("udp", addrs[i])
+		if err != nil {
+			fmt.Println("ResolveUDPAddr error:", err)
+			return
+		}
+		remoteAddrs[i] = remoteAddr
 	}
 
 	network := "udp4"
@@ -53,6 +53,13 @@ func main() {
 	if err != nil {
 		fmt.Println("ListenUDP error:", addr, err)
 		return
+	}
+
+	var xconn batchConn // for x/net
+	if addr.IP.To4() != nil {
+		xconn = ipv4.NewPacketConn(conn)
+	} else {
+		xconn = ipv6.NewPacketConn(conn)
 	}
 
 	session := make(map[int]time.Time)
@@ -75,6 +82,8 @@ func main() {
 
 	go func() {
 		for {
+			time.Sleep(time.Millisecond * 500)
+
 			mu.Lock()
 			start += 1
 			session[start] = time.Now()
@@ -82,12 +91,23 @@ func main() {
 
 			str := strconv.Itoa(start)
 
-			_, err := conn.WriteTo([]byte(str), remoteAddr)
-			if err != nil {
-				fmt.Println("write error:", err)
+			msgs := make([]ipv4.Message, len(remoteAddrs))
+			for i := 0; i < len(remoteAddrs); i++ {
+				msg := ipv4.Message{}
+				msg.Buffers = [][]byte{[]byte(str)}
+				msg.Addr = remoteAddrs[i]
+				msgs[i] = msg
 			}
 
-			time.Sleep(time.Millisecond * 500)
+			n, err := xconn.WriteBatch(msgs, 0)
+			if err != nil {
+				fmt.Printf("write batch failed. err:%v \n", err)
+				continue
+			}
+
+			if n != len(remoteAddrs) {
+				panic("n is not equal len remote addrs")
+			}
 		}
 	}()
 

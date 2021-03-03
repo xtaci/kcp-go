@@ -5,39 +5,50 @@ import (
 	"sync/atomic"
 )
 
+const (
+	STAT_XMIT_MAX = 10 //
+)
+
 // Snmp defines network statistics indicator
 type Snmp struct {
-	BytesSent        uint64 // bytes sent from upper level
-	BytesReceived    uint64 // bytes received to upper level
-	MaxConn          uint64 // max number of connections ever reached
-	ActiveOpens      uint64 // accumulated active open connections
-	PassiveOpens     uint64 // accumulated passive open connections
-	CurrEstab        uint64 // current number of established connections
-	DialTimeout      uint64 // dial timeout count
-	InErrs           uint64 // UDP read errors reported from net.PacketConn
-	InCsumErrors     uint64 // checksum errors from CRC32
-	KCPInErrors      uint64 // packet iput errors reported from KCP
-	InPkts           uint64 // incoming packets count
-	OutPkts          uint64 // outgoing packets count
-	InSegs           uint64 // incoming KCP segments
-	OutSegs          uint64 // outgoing KCP segments
-	InBytes          uint64 // UDP bytes received
-	OutBytes         uint64 // UDP bytes sent
-	RetransSegs      uint64 // accmulated retransmited segments
-	FastRetransSegs  uint64 // accmulated fast retransmitted segments
-	EarlyRetransSegs uint64 // accmulated early retransmitted segments
-	LostSegs         uint64 // number of segs infered as lost
-	RepeatSegs       uint64 // number of segs duplicated
-	Parallels        uint64 // parallel count
+	BytesSent        uint64   // bytes sent from upper level
+	BytesReceived    uint64   // bytes received to upper level
+	MaxConn          uint64   // max number of connections ever reached
+	ActiveOpens      uint64   // accumulated active open connections
+	PassiveOpens     uint64   // accumulated passive open connections
+	CurrEstab        uint64   // current number of established connections
+	DialTimeout      uint64   // dial timeout count
+	InErrs           uint64   // UDP read errors reported from net.PacketConn
+	InCsumErrors     uint64   // checksum errors from CRC32
+	KCPInErrors      uint64   // packet iput errors reported from KCP
+	InPkts           uint64   // incoming packets count
+	OutPkts          uint64   // outgoing packets count
+	InSegs           uint64   // incoming KCP segments
+	OutSegs          uint64   // outgoing KCP segments
+	InBytes          uint64   // UDP bytes received
+	OutBytes         uint64   // UDP bytes sent
+	RetransSegs      uint64   // accmulated retransmited segments
+	FastRetransSegs  uint64   // accmulated fast retransmitted segments
+	EarlyRetransSegs uint64   // accmulated early retransmitted segments
+	LostSegs         uint64   // number of segs infered as lost
+	RepeatSegs       uint64   // number of segs duplicated
+	Parallels        uint64   // parallel count
+	AckCost          uint64   // ack cost time total
+	AckCount         uint64   // ack count
+	XmitInterval     []uint64 // xmit interval
+	XmitCount        []uint64 // xmit count
 }
 
 func newSnmp() *Snmp {
-	return new(Snmp)
+	snmp := new(Snmp)
+	snmp.XmitInterval = make([]uint64, STAT_XMIT_MAX)
+	snmp.XmitCount = make([]uint64, STAT_XMIT_MAX)
+	return snmp
 }
 
 // Header returns all field names
 func (s *Snmp) Header() []string {
-	return []string{
+	headers := []string{
 		"BytesSent",
 		"BytesReceived",
 		"MaxConn",
@@ -60,13 +71,18 @@ func (s *Snmp) Header() []string {
 		"LostSegs",
 		"RepeatSegs",
 		"Parallels",
+		"AckCost",
+		"AckCount",
 	}
+	headers = append(headers, sliceHeaders("XmitInterval_", STAT_XMIT_MAX)...)
+	headers = append(headers, sliceHeaders("XmitCount_", STAT_XMIT_MAX)...)
+	return headers
 }
 
 // ToSlice returns current snmp info as slice
 func (s *Snmp) ToSlice() []string {
 	snmp := s.Copy()
-	return []string{
+	vs := []string{
 		fmt.Sprint(snmp.BytesSent),
 		fmt.Sprint(snmp.BytesReceived),
 		fmt.Sprint(snmp.MaxConn),
@@ -89,7 +105,12 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.LostSegs),
 		fmt.Sprint(snmp.RepeatSegs),
 		fmt.Sprint(snmp.Parallels),
+		fmt.Sprint(snmp.AckCost),
+		fmt.Sprint(snmp.AckCount),
 	}
+	vs = append(vs, sliceValues(snmp.XmitInterval)...)
+	vs = append(vs, sliceValues(snmp.XmitCount)...)
+	return vs
 }
 
 // Copy make a copy of current snmp snapshot
@@ -117,6 +138,10 @@ func (s *Snmp) Copy() *Snmp {
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
 	d.Parallels = atomic.LoadUint64(&s.Parallels)
+	d.AckCost = atomic.LoadUint64(&s.AckCost)
+	d.AckCount = atomic.LoadUint64(&s.AckCount)
+	sliceCopy(&d.XmitInterval, s.XmitInterval)
+	sliceCopy(&d.XmitCount, s.XmitCount)
 	return d
 }
 
@@ -144,6 +169,10 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
 	atomic.StoreUint64(&s.Parallels, 0)
+	atomic.StoreUint64(&s.AckCost, 0)
+	atomic.StoreUint64(&s.AckCount, 0)
+	sliceReset(s.XmitInterval)
+	sliceReset(s.XmitCount)
 }
 
 // DefaultSnmp is the global KCP connection statistics collector
@@ -151,4 +180,44 @@ var DefaultSnmp *Snmp
 
 func init() {
 	DefaultSnmp = newSnmp()
+}
+
+func sliceHeaders(header string, count int) []string {
+	headers := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		headers = append(headers, header+fmt.Sprint(i+1))
+	}
+	return headers
+}
+
+func sliceValues(vi []uint64) []string {
+	vs := make([]string, 0, len(vi))
+	for i := 0; i < len(vi); i++ {
+		vs = append(vs, fmt.Sprint(vi[i]))
+	}
+	return vs
+}
+
+func sliceCopy(tvi *[]uint64, vi []uint64) {
+	for i := 0; i < len(vi); i++ {
+		(*tvi)[i] = atomic.LoadUint64(&vi[i])
+	}
+}
+
+func sliceReset(vi []uint64) {
+	for i := 0; i < len(vi); i++ {
+		atomic.StoreUint64(&vi[i], 0)
+	}
+}
+
+func statXmitInterval(xmit uint32, interval int32) {
+	if 0 < xmit && xmit <= STAT_XMIT_MAX {
+		atomic.AddUint64(&DefaultSnmp.XmitInterval[xmit-1], uint64(interval))
+		atomic.AddUint64(&DefaultSnmp.XmitCount[xmit-1], 1)
+	}
+}
+
+func statAck(cost int32) {
+	atomic.AddUint64(&DefaultSnmp.AckCost, uint64(cost))
+	atomic.AddUint64(&DefaultSnmp.AckCount, 1)
 }

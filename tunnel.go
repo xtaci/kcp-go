@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/ipv4"
@@ -13,6 +14,10 @@ import (
 
 var (
 	errInvalidOperation = errors.New("invalid operation")
+)
+
+const (
+	DefaultMsgQueueCount = 10
 )
 
 type input_callback func(tunnel *UDPTunnel, data []byte, addr net.Addr)
@@ -28,7 +33,6 @@ type (
 	UDPTunnel struct {
 		conn    *net.UDPConn // the underlying packet connection
 		addr    *net.UDPAddr
-		mu      sync.RWMutex
 		inputcb input_callback
 
 		// notifications
@@ -38,8 +42,8 @@ type (
 		chFlush chan struct{} // notify Write
 
 		// packets waiting to be sent on wire
-		msgsm           map[string]*MsgQueue
-		msgss           [][]ipv4.Message
+		msgqs           []*MsgQueue
+		msgqIdx         int64
 		xconn           batchConn // for x/net
 		xconnWriteError error
 
@@ -73,8 +77,10 @@ func NewUDPTunnel(laddr string, inputcb input_callback) (tunnel *UDPTunnel, err 
 	tunnel.addr = addr
 	tunnel.die = make(chan struct{})
 	tunnel.chFlush = make(chan struct{}, 1)
-	tunnel.msgss = make([][]ipv4.Message, 0)
-	tunnel.msgsm = make(map[string]*MsgQueue)
+	tunnel.msgqs = make([]*MsgQueue, DefaultMsgQueueCount)
+	for i := 0; i < len(tunnel.msgqs); i++ {
+		tunnel.msgqs[i] = &MsgQueue{}
+	}
 
 	// cast to writebatch conn
 	if addr.IP.To4() != nil {
@@ -135,26 +141,8 @@ func (t *UDPTunnel) Simulate(loss float64, delayMin, delayMax int) {
 }
 
 func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
-	target := msgs[0].Addr.String()
-
-	t.mu.RLock()
-	msgq, ok := t.msgsm[target]
-	t.mu.RUnlock()
-
-	if !ok {
-		t.mu.Lock()
-		msgq, ok = t.msgsm[target]
-		if !ok {
-			msgq := &MsgQueue{}
-			t.msgsm[target] = msgq
-			msgq.msgss[msgq.wIdx] = append(msgq.msgss[msgq.wIdx], msgs...)
-			t.mu.Unlock()
-			t.notifyFlush()
-			return
-		}
-		t.mu.Unlock()
-	}
-
+	msgqIdx := atomic.AddInt64(&t.msgqIdx, 1)
+	msgq := t.msgqs[msgqIdx%int64(len(t.msgqs))]
 	msgq.mu.Lock()
 	msgq.msgss[msgq.wIdx] = append(msgq.msgss[msgq.wIdx], msgs...)
 	msgq.mu.Unlock()
@@ -162,8 +150,7 @@ func (t *UDPTunnel) pushMsgs(msgs []ipv4.Message) {
 }
 
 func (t *UDPTunnel) popMsgss(msgss *[][]ipv4.Message) {
-	t.mu.RLock()
-	for _, msgq := range t.msgsm {
+	for _, msgq := range t.msgqs {
 		msgq.mu.Lock()
 		msgs := msgq.msgss[msgq.wIdx]
 		msgq.wIdx = (msgq.wIdx + 1) % 2
@@ -173,7 +160,6 @@ func (t *UDPTunnel) popMsgss(msgss *[][]ipv4.Message) {
 			*msgss = append(*msgss, msgs)
 		}
 	}
-	t.mu.RUnlock()
 }
 
 func (t *UDPTunnel) releaseMsgss(msgss [][]ipv4.Message) {
