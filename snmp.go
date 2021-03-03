@@ -5,44 +5,53 @@ import (
 	"sync/atomic"
 )
 
-const (
-	STAT_XMIT_MAX = 10 //
+var (
+	STAT_XMIT_MIN        = 2
+	STAT_XMIT_MAX        = 6 //
+	STAT_TIME_BUCKET     = []int{40, 120, 360, 720, 1440, 10000}
+	STAT_TIME_BUCKET_CNT = len(STAT_TIME_BUCKET)
 )
 
 // Snmp defines network statistics indicator
 type Snmp struct {
-	BytesSent        uint64   // bytes sent from upper level
-	BytesReceived    uint64   // bytes received to upper level
-	MaxConn          uint64   // max number of connections ever reached
-	ActiveOpens      uint64   // accumulated active open connections
-	PassiveOpens     uint64   // accumulated passive open connections
-	CurrEstab        uint64   // current number of established connections
-	DialTimeout      uint64   // dial timeout count
-	InErrs           uint64   // UDP read errors reported from net.PacketConn
-	InCsumErrors     uint64   // checksum errors from CRC32
-	KCPInErrors      uint64   // packet iput errors reported from KCP
-	InPkts           uint64   // incoming packets count
-	OutPkts          uint64   // outgoing packets count
-	InSegs           uint64   // incoming KCP segments
-	OutSegs          uint64   // outgoing KCP segments
-	InBytes          uint64   // UDP bytes received
-	OutBytes         uint64   // UDP bytes sent
-	RetransSegs      uint64   // accmulated retransmited segments
-	FastRetransSegs  uint64   // accmulated fast retransmitted segments
-	EarlyRetransSegs uint64   // accmulated early retransmitted segments
-	LostSegs         uint64   // number of segs infered as lost
-	RepeatSegs       uint64   // number of segs duplicated
-	Parallels        uint64   // parallel count
-	AckCost          uint64   // ack cost time total
-	AckCount         uint64   // ack count
-	XmitInterval     []uint64 // xmit interval
-	XmitCount        []uint64 // xmit count
+	BytesSent        uint64     // bytes sent from upper level
+	BytesReceived    uint64     // bytes received to upper level
+	MaxConn          uint64     // max number of connections ever reached
+	ActiveOpens      uint64     // accumulated active open connections
+	PassiveOpens     uint64     // accumulated passive open connections
+	CurrEstab        uint64     // current number of established connections
+	DialTimeout      uint64     // dial timeout count
+	InErrs           uint64     // UDP read errors reported from net.PacketConn
+	InCsumErrors     uint64     // checksum errors from CRC32
+	KCPInErrors      uint64     // packet iput errors reported from KCP
+	InPkts           uint64     // incoming packets count
+	OutPkts          uint64     // outgoing packets count
+	InSegs           uint64     // incoming KCP segments
+	OutSegs          uint64     // outgoing KCP segments
+	InBytes          uint64     // UDP bytes received
+	OutBytes         uint64     // UDP bytes sent
+	RetransSegs      uint64     // accmulated retransmited segments
+	FastRetransSegs  uint64     // accmulated fast retransmitted segments
+	EarlyRetransSegs uint64     // accmulated early retransmitted segments
+	LostSegs         uint64     // number of segs infered as lost
+	RepeatSegs       uint64     // number of segs duplicated
+	Parallels        uint64     // parallel count
+	AckCost          []uint64   // ack cost time total
+	AckCount         []uint64   // ack count
+	XmitInterval     [][]uint64 // xmit interval
+	XmitCount        [][]uint64 // xmit count
 }
 
 func newSnmp() *Snmp {
 	snmp := new(Snmp)
-	snmp.XmitInterval = make([]uint64, STAT_XMIT_MAX)
-	snmp.XmitCount = make([]uint64, STAT_XMIT_MAX)
+	snmp.AckCost = make([]uint64, STAT_TIME_BUCKET_CNT)
+	snmp.AckCount = make([]uint64, STAT_TIME_BUCKET_CNT)
+	snmp.XmitInterval = make([][]uint64, STAT_XMIT_MAX)
+	snmp.XmitCount = make([][]uint64, STAT_XMIT_MAX)
+	for i := 0; i < STAT_XMIT_MAX; i++ {
+		snmp.XmitInterval[i] = make([]uint64, STAT_TIME_BUCKET_CNT)
+		snmp.XmitCount[i] = make([]uint64, STAT_TIME_BUCKET_CNT)
+	}
 	return snmp
 }
 
@@ -71,11 +80,11 @@ func (s *Snmp) Header() []string {
 		"LostSegs",
 		"RepeatSegs",
 		"Parallels",
-		"AckCost",
-		"AckCount",
 	}
-	headers = append(headers, sliceHeaders("XmitInterval_", STAT_XMIT_MAX)...)
-	headers = append(headers, sliceHeaders("XmitCount_", STAT_XMIT_MAX)...)
+	headers = append(headers, sliceHeaders1("AckCost", s.AckCost)...)
+	headers = append(headers, sliceHeaders1("AckCount", s.AckCount)...)
+	headers = append(headers, sliceHeaders2("XmitInterval", s.XmitInterval)...)
+	headers = append(headers, sliceHeaders2("XmitCount", s.XmitCount)...)
 	return headers
 }
 
@@ -105,11 +114,11 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.LostSegs),
 		fmt.Sprint(snmp.RepeatSegs),
 		fmt.Sprint(snmp.Parallels),
-		fmt.Sprint(snmp.AckCost),
-		fmt.Sprint(snmp.AckCount),
 	}
-	vs = append(vs, sliceValues(snmp.XmitInterval)...)
-	vs = append(vs, sliceValues(snmp.XmitCount)...)
+	vs = append(vs, sliceValues1(snmp.AckCost)...)
+	vs = append(vs, sliceValues1(snmp.AckCount)...)
+	vs = append(vs, sliceValues2(snmp.XmitInterval)...)
+	vs = append(vs, sliceValues2(snmp.XmitCount)...)
 	return vs
 }
 
@@ -138,10 +147,10 @@ func (s *Snmp) Copy() *Snmp {
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
 	d.Parallels = atomic.LoadUint64(&s.Parallels)
-	d.AckCost = atomic.LoadUint64(&s.AckCost)
-	d.AckCount = atomic.LoadUint64(&s.AckCount)
-	sliceCopy(&d.XmitInterval, s.XmitInterval)
-	sliceCopy(&d.XmitCount, s.XmitCount)
+	sliceCopy1(&d.AckCost, s.AckCost)
+	sliceCopy1(&d.AckCount, s.AckCount)
+	sliceCopy2(&d.XmitInterval, s.XmitInterval)
+	sliceCopy2(&d.XmitCount, s.XmitCount)
 	return d
 }
 
@@ -169,10 +178,10 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
 	atomic.StoreUint64(&s.Parallels, 0)
-	atomic.StoreUint64(&s.AckCost, 0)
-	atomic.StoreUint64(&s.AckCount, 0)
-	sliceReset(s.XmitInterval)
-	sliceReset(s.XmitCount)
+	sliceReset1(s.AckCost)
+	sliceReset1(s.AckCount)
+	sliceReset2(s.XmitInterval)
+	sliceReset2(s.XmitCount)
 }
 
 // DefaultSnmp is the global KCP connection statistics collector
@@ -182,42 +191,89 @@ func init() {
 	DefaultSnmp = newSnmp()
 }
 
-func sliceHeaders(header string, count int) []string {
-	headers := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		headers = append(headers, header+fmt.Sprint(i+1))
+func sliceHeaders2(header string, vss [][]uint64) []string {
+	ret := make([]string, 0, len(vss)*len(vss[0]))
+	for i := 0; i < len(vss); i++ {
+		headers := sliceHeaders1(header+"_"+fmt.Sprint(i+1), vss[i])
+		ret = append(ret, headers...)
 	}
-	return headers
+	return ret
 }
 
-func sliceValues(vi []uint64) []string {
-	vs := make([]string, 0, len(vi))
+func sliceHeaders1(header string, vs []uint64) []string {
+	ret := make([]string, 0, len(vs))
+	for i := 0; i < len(vs); i++ {
+		ret = append(ret, header+"_"+fmt.Sprint(i+1))
+	}
+	return ret
+}
+
+func sliceValues2(vss [][]uint64) []string {
+	ret := make([]string, 0, len(vss)*len(vss[0]))
+	for i := 0; i < len(vss); i++ {
+		vs := sliceValues1(vss[i])
+		ret = append(ret, vs...)
+	}
+	return ret
+}
+
+func sliceValues1(vs []uint64) []string {
+	ret := make([]string, 0, len(vs))
+	for i := 0; i < len(vs); i++ {
+		ret = append(ret, fmt.Sprint(vs[i]))
+	}
+	return ret
+}
+
+func sliceCopy2(tvi *[][]uint64, vi [][]uint64) {
 	for i := 0; i < len(vi); i++ {
-		vs = append(vs, fmt.Sprint(vi[i]))
+		sliceCopy1(&(*tvi)[i], vi[i])
 	}
-	return vs
 }
 
-func sliceCopy(tvi *[]uint64, vi []uint64) {
+func sliceCopy1(tvi *[]uint64, vi []uint64) {
 	for i := 0; i < len(vi); i++ {
 		(*tvi)[i] = atomic.LoadUint64(&vi[i])
 	}
 }
 
-func sliceReset(vi []uint64) {
+func sliceReset2(vi [][]uint64) {
+	for i := 0; i < len(vi); i++ {
+		sliceReset1(vi[i])
+	}
+}
+
+func sliceReset1(vi []uint64) {
 	for i := 0; i < len(vi); i++ {
 		atomic.StoreUint64(&vi[i], 0)
 	}
 }
 
-func statXmitInterval(xmit uint32, interval int32) {
-	if 0 < xmit && xmit <= STAT_XMIT_MAX {
-		atomic.AddUint64(&DefaultSnmp.XmitInterval[xmit-1], uint64(interval))
-		atomic.AddUint64(&DefaultSnmp.XmitCount[xmit-1], 1)
+func findBucketIdx(time int) int {
+	var idx int = 0
+	for ; idx < STAT_TIME_BUCKET_CNT; idx++ {
+		if time <= STAT_TIME_BUCKET[idx] {
+			return idx
+		}
 	}
+	//normally will not go here
+	return idx - 1
 }
 
-func statAck(cost int32) {
-	atomic.AddUint64(&DefaultSnmp.AckCost, uint64(cost))
-	atomic.AddUint64(&DefaultSnmp.AckCount, 1)
+func statXmitInterval(xmit int, interval int) {
+	if xmit < STAT_XMIT_MIN || xmit > STAT_XMIT_MAX {
+		return
+	}
+	idx := findBucketIdx(interval)
+	atomic.AddUint64(&DefaultSnmp.XmitInterval[xmit-1][idx], uint64(interval))
+	atomic.AddUint64(&DefaultSnmp.XmitCount[xmit-1][idx], 1)
+}
+
+func statAck(xmit int, cost int) {
+	if xmit < STAT_XMIT_MIN || xmit > STAT_XMIT_MAX {
+		return
+	}
+	idx := findBucketIdx(cost)
+	atomic.AddUint64(&DefaultSnmp.AckCost[idx], uint64(cost))
+	atomic.AddUint64(&DefaultSnmp.AckCount[idx], 1)
 }

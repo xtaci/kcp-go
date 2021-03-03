@@ -444,7 +444,7 @@ func (kcp *KCP) parse_ack(sn, current uint32) {
 			// have to shift the segments behind forward,
 			// which is an expensive operation for large window
 			if seg.acked == 0 && seg.fts != 0 {
-				statAck(_itimediff(current, seg.fts))
+				statAck(int(seg.xmit), int(_itimediff(current, seg.fts)))
 			}
 			seg.acked = 1
 			kcp.delSegment(seg)
@@ -477,7 +477,7 @@ func (kcp *KCP) parse_una(una, current uint32) {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
 			if seg.fts != 0 {
-				statAck(_itimediff(current, seg.fts))
+				statAck(int(seg.xmit), int(_itimediff(current, seg.fts)))
 			}
 			kcp.delSegment(seg)
 			count++
@@ -937,7 +937,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			segment.wnd = seg.wnd
 			segment.una = seg.una
 
-			statXmitInterval(segment.xmit, _itimediff(current, segment.fts))
+			statXmitInterval(int(segment.xmit), int(_itimediff(current, segment.fts)))
 
 			need := IKCP_OVERHEAD + len(segment.data)
 			makeSpace(need)

@@ -697,8 +697,16 @@ func TestSNMP(t *testing.T) {
 	if len(DefaultSnmp.Header()) != len(DefaultSnmp.ToSlice()) {
 		t.Fatalf("test snmp header not equal with value")
 	}
+
+	DefaultSnmp.Reset()
+	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
+
+	timeList := []int{0, 1, 30, 60, 120, 240, 480, 960, 10800}
 	for i := 0; i < STAT_XMIT_MAX; i++ {
-		statXmitInterval(uint32(i+1), 2)
+		for _, t := range timeList {
+			statXmitInterval(i+1, t)
+			statAck(i+1, t)
+		}
 	}
 
 	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
