@@ -420,6 +420,8 @@ func (kcp *KCP) update_ack(rtt int32) {
 	}
 	rto = uint32(kcp.rx_srtt) + _imax_(kcp.interval, uint32(kcp.rx_rttvar)<<2)
 	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+
+	statRto(int(kcp.rx_rto))
 }
 
 func (kcp *KCP) shrink_buf() {
@@ -444,7 +446,7 @@ func (kcp *KCP) parse_ack(sn, current uint32) {
 			// have to shift the segments behind forward,
 			// which is an expensive operation for large window
 			if seg.acked == 0 && seg.fts != 0 {
-				statAck(int(seg.xmit), int(_itimediff(current, seg.fts)))
+				statAckCost(int(seg.xmit), int(_itimediff(current, seg.fts)))
 			}
 			seg.acked = 1
 			kcp.delSegment(seg)
@@ -476,8 +478,8 @@ func (kcp *KCP) parse_una(una, current uint32) {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
-			if seg.fts != 0 {
-				statAck(int(seg.xmit), int(_itimediff(current, seg.fts)))
+			if seg.acked == 0 && seg.fts != 0 {
+				statAckCost(int(seg.xmit), int(_itimediff(current, seg.fts)))
 			}
 			kcp.delSegment(seg)
 			count++

@@ -98,6 +98,7 @@ type (
 		mu    sync.Mutex
 
 		parallelXmit   uint32
+		xmitMax        uint32
 		parallelTime   time.Duration
 		parallelExpire time.Time
 
@@ -607,10 +608,7 @@ func (s *UDPStream) establish() {
 	Logf(INFO, "UDPStream::establish uuid:%v accepted:%v", s.uuid, s.accepted)
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
-	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
-	if currestab > maxconn {
-		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
-	}
+	atomicSetMax(&DefaultSnmp.MaxConn, currestab)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -728,13 +726,30 @@ func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
 		s.parallelExpire = time.Now().Add(s.parallelTime)
 		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-		return len(s.tunnels)
+		s.xmitMax = xmitMax
+		parallel = int(s.xmitMax) - int(s.parallelXmit) + 2
+		if parallel > len(s.tunnels) {
+			parallel = len(s.tunnels)
+		} else if parallel < 1 {
+			parallel = 1
+		}
+		return parallel
 	} else if s.parallelExpire.IsZero() {
 		return 1
 	} else if s.parallelExpire.After(time.Now()) {
-		return len(s.tunnels)
+		if xmitMax > s.xmitMax {
+			s.xmitMax = xmitMax
+		}
+		parallel = int(s.xmitMax) - int(s.parallelXmit) + 2
+		if parallel > len(s.tunnels) {
+			parallel = len(s.tunnels)
+		} else if parallel < 1 {
+			parallel = 1
+		}
+		return parallel
 	} else {
 		Logf(INFO, "UDPStream::parallelTun leave uuid:%v accepted:%v parallelXmit:%v", s.uuid, s.accepted, s.parallelXmit)
+		s.xmitMax = 0
 		s.parallelExpire = time.Time{}
 		return 1
 	}

@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	gouuid "github.com/satori/go.uuid"
+	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/ipv4"
 )
 
@@ -53,12 +55,10 @@ var rPortCount = 2
 
 var lAddrs = []string{}
 var rAddrs = []string{}
-var remoteIps = []string{}
 var ipsCount = 2
 
 // var lAddrs = []string{"127.0.0.1:17001"}
 // var rAddrs = []string{"127.0.0.1:18001"}
-// var remoteIps = []string{"127.0.0.1"}
 
 var clientSel *TestSelector
 var clientTransport *UDPTransport
@@ -82,9 +82,6 @@ func Init(l LogLevel) {
 	}
 	for i := 0; i < rPortCount; i++ {
 		rAddrs = append(rAddrs, "127.0.0.1:"+strconv.Itoa(rPortStart+i))
-	}
-	for i := 0; i < ipsCount; i++ {
-		remoteIps = append(remoteIps, "127.0.0.1")
 	}
 
 	Logf(INFO, "init")
@@ -168,8 +165,6 @@ func setTunnelBuffer(sendBuffer, recvBuffer int) error {
 	return nil
 }
 
-const repeat = 16
-
 func checkError(t *testing.T, err error) {
 	if err != nil {
 		Logf(ERROR, "checkError: %+v\n", err)
@@ -207,7 +202,11 @@ func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) 
 	}
 }
 
-func server(t *testing.T, nodelay, interval, resend, nc int) {
+func RandInt(msgDealMinMs, msgDealMaxMs int) int {
+	return rand.Intn(msgDealMaxMs-msgDealMinMs+1) + msgDealMinMs
+}
+
+func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, msgDealMinMs, msgDealMaxMs int) {
 	stream, err := serverTransport.Accept()
 	if err != nil {
 		t.Fatalf("server accept stream failed. err:%v", err)
@@ -215,17 +214,27 @@ func server(t *testing.T, nodelay, interval, resend, nc int) {
 	defer stream.Close()
 	stream.SetNoDelay(nodelay, interval, resend, nc)
 
+	if rtoInit != 0 {
+		stream.kcp.rx_rto = uint32(rtoInit)
+	}
+	if parallelXmit != 0 {
+		stream.SetParallelXmit(uint32(parallelXmit))
+	}
+
 	buf := make([]byte, 65536)
 	for {
 		n, err := stream.Read(buf)
 		if n == 0 && err != nil {
 			return
 		}
+		if msgDealMinMs != 0 && msgDealMaxMs != 0 {
+			time.Sleep(time.Millisecond * time.Duration(RandInt(msgDealMinMs, msgDealMaxMs)))
+		}
 		stream.Write(buf[:n])
 	}
 }
 
-func client(t *testing.T, nodelay, interval, resend, nc int) {
+func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, msgCnt, bufSize int) (total, max int) {
 	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		t.Fatalf("client open stream failed. err:%v", err)
@@ -233,17 +242,33 @@ func client(t *testing.T, nodelay, interval, resend, nc int) {
 	defer stream.Close()
 	stream.SetNoDelay(nodelay, interval, resend, nc)
 
-	buf := make([]byte, 64)
-	var rtt time.Duration
-	for i := 0; i < repeat; i++ {
+	if rtoInit != 0 {
+		stream.kcp.rx_rto = uint32(rtoInit)
+	}
+	if parallelXmit != 0 {
+		stream.SetParallelXmit(uint32(parallelXmit))
+	}
+
+	Logf(INFO, "stream info rto: %v, parallelXmit", stream.kcp.rx_rto, stream.parallelXmit)
+
+	buf := make([]byte, bufSize)
+	var echoTimeAll time.Duration
+	var echoTimeMax time.Duration
+	for i := 0; i < msgCnt; i++ {
 		start := time.Now()
 		stream.Write(buf)
 		io.ReadFull(stream, buf)
-		rtt += time.Now().Sub(start)
+		cost := time.Now().Sub(start)
+		echoTimeAll += cost
+		if cost >= echoTimeMax {
+			echoTimeMax = cost
+		}
 	}
 
-	Logf(INFO, "avg rtt:%v", rtt/repeat)
-	Logf(INFO, "total time: %v for %v round trip:", rtt, repeat)
+	Logf(INFO, "avg rtt: %v, max rtt: %v", echoTimeAll/time.Duration(msgCnt), echoTimeMax)
+	Logf(INFO, "total time: %v for %v round trip:", echoTimeAll, msgCnt)
+
+	return int(echoTimeAll / time.Millisecond), int(echoTimeMax / time.Millisecond)
 }
 
 func handleEchoClient(stream *UDPStream) {
@@ -385,6 +410,63 @@ func sinkClient(nbytes, N int) error {
 	return nil
 }
 
+func testTunnelSimulate(t *testing.T, clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval int, packetLossRate float64) {
+	statLock := sync.Mutex{}
+	echoTimeMax := 0
+	echoTimeAll := 0
+
+	//init tunnel
+	tunnelSimulate(clientTunnels[0:1], packetLossRate, 0, 0)
+	tunnelSimulate(serverTunnels[0:1], packetLossRate, 0, 0)
+
+	wg := sync.WaitGroup{}
+	wg.Add(clientCnt)
+	for i := 0; i < clientCnt; i++ {
+		go server(t, 1, 20, 2, 1, rtoInterval, 4, msgDealMinMs, msgDealMaxMs)
+		go func() {
+			defer wg.Done()
+
+			total, max := client(t, 1, 20, 2, 1, rtoInterval, 4, msgCnt, 1000)
+			statLock.Lock()
+			echoTimeAll += total
+			if max > echoTimeMax {
+				echoTimeMax = max
+			}
+			statLock.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	echoTimeAvg := float64(echoTimeAll) / float64(clientCnt) / float64(msgCnt)
+
+	Logf(WARN,
+		"testTunnelSimulate, clientCnt:%v msgCnt:%v msgDealMinMs:%v msgDealMaxMs:%v rtoInterval:%v packetLossRate:%v echoTimeMax:%v echoTimeAvg:%v",
+		clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval, packetLossRate, echoTimeMax, echoTimeAvg)
+
+	//reset tunnel
+	tunnelSimulate(clientTunnels[0:1], 0, 0, 0)
+	tunnelSimulate(serverTunnels[0:1], 0, 0, 0)
+}
+
+func TestPacketDelay(t *testing.T) {
+	InitLog(WARN)
+
+	var clientCnt = 1
+	var msgCnt = 1
+	var msgDealMinMs = 5
+	var msgDealMaxMs = 100
+	// var rtoIntervalList = []int{100}
+	// var packetLossRateList = []float64{1.0}
+	var rtoIntervalList = []int{30, 50, 70, 100, 150}
+	var packetLossRateList = []float64{0.5, 1.0}
+
+	for _, packetLossRate := range packetLossRateList {
+		for _, rtoInterval := range rtoIntervalList {
+			testTunnelSimulate(t, clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval, packetLossRate)
+		}
+	}
+}
+
 func testlink(t *testing.T, loss float64, delayMin, delayMax int, nodelay, interval, resend, nc int) {
 	Logf(INFO, "testing with nodelay parameters, loss:%v delayMin:%v delayMax:%v nodelay:%v interval:%v resend:%v nc:%v",
 		loss, delayMin, delayMax, nodelay, interval, resend, nc)
@@ -392,8 +474,8 @@ func testlink(t *testing.T, loss float64, delayMin, delayMax int, nodelay, inter
 	tunnelSimulate(clientTunnels, loss, delayMin, delayMax)
 	tunnelSimulate(serverTunnels, loss, delayMin, delayMax)
 
-	go server(t, nodelay, interval, resend, nc)
-	client(t, nodelay, interval, resend, nc)
+	go server(t, nodelay, interval, resend, nc, 0, 0, 0, 0)
+	client(t, nodelay, interval, resend, nc, 0, 0, 16, 64)
 
 	tunnelSimulate(clientTunnels, 0, 0, 0)
 	tunnelSimulate(serverTunnels, 0, 0, 0)
@@ -698,20 +780,44 @@ func TestSNMP(t *testing.T) {
 		t.Fatalf("test snmp header not equal with value")
 	}
 
+	sv := sliceValues1([]uint64{1, 2, 3})
+	assert.Equal(t, "2", sv[1])
+
+	s1 := newSnmp()
+	s1.XmitIntervalMax[2] = 2
+	s2 := s1.Copy()
+	assert.Equal(t, uint64(2), s2.XmitIntervalMax[2])
+
+	s2.Reset()
+	assert.Equal(t, uint64(0), s2.XmitIntervalMax[2])
+
 	DefaultSnmp.Reset()
 	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
 
-	timeList := []int{0, 1, 30, 60, 120, 240, 480, 960, 10800}
-	for i := 0; i < STAT_XMIT_MAX; i++ {
-		for _, t := range timeList {
-			statXmitInterval(i+1, t)
-			statAck(i+1, t)
-		}
-	}
+	statRto(20)
+	assert.Equal(t, uint64(20), DefaultSnmp.RtoMax)
+	statRto(30)
+	assert.Equal(t, uint64(30), DefaultSnmp.RtoMax)
 
-	Logf(INFO, "DefaultSnmp.Copy:%v", DefaultSnmp.Copy())
-	Logf(INFO, "DefaultSnmp.Header:%v", DefaultSnmp.Header())
-	Logf(INFO, "DefaultSnmp.ToSlice:%v", DefaultSnmp.ToSlice())
+	statAckCost(1, 20)
+	assert.Equal(t, uint64(0), DefaultSnmp.AckCostMax)
+	statAckCost(2, 20)
+	assert.Equal(t, uint64(20), DefaultSnmp.AckCostMax)
+	statAckCost(3, 30)
+	assert.Equal(t, uint64(30), DefaultSnmp.AckCostMax)
+	statAckCost(STAT_XMIT_MAX+1, 40)
+	assert.Equal(t, uint64(30), DefaultSnmp.AckCostMax)
+
+	statXmitInterval(1, 20)
+	assert.Equal(t, uint64(0), DefaultSnmp.XmitIntervalMax[0])
+	statXmitInterval(2, 20)
+	assert.Equal(t, uint64(20), DefaultSnmp.XmitIntervalMax[1])
+	statXmitInterval(3, 30)
+	assert.Equal(t, uint64(20), DefaultSnmp.XmitIntervalMax[1])
+	assert.Equal(t, uint64(30), DefaultSnmp.XmitIntervalMax[2])
+	statXmitInterval(STAT_XMIT_MAX+1, 40)
+	assert.Equal(t, uint64(20), DefaultSnmp.XmitIntervalMax[1])
+	assert.Equal(t, uint64(30), DefaultSnmp.XmitIntervalMax[2])
 
 	currEstab := DefaultSnmp.CurrEstab
 	Logf(INFO, "start establish:%v", DefaultSnmp.CurrEstab)
@@ -719,34 +825,81 @@ func TestSNMP(t *testing.T) {
 	locals := []string{"127.0.0.1:10001"}
 	remotes := []string{"127.0.0.1:10002"}
 	_, err := clientTransport.Open(locals, remotes)
-	if err == nil {
-		t.Fatalf("test snmp failed")
-	}
+	assert.Error(t, err)
 
 	Logf(INFO, "open invalid establish:%v", DefaultSnmp.CurrEstab)
-	if currEstab != DefaultSnmp.CurrEstab {
-		t.Fatalf("test snmp failed")
-	}
+	assert.Equal(t, currEstab, DefaultSnmp.CurrEstab)
 
 	go echoServer()
 
 	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
-	if err != nil {
-		t.Fatalf("test snmp failed")
-	}
+	assert.NoError(t, err)
 
 	Logf(INFO, "connect establish:%v", DefaultSnmp.CurrEstab)
-	if currEstab+2 != DefaultSnmp.CurrEstab {
-		t.Fatalf("test snmp failed")
-	}
+	assert.Equal(t, currEstab+2, DefaultSnmp.CurrEstab)
 
 	stream.Close()
 	time.Sleep(time.Millisecond * 500)
 
 	Logf(INFO, "after close establish:%v", DefaultSnmp.CurrEstab)
-	if currEstab != DefaultSnmp.CurrEstab {
-		t.Fatalf("test snmp failed")
+	assert.Equal(t, currEstab, DefaultSnmp.CurrEstab)
+}
+
+func TestParallelTun(t *testing.T) {
+	parallelXmit := 3
+	parallelTime := 200 * time.Millisecond
+	tunnelCnt := 3
+	uuid, _ := gouuid.NewV1()
+	s := &UDPStream{
+		uuid:         uuid,
+		msgss:        make([][]ipv4.Message, 0),
+		parallelXmit: uint32(parallelXmit),
+		parallelTime: parallelTime,
+		tunnels:      make([]*UDPTunnel, tunnelCnt),
+		remotes:      make([]*net.UDPAddr, tunnelCnt),
 	}
+	assert.Equal(t, 3, len(s.tunnels))
+
+	parallel := s.parallelTun(2)
+	assert.Equal(t, 3, parallel)
+	s.state = StateEstablish
+
+	parallel = s.parallelTun(2)
+	assert.Equal(t, 1, parallel)
+
+	parallel = s.parallelTun(3)
+	assert.Equal(t, 2, parallel)
+	parallel = s.parallelTun(1)
+	assert.Equal(t, 2, parallel)
+	parallel = s.parallelTun(4)
+	assert.Equal(t, 3, parallel)
+	parallel = s.parallelTun(5)
+	assert.Equal(t, 3, parallel)
+	parallel = s.parallelTun(1)
+	assert.Equal(t, 3, parallel)
+
+	time.Sleep(parallelTime)
+	parallel = s.parallelTun(1)
+	assert.Equal(t, 1, parallel)
+
+	buf := make([]byte, 100)
+
+	s.output(buf, 1)
+	assert.Equal(t, 1, len(s.msgss[0]))
+
+	s.output(buf, 3)
+	assert.Equal(t, 2, len(s.msgss[0]))
+	assert.Equal(t, 1, len(s.msgss[1]))
+
+	s.output(buf, 4)
+	assert.Equal(t, 3, len(s.msgss[0]))
+	assert.Equal(t, 2, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
+
+	s.output(buf, 5)
+	assert.Equal(t, 4, len(s.msgss[0]))
+	assert.Equal(t, 3, len(s.msgss[1]))
+	assert.Equal(t, 2, len(s.msgss[2]))
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
@@ -902,69 +1055,69 @@ func randString(n int) string {
 	return string(b)
 }
 
-func TestTCPFileTransfer(t *testing.T) {
-	lFile := randString(1024 * 512)
-	lReader := strings.NewReader(lFile)
-	rFile := randString(1024 * 1024 * 16)
-	rReader := strings.NewReader(rFile)
+// func TestTCPFileTransfer(t *testing.T) {
+// 	lFile := randString(1024 * 512)
+// 	lReader := strings.NewReader(lFile)
+// 	rFile := randString(1024 * 1024 * 16)
+// 	rReader := strings.NewReader(rFile)
 
-	lh := md5.New()
-	_, err := io.Copy(lh, lReader)
-	lFileHash := lh.Sum(nil)
-	Logf(INFO, "lFileLen:%v hash:%v err:%v", len(lFile), lFileHash, err)
+// 	lh := md5.New()
+// 	_, err := io.Copy(lh, lReader)
+// 	lFileHash := lh.Sum(nil)
+// 	Logf(INFO, "lFileLen:%v hash:%v err:%v", len(lFile), lFileHash, err)
 
-	rh := md5.New()
-	_, err = io.Copy(rh, rReader)
-	rFileHash := rh.Sum(nil)
-	Logf(INFO, "rFileLen:%v hash:%v err:%v", len(rFile), rFileHash, err)
+// 	rh := md5.New()
+// 	_, err = io.Copy(rh, rReader)
+// 	rFileHash := rh.Sum(nil)
+// 	Logf(INFO, "rFileLen:%v hash:%v err:%v", len(rFile), rFileHash, err)
 
-	lReader.Seek(0, io.SeekStart)
-	rReader.Seek(0, io.SeekStart)
+// 	lReader.Seek(0, io.SeekStart)
+// 	rReader.Seek(0, io.SeekStart)
 
-	l, err := net.Listen("tcp", "100.100.35.71:")
-	if err != nil {
-		t.Fatalf("Listen failed. err: %v", err)
-	}
+// 	l, err := net.Listen("tcp", "100.100.35.71:")
+// 	if err != nil {
+// 		t.Fatalf("Listen failed. err: %v", err)
+// 	}
 
-	var serverConn net.Conn
-	var clientConn net.Conn
+// 	var serverConn net.Conn
+// 	var clientConn net.Conn
 
-	go func() {
-		clientConn, err = net.Dial("tcp", l.Addr().String())
-		if err != nil {
-			fmt.Println("Error connecting:", err)
-			os.Exit(1)
-		}
-	}()
+// 	go func() {
+// 		clientConn, err = net.Dial("tcp", l.Addr().String())
+// 		if err != nil {
+// 			fmt.Println("Error connecting:", err)
+// 			os.Exit(1)
+// 		}
+// 	}()
 
-	go func() {
-		serverConn, err = l.Accept()
-		if err != nil {
-			t.Fatalf("FileTransferServer Accept stream %v", err)
-		}
-	}()
+// 	go func() {
+// 		serverConn, err = l.Accept()
+// 		if err != nil {
+// 			t.Fatalf("FileTransferServer Accept stream %v", err)
+// 		}
+// 	}()
 
-	for {
-		if serverConn != nil && clientConn != nil {
-			break
-		}
-		time.Sleep(time.Millisecond * 100)
-	}
+// 	for {
+// 		if serverConn != nil && clientConn != nil {
+// 			break
+// 		}
+// 		time.Sleep(time.Millisecond * 100)
+// 	}
 
-	finish := make(chan struct{}, 2)
-	go func() {
-		FileTransfer(t, serverConn, rReader, lFileHash)
-		finish <- struct{}{}
-	}()
+// 	finish := make(chan struct{}, 2)
+// 	go func() {
+// 		FileTransfer(t, serverConn, rReader, lFileHash)
+// 		finish <- struct{}{}
+// 	}()
 
-	go func() {
-		FileTransfer(t, clientConn, lReader, rFileHash)
-		finish <- struct{}{}
-	}()
+// 	go func() {
+// 		FileTransfer(t, clientConn, lReader, rFileHash)
+// 		finish <- struct{}{}
+// 	}()
 
-	<-finish
-	<-finish
-}
+// 	<-finish
+// 	<-finish
+// }
 
 func TestUDPFileTransfer(t *testing.T) {
 	lFile := randString(1024)
