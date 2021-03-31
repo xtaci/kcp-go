@@ -720,7 +720,7 @@ func (s *UDPStream) flush() (interval uint32) {
 }
 
 func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
-	if s.parallelXmit == 0 || s.state == StateNone {
+	if s.parallelXmit <= 1 || s.state == StateNone {
 		return len(s.tunnels)
 	} else if xmitMax >= s.parallelXmit && s.parallelExpire.IsZero() {
 		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
