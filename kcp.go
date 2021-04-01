@@ -704,7 +704,6 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	// update rtt with the latest ts
 	// ignore the FEC packet
 	if flag != 0 && regular {
-		current := currentMs()
 		if _itimediff(current, latest) >= 0 {
 			kcp.update_ack(_itimediff(current, latest))
 		}
