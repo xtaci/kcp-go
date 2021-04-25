@@ -14,15 +14,17 @@ func toBatchConn(c net.PacketConn) batchConn {
 }
 
 func readBatchUnavailable(xconn batchConn, err error) bool {
+	ret := false
 	if detector, ok := xconn.(batchErrDetector); ok {
-		return detector.ReadBatchUnavailable(err)
+		ret = detector.ReadBatchUnavailable(err)
 	}
-	return false
+	return ret
 }
 
 func writeBatchUnavailable(xconn batchConn, err error) bool {
+	ret := false
 	if detector, ok := xconn.(batchErrDetector); ok {
-		return detector.WriteBatchUnavailable(err)
+		ret = detector.WriteBatchUnavailable(err)
 	}
-	return false
+	return ret
 }

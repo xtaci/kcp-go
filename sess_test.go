@@ -90,6 +90,8 @@ func dialTinyBufferEcho(port int) (*UDPSession, error) {
 }
 
 //////////////////////////
+type listenFn func(port int) (net.Listener, error)
+
 func listenEcho(port int) (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
@@ -113,7 +115,7 @@ func listenNoEncryption(port int) (net.Listener, error) {
 
 func server(
 	port int,
-	listen func(port int) (net.Listener, error),
+	listen listenFn,
 	handle func(*UDPSession),
 ) net.Listener {
 	l, err := listen(port)
@@ -748,8 +750,25 @@ func (c *customBatchConn) WriteBatchUnavailable(err error) bool {
 	return err.Error() == "unsupported"
 }
 
+func batchListenFn(opt func(pconn *customBatchConn)) listenFn {
+	return func(port int) (net.Listener, error) {
+		udpaddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%v", port))
+		if err != nil {
+			return nil, err
+		}
+		conn, err := net.ListenUDP("udp", udpaddr)
+		if err != nil {
+			return nil, err
+		}
+		pconn := &customBatchConn{UDPConn: conn}
+		opt(pconn)
+		return serveConn(nil, 0, 0, pconn, true)
+	}
+}
+
 func TestCustomBatchConn(t *testing.T) {
-	l := server(0, listenNoEncryption, handleEcho)
+	listen := batchListenFn(func(pconn *customBatchConn) {})
+	l := server(0, listen, handleEcho)
 	defer l.Close()
 
 	// Create a net.PacketConn not owned by the UDPSession.
@@ -794,7 +813,12 @@ func TestCustomBatchConn(t *testing.T) {
 }
 
 func TestCustomBatchConnFallback(t *testing.T) {
-	l := server(0, listenNoEncryption, handleEcho)
+	// should fallback to defaultMonitor()
+	listen := batchListenFn(func(pconn *customBatchConn) {
+		pconn.disableReadBatch = true
+		pconn.disableWriteBatch = true
+	})
+	l := server(0, listen, handleEcho)
 	defer l.Close()
 
 	// Create a net.PacketConn not owned by the UDPSession.

@@ -14,8 +14,8 @@ func toBatchConn(c net.PacketConn) batchConn {
 	if xconn, ok := c.(batchConn); ok {
 		return xconn
 	}
+	var xconn batchConn
 	if _, ok := c.(*net.UDPConn); ok {
-		var xconn batchConn
 		addr, err := net.ResolveUDPAddr("udp", c.LocalAddr().String())
 		if err == nil {
 			if addr.IP.To4() != nil {
@@ -24,9 +24,8 @@ func toBatchConn(c net.PacketConn) batchConn {
 				xconn = ipv6.NewPacketConn(c)
 			}
 		}
-		return xconn
 	}
-	return nil
+	return xconn
 }
 
 func isPacketConn(xconn batchConn) bool {
@@ -53,10 +52,11 @@ func readBatchUnavailable(xconn batchConn, err error) bool {
 		}
 		return false
 	}
+	ret := false
 	if detector, ok := xconn.(batchErrDetector); ok {
-		return detector.ReadBatchUnavailable(err)
+		ret = detector.ReadBatchUnavailable(err)
 	}
-	return false
+	return ret
 }
 
 func writeBatchUnavailable(xconn batchConn, err error) bool {
@@ -73,8 +73,9 @@ func writeBatchUnavailable(xconn batchConn, err error) bool {
 		}
 		return false
 	}
+	ret := false
 	if detector, ok := xconn.(batchErrDetector); ok {
-		return detector.WriteBatchUnavailable(err)
+		ret = detector.WriteBatchUnavailable(err)
 	}
-	return false
+	return ret
 }

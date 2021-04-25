@@ -33,13 +33,11 @@ func (s *UDPSession) defaultReadLoop() {
 	for {
 		if n, addr, err := s.conn.ReadFrom(buf); err == nil {
 			// make sure the packet is from the same source
-			if addr.String() != src {
-				if len(src) == 0 { // set source address
-					src = addr.String()
-				} else {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-					continue
-				}
+			if src == "" { // set source address
+				src = addr.String()
+			} else if addr.String() != src {
+				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+				continue
 			}
 			s.packetInput(buf[:n])
 		} else {
