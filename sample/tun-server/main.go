@@ -12,6 +12,8 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strconv"
 	"strings"
@@ -579,6 +581,10 @@ func main() {
 			err = tunnel.SetWriteBuffer(bufferSize)
 			checkError(err)
 		}
+
+		go func() {
+			http.ListenAndServe("0.0.0.0:6061", nil)
+		}()
 
 		go func() {
 			var intervalSeconds uint64 = 10

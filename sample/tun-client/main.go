@@ -12,6 +12,8 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"strconv"
 	"strings"
@@ -611,6 +613,10 @@ func main() {
 					handleClient(stream, conn)
 				}()
 			}
+		}()
+
+		go func() {
+			http.ListenAndServe("0.0.0.0:6060", nil)
 		}()
 
 		if testStreamCount != 0 && testMsgCount != 0 && testMsgLen != 0 {
