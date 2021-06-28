@@ -153,7 +153,7 @@ func main() {
 	clients := make([]*client, clientcount)
 	batch := 100
 	batchCount := (clientcount + batch - 1) / batch
-	batchSleep := time.Millisecond * 10
+	batchSleep := time.Millisecond * 100
 
 	costs := make([]*CostStat, 0, CostStatMax/CostStatInterval)
 	for i := 0; i < cap(costs); i++ {
