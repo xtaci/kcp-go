@@ -410,6 +410,10 @@ func sinkClient(nbytes, N int) error {
 }
 
 func testTunnelSimulate(t *testing.T, clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval int, packetLossRate float64) {
+	Logf(WARN,
+		"testTunnelSimulate, clientCnt:%v msgCnt:%v msgDealMinMs:%v msgDealMaxMs:%v rtoInterval:%v packetLossRate:%v",
+		clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval, packetLossRate)
+
 	statLock := sync.Mutex{}
 	echoTimeMax := 0
 	echoTimeAll := 0
