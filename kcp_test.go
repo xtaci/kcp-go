@@ -921,62 +921,82 @@ func TestSNMP(t *testing.T) {
 	assert.Equal(t, currEstab, DefaultSnmp.CurrEstab)
 }
 
-// func TestParallelTun(t *testing.T) {
-// 	parallelXmit := 3
-// 	parallelTime := 200 * time.Millisecond
-// 	tunnelCnt := 3
-// 	uuid, _ := gouuid.NewV1()
-// 	s := &UDPStream{
-// 		uuid:         uuid,
-// 		msgss:        make([][]ipv4.Message, 0),
-// 		parallelXmit: uint32(parallelXmit),
-// 		parallelTime: parallelTime,
-// 		tunnels:      make([]*UDPTunnel, tunnelCnt),
-// 		remotes:      make([]*net.UDPAddr, tunnelCnt),
-// 	}
-// 	assert.Equal(t, 3, len(s.tunnels))
+func TestParallelTun(t *testing.T) {
+	parallelXmit := 3
+	parallelTime := 200 * time.Millisecond
+	tunnelCnt := 3
+	uuid, _ := gouuid.NewV1()
+	s := &UDPStream{
+		uuid:         uuid,
+		msgss:        make([][]ipv4.Message, 0),
+		parallelXmit: uint32(parallelXmit),
+		parallelTime: parallelTime,
+		tunnels:      make([]*UDPTunnel, tunnelCnt),
+		remotes:      make([]*net.UDPAddr, tunnelCnt),
+	}
+	assert.Equal(t, 3, len(s.tunnels))
 
-// 	parallel := s.parallelTun(2)
-// 	assert.Equal(t, 3, parallel)
-// 	s.state = StateEstablish
+	parallel, trigger := s.getParallel(2)
+	assert.Equal(t, 1, parallel)
+	assert.False(t, trigger)
 
-// 	parallel = s.parallelTun(2)
-// 	assert.Equal(t, 1, parallel)
+	parallel, trigger = s.getParallel(3)
+	assert.Equal(t, 2, parallel)
+	assert.True(t, trigger)
 
-// 	parallel = s.parallelTun(3)
-// 	assert.Equal(t, 2, parallel)
-// 	parallel = s.parallelTun(1)
-// 	assert.Equal(t, 2, parallel)
-// 	parallel = s.parallelTun(4)
-// 	assert.Equal(t, 3, parallel)
-// 	parallel = s.parallelTun(5)
-// 	assert.Equal(t, 3, parallel)
-// 	parallel = s.parallelTun(1)
-// 	assert.Equal(t, 3, parallel)
+	parallel, trigger = s.getParallel(1)
+	assert.Equal(t, 2, parallel)
+	assert.False(t, trigger)
 
-// 	time.Sleep(parallelTime)
-// 	parallel = s.parallelTun(1)
-// 	assert.Equal(t, 1, parallel)
+	parallel, trigger = s.getParallel(4)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
 
-// 	buf := make([]byte, 100)
+	parallel, trigger = s.getParallel(5)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
 
-// 	s.output(buf, 1)
-// 	assert.Equal(t, 1, len(s.msgss[0]))
+	parallel, trigger = s.getParallel(1)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
 
-// 	s.output(buf, 3)
-// 	assert.Equal(t, 2, len(s.msgss[0]))
-// 	assert.Equal(t, 1, len(s.msgss[1]))
+	time.Sleep(parallelTime)
 
-// 	s.output(buf, 4)
-// 	assert.Equal(t, 3, len(s.msgss[0]))
-// 	assert.Equal(t, 2, len(s.msgss[1]))
-// 	assert.Equal(t, 1, len(s.msgss[2]))
+	parallel, trigger = s.getParallel(1)
+	assert.Equal(t, 1, parallel)
+	assert.False(t, trigger)
 
-// 	s.output(buf, 5)
-// 	assert.Equal(t, 4, len(s.msgss[0]))
-// 	assert.Equal(t, 3, len(s.msgss[1]))
-// 	assert.Equal(t, 2, len(s.msgss[2]))
-// }
+	buf := make([]byte, 100)
+
+	s.output(buf, 1)
+	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 1, len(s.msgss[0]))
+	assert.Equal(t, 1, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
+
+	s.state = StateEstablish
+
+	s.output(buf, 1)
+	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 2, len(s.msgss[0]))
+	assert.Equal(t, 1, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
+
+	s.output(buf, 3)
+	assert.Equal(t, 3, len(s.msgss[0]))
+	assert.Equal(t, 2, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
+
+	s.output(buf, 4)
+	assert.Equal(t, 4, len(s.msgss[0]))
+	assert.Equal(t, 3, len(s.msgss[1]))
+	assert.Equal(t, 2, len(s.msgss[2]))
+
+	s.output(buf, 5)
+	assert.Equal(t, 5, len(s.msgss[0]))
+	assert.Equal(t, 4, len(s.msgss[1]))
+	assert.Equal(t, 3, len(s.msgss[2]))
+}
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
