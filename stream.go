@@ -983,13 +983,13 @@ func (s *UDPStream) encodeDialInfo(locals []string) ([]byte, error) {
 		}
 		addrLen += (1 + len(local))
 	}
-	dialBuf := make([]byte, 1+addrLen)
-	dialBuf = ikcp_encode8u(dialBuf, DV1)
-	dialBuf = ikcp_encode8u(dialBuf, byte(len(locals)))
+	buf := make([]byte, 1+addrLen)
+	encodeBuf := ikcp_encode8u(buf, DV1)
+	encodeBuf = ikcp_encode8u(encodeBuf, byte(len(locals)))
 	for _, local := range locals {
-		dialBuf = encode8uString(dialBuf, local)
+		encodeBuf = encode8uString(encodeBuf, local)
 	}
-	return dialBuf, nil
+	return buf, nil
 }
 
 func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {

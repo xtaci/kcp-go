@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	gouuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/ipv4"
 )
@@ -195,6 +196,80 @@ func TestTransportOption(t *testing.T) {
 	}
 }
 
+func TestDialInfoEncode(t *testing.T) {
+	uuid, err := gouuid.NewV1()
+	assert.NoError(t, err)
+
+	s1 := &UDPStream{
+		uuid: uuid,
+	}
+
+	locals := []string{"abc", "def"}
+	buf, err := s1.encodeDialInfo(locals)
+	assert.NoError(t, err)
+	decodeLocals, err := s1.decodeDialInfo(buf)
+	assert.NoError(t, err)
+
+	assert.Equal(t, len(locals), len(decodeLocals))
+	assert.Equal(t, locals[0], decodeLocals[0])
+	assert.Equal(t, locals[1], decodeLocals[1])
+
+	uuid, err = gouuid.NewV4()
+	assert.NoError(t, err)
+
+	s2 := &UDPStream{
+		uuid: uuid,
+	}
+	buf, err = s2.encodeDialInfo(locals)
+	assert.Error(t, err)
+
+	locals = []string{"127.0.0.1:5678", "127.0.0.1:6789"}
+	buf, err = s2.encodeDialInfo(locals)
+	assert.NoError(t, err)
+
+	decodeLocals, err = s2.decodeDialInfo(buf)
+	assert.NoError(t, err)
+
+	assert.Equal(t, len(locals), len(decodeLocals))
+	assert.Equal(t, locals[0], decodeLocals[0])
+	assert.Equal(t, locals[1], decodeLocals[1])
+}
+
+func TestFrameHeaderEncode(t *testing.T) {
+	uuid, err := gouuid.NewV1()
+	assert.NoError(t, err)
+
+	buf := make([]byte, 17)
+	s1 := &UDPStream{
+		uuid: uuid,
+	}
+	s1.encodeFrameHeader(buf, false)
+	parallel := s1.decodeFrameHeader(buf)
+	assert.False(t, parallel)
+
+	s1.encodeFrameHeader(buf, true)
+	parallel = s1.decodeFrameHeader(buf)
+	assert.False(t, parallel)
+
+	uuid, err = gouuid.NewV4()
+	assert.NoError(t, err)
+
+	s2 := &UDPStream{
+		uuid: uuid,
+	}
+	s2.encodeFrameHeader(buf, false)
+	parallel = s2.decodeFrameHeader(buf)
+	assert.False(t, parallel)
+
+	s2.encodeFrameHeader(buf, true)
+	parallel = s2.decodeFrameHeader(buf)
+	assert.True(t, parallel)
+
+	s2.encodeFrameHeader(buf, true)
+	parallel = s2.decodeFrameHeader(buf[1:])
+	assert.False(t, parallel)
+}
+
 func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) {
 	for _, tunnel := range tunnels {
 		tunnel.Simulate(loss, delayMin, delayMax)
@@ -247,8 +322,6 @@ func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	if parallelXmit != 0 {
 		stream.SetParallelXmit(uint32(parallelXmit))
 	}
-
-	Logf(INFO, "stream info rto: %v, parallelXmit", stream.kcp.rx_rto, stream.parallelXmit)
 
 	buf := make([]byte, bufSize)
 	var echoTimeAll time.Duration
@@ -460,8 +533,8 @@ func TestPacketDelay(t *testing.T) {
 	var msgDealMaxMs = 100
 	// var rtoIntervalList = []int{100}
 	// var packetLossRateList = []float64{1.0}
-	var rtoIntervalList = []int{30, 50, 70, 100, 150}
 	var packetLossRateList = []float64{0.5, 1.0}
+	var rtoIntervalList = []int{30, 50, 70, 100, 150}
 
 	for _, packetLossRate := range packetLossRateList {
 		for _, rtoInterval := range rtoIntervalList {
