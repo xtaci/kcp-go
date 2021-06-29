@@ -15,7 +15,6 @@ import (
 	"testing"
 	"time"
 
-	gouuid "github.com/satori/go.uuid"
 	"github.com/stretchr/testify/assert"
 	"golang.org/x/net/ipv4"
 )
@@ -845,62 +844,62 @@ func TestSNMP(t *testing.T) {
 	assert.Equal(t, currEstab, DefaultSnmp.CurrEstab)
 }
 
-func TestParallelTun(t *testing.T) {
-	parallelXmit := 3
-	parallelTime := 200 * time.Millisecond
-	tunnelCnt := 3
-	uuid, _ := gouuid.NewV1()
-	s := &UDPStream{
-		uuid:         uuid,
-		msgss:        make([][]ipv4.Message, 0),
-		parallelXmit: uint32(parallelXmit),
-		parallelTime: parallelTime,
-		tunnels:      make([]*UDPTunnel, tunnelCnt),
-		remotes:      make([]*net.UDPAddr, tunnelCnt),
-	}
-	assert.Equal(t, 3, len(s.tunnels))
+// func TestParallelTun(t *testing.T) {
+// 	parallelXmit := 3
+// 	parallelTime := 200 * time.Millisecond
+// 	tunnelCnt := 3
+// 	uuid, _ := gouuid.NewV1()
+// 	s := &UDPStream{
+// 		uuid:         uuid,
+// 		msgss:        make([][]ipv4.Message, 0),
+// 		parallelXmit: uint32(parallelXmit),
+// 		parallelTime: parallelTime,
+// 		tunnels:      make([]*UDPTunnel, tunnelCnt),
+// 		remotes:      make([]*net.UDPAddr, tunnelCnt),
+// 	}
+// 	assert.Equal(t, 3, len(s.tunnels))
 
-	parallel := s.parallelTun(2)
-	assert.Equal(t, 3, parallel)
-	s.state = StateEstablish
+// 	parallel := s.parallelTun(2)
+// 	assert.Equal(t, 3, parallel)
+// 	s.state = StateEstablish
 
-	parallel = s.parallelTun(2)
-	assert.Equal(t, 1, parallel)
+// 	parallel = s.parallelTun(2)
+// 	assert.Equal(t, 1, parallel)
 
-	parallel = s.parallelTun(3)
-	assert.Equal(t, 2, parallel)
-	parallel = s.parallelTun(1)
-	assert.Equal(t, 2, parallel)
-	parallel = s.parallelTun(4)
-	assert.Equal(t, 3, parallel)
-	parallel = s.parallelTun(5)
-	assert.Equal(t, 3, parallel)
-	parallel = s.parallelTun(1)
-	assert.Equal(t, 3, parallel)
+// 	parallel = s.parallelTun(3)
+// 	assert.Equal(t, 2, parallel)
+// 	parallel = s.parallelTun(1)
+// 	assert.Equal(t, 2, parallel)
+// 	parallel = s.parallelTun(4)
+// 	assert.Equal(t, 3, parallel)
+// 	parallel = s.parallelTun(5)
+// 	assert.Equal(t, 3, parallel)
+// 	parallel = s.parallelTun(1)
+// 	assert.Equal(t, 3, parallel)
 
-	time.Sleep(parallelTime)
-	parallel = s.parallelTun(1)
-	assert.Equal(t, 1, parallel)
+// 	time.Sleep(parallelTime)
+// 	parallel = s.parallelTun(1)
+// 	assert.Equal(t, 1, parallel)
 
-	buf := make([]byte, 100)
+// 	buf := make([]byte, 100)
 
-	s.output(buf, 1)
-	assert.Equal(t, 1, len(s.msgss[0]))
+// 	s.output(buf, 1)
+// 	assert.Equal(t, 1, len(s.msgss[0]))
 
-	s.output(buf, 3)
-	assert.Equal(t, 2, len(s.msgss[0]))
-	assert.Equal(t, 1, len(s.msgss[1]))
+// 	s.output(buf, 3)
+// 	assert.Equal(t, 2, len(s.msgss[0]))
+// 	assert.Equal(t, 1, len(s.msgss[1]))
 
-	s.output(buf, 4)
-	assert.Equal(t, 3, len(s.msgss[0]))
-	assert.Equal(t, 2, len(s.msgss[1]))
-	assert.Equal(t, 1, len(s.msgss[2]))
+// 	s.output(buf, 4)
+// 	assert.Equal(t, 3, len(s.msgss[0]))
+// 	assert.Equal(t, 2, len(s.msgss[1]))
+// 	assert.Equal(t, 1, len(s.msgss[2]))
 
-	s.output(buf, 5)
-	assert.Equal(t, 4, len(s.msgss[0]))
-	assert.Equal(t, 3, len(s.msgss[1]))
-	assert.Equal(t, 2, len(s.msgss[2]))
-}
+// 	s.output(buf, 5)
+// 	assert.Equal(t, 4, len(s.msgss[0]))
+// 	assert.Equal(t, 3, len(s.msgss[1]))
+// 	assert.Equal(t, 2, len(s.msgss[2]))
+// }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
