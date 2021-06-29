@@ -122,6 +122,7 @@ type UDPTransport struct {
 	die           chan struct{} // notify the listener has closed
 	dieOnce       sync.Once
 	inputQueues   []chan *inputMsg
+	makeUUID      func() (gouuid.UUID, error)
 }
 
 func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport, err error) {
@@ -137,6 +138,7 @@ func NewUDPTransport(sel TunnelSelector, opt *TransportOption) (t *UDPTransport,
 		sel:             sel,
 		die:             make(chan struct{}),
 		inputQueues:     make([]chan *inputMsg, 0),
+		makeUUID:        gouuid.NewV4,
 	}
 	return t, nil
 }
@@ -201,7 +203,7 @@ func (t *UDPTransport) Open(locals, remotes []string) (stream *UDPStream, err er
 func (t *UDPTransport) OpenTimeout(locals, remotes []string, timeout time.Duration) (stream *UDPStream, err error) {
 	Logf(INFO, "UDPTransport::OpenTimeout locals:%v remotes:%v timeout:%v", locals, remotes, timeout)
 
-	uuid, err := gouuid.NewV4()
+	uuid, err := t.makeUUID()
 	if err != nil {
 		Logf(ERROR, "UDPTransport::OpenTimeout NewV4 failed. locals:%v remotes:%v err:%v", locals, remotes, err)
 		return nil, err

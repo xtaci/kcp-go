@@ -851,6 +851,40 @@ func TestClose(t *testing.T) {
 	}
 }
 
+func TestUUIDCompatible(t *testing.T) {
+	go echoServer()
+	go echoServer()
+
+	clientTransport.makeUUID = gouuid.NewV1
+	stream1, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream1.Close()
+
+	clientTransport.makeUUID = gouuid.NewV4
+	stream2, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream2.Close()
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		err := echoTester(stream1, 1024, 10000)
+		assert.NoError(t, err)
+	}()
+	go func() {
+		defer wg.Done()
+		err := echoTester(stream2, 1024, 10000)
+		assert.NoError(t, err)
+	}()
+
+	wg.Wait()
+}
+
 func TestSNMP(t *testing.T) {
 	if len(DefaultSnmp.Header()) != len(DefaultSnmp.ToSlice()) {
 		t.Fatalf("test snmp header not equal with value")
