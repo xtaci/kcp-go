@@ -748,7 +748,7 @@ func (s *UDPStream) tryParallel() bool {
 	atomic.AddUint64(&DefaultSnmp.Parallels, 1)
 	s.xmitMax = s.parallelXmit
 
-	Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v", s.uuid, s.accepted)
+	Logf(INFO, "UDPStream::tryParallel uuid:%v accepted:%v", s.uuid, s.accepted)
 	return true
 }
 
