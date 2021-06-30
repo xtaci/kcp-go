@@ -739,8 +739,8 @@ func (s *UDPStream) flush() (interval uint32) {
 	return
 }
 
-func (s *UDPStream) tryParallel() bool {
-	if !s.parallelExpire.IsZero() {
+func (s *UDPStream) tryParallel(active bool) bool {
+	if active && !s.parallelExpire.IsZero() {
 		return false
 	}
 
@@ -754,7 +754,7 @@ func (s *UDPStream) tryParallel() bool {
 
 func (s *UDPStream) getParallel(xmitMax uint32) (parallel int, trigger bool) {
 	if xmitMax >= s.parallelXmit {
-		trigger = s.tryParallel()
+		trigger = s.tryParallel(true)
 	}
 
 	if s.parallelExpire.IsZero() {
@@ -815,7 +815,7 @@ func (s *UDPStream) input(data []byte) {
 
 	s.mu.Lock()
 	if trigger {
-		s.tryParallel()
+		s.tryParallel(false)
 	}
 	if ret := s.kcp.Input(data[s.headerSize:], true, false); ret != 0 {
 		kcpInErrors++
