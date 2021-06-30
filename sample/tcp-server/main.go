@@ -37,7 +37,7 @@ func handleEcho(conn *net.TCPConn) {
 	}
 }
 
-var listenAddr = flag.String("listenAddr", "0.0.0.0:9259", "listen address")
+var listenAddr = flag.String("listenAddr", "0.0.0.0:7900", "listen address")
 
 func main() {
 	flag.Parse()
