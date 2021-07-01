@@ -655,9 +655,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		}
 
 		// only trust window updates from regular packets. i.e: latest update
-		if regular {
-			kcp.rmt_wnd = uint32(wnd)
-		}
+		kcp.rmt_wnd = uint32(wnd)
 		kcp.parse_una(una, current)
 		kcp.shrink_buf()
 
@@ -683,7 +681,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					repeat = kcp.parse_data(seg)
 				}
 			}
-			if regular && repeat {
+			if repeat {
 				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
 		} else if cmd == IKCP_CMD_WASK {
@@ -1131,6 +1129,10 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int) int {
 		} else {
 			kcp.rx_minrto = IKCP_RTO_MIN
 		}
+		//reset rx_rto
+		kcp.rx_srtt = 0
+		kcp.rx_rttvar = 0
+		kcp.rx_rto = kcp.rx_minrto * 2
 	}
 	if interval >= 0 {
 		if interval > 5000 {

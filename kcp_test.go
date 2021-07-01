@@ -244,12 +244,15 @@ func TestFrameHeaderEncode(t *testing.T) {
 		uuid: uuid,
 	}
 	s1.encodeFrameHeader(buf, false)
-	parallel := s1.decodeFrameHeader(buf)
+	parallel, replica := s1.decodeFrameHeader(buf)
 	assert.False(t, parallel)
+	assert.False(t, replica)
 
 	s1.encodeFrameHeader(buf, true)
-	parallel = s1.decodeFrameHeader(buf)
+	s1.setFrameReplica(buf)
+	parallel, replica = s1.decodeFrameHeader(buf)
 	assert.False(t, parallel)
+	assert.False(t, replica)
 
 	uuid, err = gouuid.NewV4()
 	assert.NoError(t, err)
@@ -258,16 +261,21 @@ func TestFrameHeaderEncode(t *testing.T) {
 		uuid: uuid,
 	}
 	s2.encodeFrameHeader(buf, false)
-	parallel = s2.decodeFrameHeader(buf)
+	s2.setFrameReplica(buf)
+	parallel, replica = s2.decodeFrameHeader(buf)
 	assert.False(t, parallel)
+	assert.True(t, replica)
 
 	s2.encodeFrameHeader(buf, true)
-	parallel = s2.decodeFrameHeader(buf)
+	parallel, replica = s2.decodeFrameHeader(buf)
 	assert.True(t, parallel)
+	assert.False(t, replica)
 
 	s2.encodeFrameHeader(buf, true)
-	parallel = s2.decodeFrameHeader(buf[1:])
+	s2.setFrameReplica(buf)
+	parallel, replica = s2.decodeFrameHeader(buf[1:])
 	assert.False(t, parallel)
+	assert.False(t, replica)
 }
 
 func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) {
@@ -959,7 +967,7 @@ func TestParallelTun(t *testing.T) {
 	parallelXmit := 3
 	parallelTime := 200 * time.Millisecond
 	tunnelCnt := 3
-	uuid, _ := gouuid.NewV1()
+	uuid, _ := gouuid.NewV4()
 	s := &UDPStream{
 		uuid:         uuid,
 		msgss:        make([][]ipv4.Message, 0),
@@ -967,6 +975,7 @@ func TestParallelTun(t *testing.T) {
 		parallelTime: parallelTime,
 		tunnels:      make([]*UDPTunnel, tunnelCnt),
 		remotes:      make([]*net.UDPAddr, tunnelCnt),
+		headerSize:   gouuid.Size + 1,
 	}
 	assert.Equal(t, 3, len(s.tunnels))
 
@@ -1001,12 +1010,19 @@ func TestParallelTun(t *testing.T) {
 	assert.False(t, trigger)
 
 	buf := make([]byte, 100)
-
 	s.output(buf, 1)
 	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
 	assert.Equal(t, 1, len(s.msgss[2]))
+
+	par, replica := s.decodeFrameHeader(s.msgss[0][0].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
+	assert.False(t, par)
+	assert.True(t, replica)
 
 	s.state = StateEstablish
 
@@ -1016,10 +1032,22 @@ func TestParallelTun(t *testing.T) {
 	assert.Equal(t, 1, len(s.msgss[1]))
 	assert.Equal(t, 1, len(s.msgss[2]))
 
+	par, replica = s.decodeFrameHeader(s.msgss[0][1].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
 	s.output(buf, 3)
 	assert.Equal(t, 3, len(s.msgss[0]))
 	assert.Equal(t, 2, len(s.msgss[1]))
 	assert.Equal(t, 1, len(s.msgss[2]))
+
+	par, replica = s.decodeFrameHeader(s.msgss[0][2].Buffers[0])
+	assert.True(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[1][1].Buffers[0])
+	assert.True(t, par)
+	assert.True(t, replica)
 
 	s.output(buf, 4)
 	assert.Equal(t, 4, len(s.msgss[0]))
@@ -1030,6 +1058,40 @@ func TestParallelTun(t *testing.T) {
 	assert.Equal(t, 5, len(s.msgss[0]))
 	assert.Equal(t, 4, len(s.msgss[1]))
 	assert.Equal(t, 3, len(s.msgss[2]))
+
+	par, replica = s.decodeFrameHeader(s.msgss[0][4].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[2][2].Buffers[0])
+	assert.False(t, par)
+	assert.True(t, replica)
+
+	uuid, _ = gouuid.NewV1()
+	s = &UDPStream{
+		uuid:         uuid,
+		msgss:        make([][]ipv4.Message, 0),
+		parallelXmit: uint32(parallelXmit),
+		parallelTime: parallelTime,
+		tunnels:      make([]*UDPTunnel, tunnelCnt),
+		remotes:      make([]*net.UDPAddr, tunnelCnt),
+		headerSize:   gouuid.Size,
+	}
+
+	buf = make([]byte, 100)
+	s.output(buf, 1)
+	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 1, len(s.msgss[0]))
+	assert.Equal(t, 1, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
+
+	par, replica = s.decodeFrameHeader(s.msgss[0][0].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
@@ -1441,4 +1503,16 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 func BenchmarkSinkSpeed1K(b *testing.B) {
 	InitLog(FATAL)
 	sinkSpeed(b, 1024)
+}
+
+func TestUpdateAck(t *testing.T) {
+	kcp := NewKCP(1, nil)
+
+	kcp.rx_minrto = 30
+
+	rtts := []int32{30, 25, 23, 331, 368, 600, 601, 798, 799, 1094, 1107, 759, 765, 31, 33, 34, 37, 20, 23, 35, 38, 20}
+	for _, rtt := range rtts {
+		kcp.update_ack(rtt)
+		fmt.Println("rtt", rtt, ",", "rto", kcp.rx_rto)
+	}
 }

@@ -25,6 +25,16 @@ var (
 )
 
 const (
+	CleanTimeout           = time.Second * 5
+	HeartbeatInterval      = time.Second * 30
+	DefaultParallelXmit    = 4
+	DefaultParallelTime    = time.Second * 30
+	DefaultDeadLink        = 10
+	DefaultAckNoDelayRatio = 0.7
+	DefaultAckNoDelayCount = 60
+)
+
+const (
 	StateNone = iota // 0
 	StateEstablish
 	StateClosed
@@ -39,13 +49,8 @@ const (
 )
 
 const (
-	CleanTimeout           = time.Second * 5
-	HeartbeatInterval      = time.Second * 30
-	DefaultParallelXmit    = 4
-	DefaultParallelTime    = time.Second * 30
-	DefaultDeadLink        = 10
-	DefaultAckNoDelayRatio = 0.7
-	DefaultAckNoDelayCount = 60
+	FRAME_FLAG_PARALLEL_NTF = 0x08
+	FRAME_FLAG_REPLICA      = 0x04
 )
 
 // FRAME versions
@@ -802,6 +807,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 		msg := ipv4.Message{}
 		bts := xmitBuf.Get().([]byte)[:len(buf)]
 		copy(bts, buf)
+		s.setFrameReplica(bts[:s.headerSize])
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remotes[i]
 		s.msgss[i] = append(s.msgss[i], msg)
@@ -811,13 +817,13 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 func (s *UDPStream) input(data []byte) {
 	var kcpInErrors uint64
 
-	trigger := s.decodeFrameHeader(data)
+	trigger, replica := s.decodeFrameHeader(data)
 
 	s.mu.Lock()
 	if trigger {
 		s.tryParallel(false)
 	}
-	if ret := s.kcp.Input(data[s.headerSize:], true, false); ret != 0 {
+	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++
 	}
 
@@ -1017,25 +1023,33 @@ func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {
 	return remotes, nil
 }
 
+//uuid + version(4bit) + parallel_notify(1 bit) + replica(1 bit) + none_use(2 bit)
 func (s *UDPStream) encodeFrameHeader(buf []byte, parallel bool) {
 	copy(buf, s.uuid[:])
 	if s.uuid.Version() == gouuid.V1 {
 		return
 	}
-	verPar := FV1
+	verFlag := FV1 << 4
 	if parallel {
-		verPar = (verPar << 4) | 1
+		verFlag |= FRAME_FLAG_PARALLEL_NTF
 	}
-	buf[gouuid.Size] = verPar
+	buf[gouuid.Size] = verFlag
 }
 
-func (s *UDPStream) decodeFrameHeader(buf []byte) bool {
+func (s *UDPStream) setFrameReplica(buf []byte) {
+	if s.uuid.Version() == gouuid.V1 {
+		return
+	}
+	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_REPLICA
+}
+
+func (s *UDPStream) decodeFrameHeader(buf []byte) (bool, bool) {
 	if s.uuid.Version() == gouuid.V1 || len(buf) <= gouuid.Size {
-		return false
+		return false, false
 	}
-	verPar := buf[gouuid.Size]
-	if verPar>>4 != FV1 {
-		return false
+	verFlag := buf[gouuid.Size]
+	if verFlag>>4 != FV1 {
+		return false, false
 	}
-	return verPar&0x01 == 1
+	return verFlag&FRAME_FLAG_PARALLEL_NTF != 0, verFlag&FRAME_FLAG_REPLICA != 0
 }
