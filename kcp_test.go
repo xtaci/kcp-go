@@ -1374,7 +1374,7 @@ func TestUDPFileTransfer(t *testing.T) {
 }
 
 func TestAckXmit(t *testing.T) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp := NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {})
 	for i := 0; i < IKCP_WND_RCV+2; i++ {
 		kcp.ack_push(uint32(i), 0)
 	}
@@ -1418,7 +1418,7 @@ func TestAckXmit(t *testing.T) {
 }
 
 func BenchmarkFlush(b *testing.B) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp := NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {})
 	kcp.snd_buf = make([]segment, 1024)
 	for k := range kcp.snd_buf {
 		kcp.snd_buf[k].xmit = 1

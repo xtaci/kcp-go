@@ -58,7 +58,7 @@ var refTime time.Time = time.Now()
 func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
 
 // output_callback is a prototype which ought capture conn and call conn.Write
-type output_callback func(buf []byte, size int, xmitMax uint32)
+type output_callback func(buf []byte, size int, current, xmitMax, delayts uint32)
 
 /* encode 8 bits unsigned int */
 func ikcp_encode8u(p []byte, c byte) []byte {
@@ -768,7 +768,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var buffer []byte
 	var ptr []byte
 
+	var current uint32
 	var xmitMax uint32
+	var delayts uint32
 
 	makeBuffer := func() {
 		buffer = xmitBuf.Get().([]byte)[:kcp.mtu]
@@ -782,9 +784,10 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
-			kcp.output(buffer, size, xmitMax)
+			kcp.output(buffer, size, current, xmitMax, delayts)
 			makeBuffer()
 			xmitMax = 0
+			delayts = 0
 		}
 	}
 
@@ -792,8 +795,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	flushBuffer := func() {
 		size := len(buffer) - len(ptr)
 		if size > kcp.reserved {
-			kcp.output(buffer, size, xmitMax)
+			kcp.output(buffer, size, current, xmitMax, delayts)
 			xmitMax = 0
+			delayts = 0
 		}
 	}
 
@@ -819,7 +823,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// probe window size (if remote window size equals zero)
 	if kcp.rmt_wnd == 0 {
-		current := currentMs()
+		current = currentMs()
 		if kcp.probe_wait == 0 {
 			kcp.probe_wait = IKCP_PROBE_INIT
 			kcp.ts_probe = current + kcp.probe_wait
@@ -885,7 +889,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	}
 
 	// check for retransmissions
-	current := currentMs()
+	current = currentMs()
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
@@ -949,6 +953,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			}
 			if segment.xmit > xmitMax {
 				xmitMax = segment.xmit
+			}
+			if segment.ts-segment.fts > delayts {
+				delayts = segment.ts - segment.fts
 			}
 		}
 

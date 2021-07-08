@@ -25,13 +25,14 @@ var (
 )
 
 const (
-	CleanTimeout           = time.Second * 5
-	HeartbeatInterval      = time.Second * 30
-	DefaultParallelXmit    = 4
-	DefaultParallelTime    = time.Second * 30
-	DefaultDeadLink        = 10
-	DefaultAckNoDelayRatio = 0.7
-	DefaultAckNoDelayCount = 60
+	CleanTimeout              = time.Second * 5
+	HeartbeatInterval         = time.Second * 30
+	DefaultParallelXmit       = 5
+	DefaultParallelDelayMs    = 350
+	DefaultParallelDurationMs = 30 * 1000
+	DefaultDeadLink           = 10
+	DefaultAckNoDelayRatio    = 0.7
+	DefaultAckNoDelayCount    = 60
 )
 
 const (
@@ -114,10 +115,10 @@ type (
 		msgss [][]ipv4.Message
 		mu    sync.Mutex
 
-		parallelXmit   uint32
-		xmitMax        uint32
-		parallelTime   time.Duration
-		parallelExpire time.Time
+		parallelDelayMs    uint32
+		parallelDurationMs uint32
+		parallelExpireMs   uint32
+		parallelXmit       uint32
 
 		ackNoDelayRatio float32
 		ackNoDelayCount uint32
@@ -172,14 +173,14 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.remotes = remoteAddrs
 	stream.hrtTicker = time.NewTicker(HeartbeatInterval)
 	stream.cleanTimer = time.NewTimer(CleanTimeout)
-	stream.parallelXmit = uint32(DefaultParallelXmit)
-	stream.parallelTime = DefaultParallelTime
+	stream.parallelDelayMs = DefaultParallelDelayMs
+	stream.parallelDurationMs = DefaultParallelDurationMs
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
 
-	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
+	stream.kcp = NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
-			stream.output(buf[:size], xmitMax)
+			stream.output(buf[:size], current, xmitMax, delayts)
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
@@ -306,13 +307,11 @@ func (s *UDPStream) SetDeadLink(deadLink int) {
 func (s *UDPStream) SetParallelXmit(parallelXmit uint32) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.parallelXmit = parallelXmit
 }
 
 func (s *UDPStream) SetParallelTime(parallelTime time.Duration) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.parallelTime = parallelTime
 }
 
 func (s *UDPStream) WaitSnd() int {
@@ -744,51 +743,43 @@ func (s *UDPStream) flush() (interval uint32) {
 	return
 }
 
-func (s *UDPStream) tryParallel(active bool) bool {
-	if active && !s.parallelExpire.IsZero() {
+func (s *UDPStream) tryParallel(current uint32, active bool) bool {
+	if current == 0 {
+		current = currentMs()
+	}
+	if active && current < s.parallelExpireMs {
 		return false
 	}
 
-	s.parallelExpire = time.Now().Add(s.parallelTime)
+	s.parallelExpireMs = current + s.parallelDurationMs
 	atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-	s.xmitMax = s.parallelXmit
 
 	Logf(INFO, "UDPStream::tryParallel uuid:%v accepted:%v", s.uuid, s.accepted)
 	return true
 }
 
-func (s *UDPStream) getParallel(xmitMax uint32) (parallel int, trigger bool) {
-	if xmitMax >= s.parallelXmit {
-		trigger = s.tryParallel(true)
+func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
+	if delayts >= s.parallelDelayMs {
+		// if xmitMax >= 5 {
+		trigger = s.tryParallel(current, true)
 	}
-
-	if s.parallelExpire.IsZero() {
-		return 1, trigger
-	} else if s.parallelExpire.After(time.Now()) {
-		if xmitMax > s.xmitMax {
-			s.xmitMax = xmitMax
-		}
-		parallel = int(s.xmitMax) - int(s.parallelXmit) + 2
-		if parallel > len(s.tunnels) {
-			parallel = len(s.tunnels)
-		} else if parallel < 1 {
-			parallel = 1
-		}
-		return parallel, trigger
-	} else {
-		s.xmitMax = 0
-		s.parallelExpire = time.Time{}
+	if s.parallelExpireMs <= current {
 		return 1, trigger
 	}
+	parallel = len(s.tunnels)
+	if parallel > 2 {
+		parallel = 2
+	}
+	return parallel, trigger
 }
 
-func (s *UDPStream) output(buf []byte, xmitMax uint32) {
+func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 	var appendCount int
 	var trigger bool
-	if s.parallelXmit <= 1 || s.state == StateNone {
+	if s.parallelDelayMs == 0 || s.state == StateNone {
 		appendCount = len(s.tunnels)
 	} else {
-		appendCount, trigger = s.getParallel(xmitMax)
+		appendCount, trigger = s.getParallel(current, xmitMax, delayts)
 	}
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
@@ -821,7 +812,7 @@ func (s *UDPStream) input(data []byte) {
 
 	s.mu.Lock()
 	if trigger {
-		s.tryParallel(false)
+		s.tryParallel(currentMs(), false)
 	}
 	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++
