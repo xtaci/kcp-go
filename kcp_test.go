@@ -196,6 +196,88 @@ func TestTransportOption(t *testing.T) {
 	}
 }
 
+func TestDialInfoEncode(t *testing.T) {
+	uuid, err := gouuid.NewV1()
+	assert.NoError(t, err)
+
+	s1 := &UDPStream{
+		uuid: uuid,
+	}
+
+	locals := []string{"abc", "def"}
+	buf, err := s1.encodeDialInfo(locals)
+	assert.NoError(t, err)
+	decodeLocals, err := s1.decodeDialInfo(buf)
+	assert.NoError(t, err)
+
+	assert.Equal(t, len(locals), len(decodeLocals))
+	assert.Equal(t, locals[0], decodeLocals[0])
+	assert.Equal(t, locals[1], decodeLocals[1])
+
+	uuid, err = gouuid.NewV4()
+	assert.NoError(t, err)
+
+	s2 := &UDPStream{
+		uuid: uuid,
+	}
+	buf, err = s2.encodeDialInfo(locals)
+	assert.Error(t, err)
+
+	locals = []string{"127.0.0.1:5678", "127.0.0.1:6789"}
+	buf, err = s2.encodeDialInfo(locals)
+	assert.NoError(t, err)
+
+	decodeLocals, err = s2.decodeDialInfo(buf)
+	assert.NoError(t, err)
+
+	assert.Equal(t, len(locals), len(decodeLocals))
+	assert.Equal(t, locals[0], decodeLocals[0])
+	assert.Equal(t, locals[1], decodeLocals[1])
+}
+
+func TestFrameHeaderEncode(t *testing.T) {
+	uuid, err := gouuid.NewV1()
+	assert.NoError(t, err)
+
+	buf := make([]byte, 17)
+	s1 := &UDPStream{
+		uuid: uuid,
+	}
+	s1.encodeFrameHeader(buf, false)
+	parallel, replica := s1.decodeFrameHeader(buf)
+	assert.False(t, parallel)
+	assert.False(t, replica)
+
+	s1.encodeFrameHeader(buf, true)
+	s1.setFrameReplica(buf)
+	parallel, replica = s1.decodeFrameHeader(buf)
+	assert.False(t, parallel)
+	assert.False(t, replica)
+
+	uuid, err = gouuid.NewV4()
+	assert.NoError(t, err)
+
+	s2 := &UDPStream{
+		uuid: uuid,
+	}
+	s2.encodeFrameHeader(buf, false)
+	s2.setFrameReplica(buf)
+	parallel, replica = s2.decodeFrameHeader(buf)
+	assert.False(t, parallel)
+	assert.True(t, replica)
+
+	s2.encodeFrameHeader(buf, true)
+	parallel, replica = s2.decodeFrameHeader(buf)
+	assert.True(t, parallel)
+	assert.False(t, replica)
+
+	s2.encodeFrameHeader(buf, true)
+	s2.setFrameReplica(buf)
+	parallel, replica = s2.decodeFrameHeader(buf[1:])
+	assert.False(t, parallel)
+	assert.False(t, replica)
+}
+
 func tunnelSimulate(tunnels []*UDPTunnel, loss float64, delayMin, delayMax int) {
 	for _, tunnel := range tunnels {
 		tunnel.Simulate(loss, delayMin, delayMax)
@@ -206,7 +288,7 @@ func RandInt(msgDealMinMs, msgDealMaxMs int) int {
 	return rand.Intn(msgDealMaxMs-msgDealMinMs+1) + msgDealMinMs
 }
 
-func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, msgDealMinMs, msgDealMaxMs int) {
+func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelDelayMs, msgDealMinMs, msgDealMaxMs int) {
 	stream, err := serverTransport.Accept()
 	if err != nil {
 		t.Fatalf("server accept stream failed. err:%v", err)
@@ -217,8 +299,8 @@ func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	if rtoInit != 0 {
 		stream.kcp.rx_rto = uint32(rtoInit)
 	}
-	if parallelXmit != 0 {
-		stream.SetParallelXmit(uint32(parallelXmit))
+	if parallelDelayMs != 0 {
+		stream.SetParallelDelayMs(uint32(parallelDelayMs))
 	}
 
 	buf := make([]byte, 65536)
@@ -234,7 +316,7 @@ func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	}
 }
 
-func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, msgCnt, bufSize int) (total, max int) {
+func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelDelayMs, msgCnt, bufSize int) (total, max int) {
 	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		t.Fatalf("client open stream failed. err:%v", err)
@@ -245,11 +327,9 @@ func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	if rtoInit != 0 {
 		stream.kcp.rx_rto = uint32(rtoInit)
 	}
-	if parallelXmit != 0 {
-		stream.SetParallelXmit(uint32(parallelXmit))
+	if parallelDelayMs != 0 {
+		stream.SetParallelDelayMs(uint32(parallelDelayMs))
 	}
-
-	Logf(INFO, "stream info rto: %v, parallelXmit", stream.kcp.rx_rto, stream.parallelXmit)
 
 	buf := make([]byte, bufSize)
 	var echoTimeAll time.Duration
@@ -411,6 +491,10 @@ func sinkClient(nbytes, N int) error {
 }
 
 func testTunnelSimulate(t *testing.T, clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval int, packetLossRate float64) {
+	Logf(WARN,
+		"testTunnelSimulate, clientCnt:%v msgCnt:%v msgDealMinMs:%v msgDealMaxMs:%v rtoInterval:%v packetLossRate:%v",
+		clientCnt, msgCnt, msgDealMinMs, msgDealMaxMs, rtoInterval, packetLossRate)
+
 	statLock := sync.Mutex{}
 	echoTimeMax := 0
 	echoTimeAll := 0
@@ -422,11 +506,11 @@ func testTunnelSimulate(t *testing.T, clientCnt, msgCnt, msgDealMinMs, msgDealMa
 	wg := sync.WaitGroup{}
 	wg.Add(clientCnt)
 	for i := 0; i < clientCnt; i++ {
-		go server(t, 1, 20, 2, 1, rtoInterval, 4, msgDealMinMs, msgDealMaxMs)
+		go server(t, 1, 20, 2, 1, rtoInterval, 300, msgDealMinMs, msgDealMaxMs)
 		go func() {
 			defer wg.Done()
 
-			total, max := client(t, 1, 20, 2, 1, rtoInterval, 4, msgCnt, 1000)
+			total, max := client(t, 1, 20, 2, 1, rtoInterval, 300, msgCnt, 1000)
 			statLock.Lock()
 			echoTimeAll += total
 			if max > echoTimeMax {
@@ -457,8 +541,8 @@ func TestPacketDelay(t *testing.T) {
 	var msgDealMaxMs = 100
 	// var rtoIntervalList = []int{100}
 	// var packetLossRateList = []float64{1.0}
-	var rtoIntervalList = []int{30, 50, 70, 100, 150}
 	var packetLossRateList = []float64{0.5, 1.0}
+	var rtoIntervalList = []int{30, 50, 70, 100, 150}
 
 	for _, packetLossRate := range packetLossRateList {
 		for _, rtoInterval := range rtoIntervalList {
@@ -775,6 +859,40 @@ func TestClose(t *testing.T) {
 	}
 }
 
+func TestUUIDCompatible(t *testing.T) {
+	go echoServer()
+	go echoServer()
+
+	clientTransport.makeUUID = gouuid.NewV1
+	stream1, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream1.Close()
+
+	clientTransport.makeUUID = gouuid.NewV4
+	stream2, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
+	if err != nil {
+		t.Fatalf("client open stream failed. err:%v", err)
+	}
+	defer stream2.Close()
+
+	wg := sync.WaitGroup{}
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		err := echoTester(stream1, 1024, 10000)
+		assert.NoError(t, err)
+	}()
+	go func() {
+		defer wg.Done()
+		err := echoTester(stream2, 1024, 10000)
+		assert.NoError(t, err)
+	}()
+
+	wg.Wait()
+}
+
 func TestSNMP(t *testing.T) {
 	if len(DefaultSnmp.Header()) != len(DefaultSnmp.ToSlice()) {
 		t.Fatalf("test snmp header not equal with value")
@@ -845,61 +963,250 @@ func TestSNMP(t *testing.T) {
 	assert.Equal(t, currEstab, DefaultSnmp.CurrEstab)
 }
 
-func TestParallelTun(t *testing.T) {
-	parallelXmit := 3
-	parallelTime := 200 * time.Millisecond
-	tunnelCnt := 3
-	uuid, _ := gouuid.NewV1()
+func TestTryParallel(t *testing.T) {
+	uuid, _ := gouuid.NewV4()
 	s := &UDPStream{
-		uuid:         uuid,
-		msgss:        make([][]ipv4.Message, 0),
-		parallelXmit: uint32(parallelXmit),
-		parallelTime: parallelTime,
-		tunnels:      make([]*UDPTunnel, tunnelCnt),
-		remotes:      make([]*net.UDPAddr, tunnelCnt),
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		headerSize: gouuid.Size + 1,
+	}
+
+	var durationMs uint32 = 100
+	s.SetParallelDurationMs(durationMs)
+
+	current := currentMs()
+	trigger := s.tryParallel(0)
+	assert.True(t, trigger)
+	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+
+	current += 90
+	trigger = s.tryParallel(current)
+	assert.False(t, trigger)
+	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+
+	current += 20
+	trigger = s.tryParallel(current)
+	assert.False(t, trigger)
+	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+}
+
+func TestGetParallel(t *testing.T) {
+	tunnelCnt := 3
+	uuid, _ := gouuid.NewV4()
+	s := &UDPStream{
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		tunnels:    make([]*UDPTunnel, tunnelCnt),
+		remotes:    make([]*net.UDPAddr, tunnelCnt),
+		headerSize: gouuid.Size + 1,
 	}
 	assert.Equal(t, 3, len(s.tunnels))
 
-	parallel := s.parallelTun(2)
-	assert.Equal(t, 3, parallel)
-	s.state = StateEstablish
+	var delayMs uint32 = 200
+	var durationMs uint32 = 100
+	var intervalMs uint32 = 150
 
-	parallel = s.parallelTun(2)
+	s.SetParallelDelayMs(delayMs)
+	s.SetParallelDurationMs(durationMs)
+	s.SetParallelIntervalMs(intervalMs)
+
+	current := currentMs()
+
+	parallel, trigger := s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
+	assert.False(t, trigger)
 
-	parallel = s.parallelTun(3)
+	parallel, trigger = s.getParallel(current, 0, 250)
 	assert.Equal(t, 2, parallel)
-	parallel = s.parallelTun(1)
-	assert.Equal(t, 2, parallel)
-	parallel = s.parallelTun(4)
-	assert.Equal(t, 3, parallel)
-	parallel = s.parallelTun(5)
-	assert.Equal(t, 3, parallel)
-	parallel = s.parallelTun(1)
-	assert.Equal(t, 3, parallel)
+	assert.True(t, trigger)
 
-	time.Sleep(parallelTime)
-	parallel = s.parallelTun(1)
+	parallel, trigger = s.getParallel(current, 0, 340)
+	assert.Equal(t, 2, parallel)
+	assert.False(t, trigger)
+
+	parallel, trigger = s.getParallel(current, 0, 350)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
+
+	parallel, trigger = s.getParallel(current, 0, 500)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
+
+	parallel, trigger = s.getParallel(current, 0, 150)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
+
+	current += durationMs
+
+	parallel, trigger = s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
+	assert.False(t, trigger)
+
+	parallel, trigger = s.getParallel(current, 0, 250)
+	assert.Equal(t, 2, parallel)
+	assert.True(t, trigger)
+}
+
+func TestParallelOutput(t *testing.T) {
+	tunnelCnt := 3
+	uuid, _ := gouuid.NewV4()
+	s := &UDPStream{
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		tunnels:    make([]*UDPTunnel, tunnelCnt),
+		remotes:    make([]*net.UDPAddr, tunnelCnt),
+		headerSize: gouuid.Size + 1,
+	}
+	assert.Equal(t, 3, len(s.tunnels))
+
+	var delayMs uint32 = 200
+	var durationMs uint32 = 100
+	var intervalMs uint32 = 150
+
+	s.SetParallelDelayMs(delayMs)
+	s.SetParallelDurationMs(durationMs)
+	s.SetParallelIntervalMs(intervalMs)
+
+	current := currentMs()
 
 	buf := make([]byte, 100)
-
-	s.output(buf, 1)
+	s.output(buf, current, 0, 0)
+	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
+	assert.Equal(t, 1, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
 
-	s.output(buf, 3)
+	par, replica := s.decodeFrameHeader(s.msgss[0][0].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
+	assert.False(t, par)
+	assert.True(t, replica)
+
+	s.state = StateEstablish
+
+	s.output(buf, current, 0, 0)
+	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 2, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
 
-	s.output(buf, 4)
+	par, replica = s.decodeFrameHeader(s.msgss[0][1].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	s.output(buf, current, 0, 200)
 	assert.Equal(t, 3, len(s.msgss[0]))
 	assert.Equal(t, 2, len(s.msgss[1]))
 	assert.Equal(t, 1, len(s.msgss[2]))
 
-	s.output(buf, 5)
+	par, replica = s.decodeFrameHeader(s.msgss[0][2].Buffers[0])
+	assert.True(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[1][1].Buffers[0])
+	assert.True(t, par)
+	assert.True(t, replica)
+
+	s.output(buf, current, 0, 350)
 	assert.Equal(t, 4, len(s.msgss[0]))
 	assert.Equal(t, 3, len(s.msgss[1]))
 	assert.Equal(t, 2, len(s.msgss[2]))
+
+	s.output(buf, current, 0, 500)
+	assert.Equal(t, 5, len(s.msgss[0]))
+	assert.Equal(t, 4, len(s.msgss[1]))
+	assert.Equal(t, 3, len(s.msgss[2]))
+
+	par, replica = s.decodeFrameHeader(s.msgss[0][4].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[2][2].Buffers[0])
+	assert.False(t, par)
+	assert.True(t, replica)
+
+	uuid, _ = gouuid.NewV1()
+	s = &UDPStream{
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		tunnels:    make([]*UDPTunnel, tunnelCnt),
+		remotes:    make([]*net.UDPAddr, tunnelCnt),
+		headerSize: gouuid.Size,
+	}
+
+	s.SetParallelDelayMs(delayMs)
+	s.SetParallelDurationMs(durationMs)
+	s.SetParallelIntervalMs(intervalMs)
+
+	buf = make([]byte, 100)
+	s.output(buf, current, 0, 0)
+	assert.Equal(t, 3, len(s.msgss))
+	assert.Equal(t, 1, len(s.msgss[0]))
+	assert.Equal(t, 1, len(s.msgss[1]))
+	assert.Equal(t, 1, len(s.msgss[2]))
+
+	par, replica = s.decodeFrameHeader(s.msgss[0][0].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+
+	par, replica = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
+	assert.False(t, par)
+	assert.False(t, replica)
+}
+
+func TestKcpFlush(t *testing.T) {
+	// var current uint32
+	var xmitMax int
+	var delayts int
+	var outputcnt int
+
+	ouput := func(buf []byte, size int, current_, xmitMax_, delayts_ uint32) {
+		// current = current_
+		xmitMax = int(xmitMax_)
+		delayts = int(delayts_)
+		outputcnt++
+	}
+	kcp := NewKCP(1, ouput)
+	kcp.rx_rto = 30
+	kcp.cwnd = 10
+	kcp.nocwnd = 1
+
+	buf := make([]byte, 100)
+	kcp.Send(buf)
+	kcp.flush(false)
+
+	assert.Equal(t, 1, outputcnt)
+	assert.Equal(t, 1, xmitMax)
+	assert.Equal(t, 0, delayts)
+
+	time.Sleep(time.Millisecond * 30)
+	kcp.flush(false)
+
+	assert.Equal(t, 2, outputcnt)
+	assert.Equal(t, 2, xmitMax)
+	assert.True(t, delayts >= 30)
+
+	time.Sleep(time.Millisecond * 30)
+	kcp.flush(false)
+
+	assert.Equal(t, 2, outputcnt)
+	assert.Equal(t, 2, xmitMax)
+	assert.True(t, delayts >= 30)
+
+	kcp.Send(buf)
+	kcp.flush(false)
+	assert.Equal(t, 3, outputcnt)
+	assert.Equal(t, 1, xmitMax)
+	assert.Equal(t, 0, delayts)
+
+	time.Sleep(time.Millisecond * 30)
+	kcp.flush(false)
+
+	assert.Equal(t, 4, outputcnt)
+	assert.Equal(t, 3, xmitMax)
+	assert.True(t, delayts >= 60)
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
@@ -1182,7 +1489,7 @@ func TestUDPFileTransfer(t *testing.T) {
 }
 
 func TestAckXmit(t *testing.T) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp := NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {})
 	for i := 0; i < IKCP_WND_RCV+2; i++ {
 		kcp.ack_push(uint32(i), 0)
 	}
@@ -1226,7 +1533,7 @@ func TestAckXmit(t *testing.T) {
 }
 
 func BenchmarkFlush(b *testing.B) {
-	kcp := NewKCP(1, func(buf []byte, size int, xmitMax uint32) {})
+	kcp := NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {})
 	kcp.snd_buf = make([]segment, 1024)
 	for k := range kcp.snd_buf {
 		kcp.snd_buf[k].xmit = 1
@@ -1311,4 +1618,16 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 func BenchmarkSinkSpeed1K(b *testing.B) {
 	InitLog(FATAL)
 	sinkSpeed(b, 1024)
+}
+
+func TestUpdateAck(t *testing.T) {
+	kcp := NewKCP(1, nil)
+
+	kcp.rx_minrto = 30
+
+	rtts := []int32{30, 25, 23, 331, 368, 600, 601, 798, 799, 1094, 1107, 759, 765, 31, 33, 34, 37, 20, 23, 35, 38, 20}
+	for _, rtt := range rtts {
+		kcp.update_ack(rtt)
+		fmt.Println("rtt", rtt, ",", "rto", kcp.rx_rto)
+	}
 }

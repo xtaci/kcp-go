@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"log"
@@ -16,11 +17,29 @@ import (
 const CostStatInterval = 100 * time.Millisecond
 const CostStatMax = 3000 * time.Millisecond
 
+var done uint32
+
+var clients = flag.Int("clients", 1, "client count")
+var msgcount = flag.Int("msgcount", 0, "input msg count, zero means no limit")
+var msglen = flag.Int("msglen", 1024, "input msg length")
+var targetAddr = flag.String("targetAddr", "0.0.0.0:9259", "target address")
+var proxyAddr = flag.String("proxyAddr", "", "socks5 proxy address")
+var directProxyAddr = flag.String("directProxyAddr", "", "direct proxy address")
+var sendIntervalMs = flag.Int("sendIntervalMs", 1000, "msg send interval millisecond")
+var outputIntervalS = flag.Int("outputIntervalS", 1, "output interval second")
+var printRtoMs = flag.Int("printRtoMs", 1000, "print rto ms")
+
 func checkError(err error) {
 	if err != nil {
 		log.Println("checkError", err)
 		os.Exit(-1)
 	}
+}
+
+/* decode 16 bits unsigned int (lsb) */
+func ikcp_decode16u(p []byte, w *uint16) []byte {
+	*w = binary.LittleEndian.Uint16(p)
+	return p[2:]
 }
 
 type client struct {
@@ -97,7 +116,7 @@ func echoTester(c *client, msglen, msgcount, sendIntervalMs int, costs []*CostSt
 		nrecv := 0
 		var n int
 		for {
-			n, err = c.Read(buf)
+			n, err = c.Read(buf[nrecv:])
 			if err != nil {
 				c.err = err
 				log.Printf("client:%v proxy:%v read err:%v \n", c.idx, c.proxy, err)
@@ -125,17 +144,62 @@ func echoTester(c *client, msglen, msgcount, sendIntervalMs int, costs []*CostSt
 		if sendIntervalMs != 0 {
 			time.Sleep(time.Duration(sendIntervalMs) * time.Millisecond)
 		}
+		printRtoDetail(c, cost, buf)
 	}
 	return nil
 }
 
-var clients = flag.Int("clients", 1, "client count")
-var msgcount = flag.Int("msgcount", 0, "input msg count, zero means no limit")
-var msglen = flag.Int("msglen", 1000, "input msg length")
-var targetAddr = flag.String("targetAddr", "0.0.0.0:9259", "target address")
-var proxyAddr = flag.String("proxyAddr", "", "proxy address")
-var sendIntervalMs = flag.Int("sendIntervalMs", 200, "msg send interval millisecond")
-var outputIntervalS = flag.Int("outputIntervalS", 1, "output interval second")
+func printRtoDetail(c *client, cost time.Duration, buf []byte) {
+	if cost < time.Millisecond*time.Duration((*printRtoMs)) {
+		return
+	}
+
+	new := atomic.AddUint32(&done, 1)
+	if new != 1 {
+		return
+	}
+
+	var out, xmit_out, passts_out uint16
+	ikcp_decode16u(buf[1000:], &out)
+	ikcp_decode16u(buf[1002:], &xmit_out)
+	ikcp_decode16u(buf[1004:], &passts_out)
+	rtos_out := make([]uint16, 0, 500/2)
+	for i := 0; i < 500; i += 2 {
+		idx := uint16(i) + out
+		if idx >= 500 {
+			idx -= 500
+		}
+		var rto uint16
+		ikcp_decode16u(buf[idx:], &rto)
+		if rto > 0 {
+			rtos_out = append(rtos_out, rto)
+		}
+	}
+	log.Printf("client:%v cost:%v rtos_out:%v out:%v xmit_out:%v passts_out:%v \n",
+		c.idx, cost, rtos_out, out, xmit_out, passts_out)
+
+	var in, xmit_in, passts_in uint16
+	ikcp_decode16u(buf[1010:], &in)
+	ikcp_decode16u(buf[1012:], &xmit_in)
+	ikcp_decode16u(buf[1014:], &passts_in)
+	rtos_in := make([]uint16, 0, 500/2)
+	for i := 0; i < 500; i += 2 {
+		idx := uint16(i) + in
+		if idx >= 500 {
+			idx -= 500
+		}
+		idx += 500
+		var rto uint16
+		ikcp_decode16u(buf[idx:], &rto)
+		if rto > 0 {
+			rtos_in = append(rtos_in, rto)
+		}
+	}
+	log.Printf("client:%v cost:%v rtos_in:%v in:%v xmit_in:%v passts_in:%v \n",
+		c.idx, cost, rtos_in, in, xmit_in, passts_in)
+
+	atomic.StoreUint32(&done, 0)
+}
 
 func main() {
 	flag.Parse()
@@ -145,15 +209,17 @@ func main() {
 	log.Printf("msglen:%v\n", *msglen)
 	log.Printf("targetAddr:%v\n", *targetAddr)
 	log.Printf("proxyAddr:%v\n", *proxyAddr)
+	log.Printf("directProxyAddr:%v\n", *directProxyAddr)
 	log.Printf("sendIntervalMs:%v\n", *sendIntervalMs)
 	log.Printf("outputIntervalS:%v\n", *outputIntervalS)
+	log.Printf("printRtoMs:%v\n", *printRtoMs)
 
 	clientcount := *clients
 
 	clients := make([]*client, clientcount)
 	batch := 100
 	batchCount := (clientcount + batch - 1) / batch
-	batchSleep := time.Millisecond * 10
+	batchSleep := time.Millisecond * 100
 
 	costs := make([]*CostStat, 0, CostStatMax/CostStatInterval)
 	for i := 0; i < cap(costs); i++ {
@@ -175,17 +241,28 @@ func main() {
 				var conn net.Conn
 				var err error
 				var dialer proxy.Dialer
-				if *proxyAddr == "" {
-					conn, err = net.Dial("tcp", *targetAddr)
-					checkError(err)
-				} else {
+				var proxyAddrS string
+				start := time.Now()
+				if *proxyAddr != "" {
 					dialer, err = proxy.SOCKS5("tcp", *proxyAddr, nil, &net.Dialer{})
 					checkError(err)
 					conn, err = dialer.Dial("tcp", *targetAddr)
 					checkError(err)
+					proxyAddrS = *proxyAddr
+				} else if *directProxyAddr != "" {
+					conn, err = net.Dial("tcp", *directProxyAddr)
+					checkError(err)
+					proxyAddrS = *directProxyAddr
+				} else {
+					conn, err = net.Dial("tcp", *targetAddr)
+					checkError(err)
+				}
+				cost := time.Since(start)
+				if cost > time.Millisecond*1000 {
+					fmt.Printf("dial addr:%v cost:%v \n", proxyAddrS, cost)
 				}
 				c := &client{
-					proxy:   *proxyAddr,
+					proxy:   proxyAddrS,
 					TCPConn: conn.(*net.TCPConn),
 					idx:     i + 1,
 				}

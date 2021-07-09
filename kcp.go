@@ -58,7 +58,7 @@ var refTime time.Time = time.Now()
 func currentMs() uint32 { return uint32(time.Now().Sub(refTime) / time.Millisecond) }
 
 // output_callback is a prototype which ought capture conn and call conn.Write
-type output_callback func(buf []byte, size int, xmitMax uint32)
+type output_callback func(buf []byte, size int, current, xmitMax, delayts uint32)
 
 /* encode 8 bits unsigned int */
 func ikcp_encode8u(p []byte, c byte) []byte {
@@ -156,7 +156,7 @@ type KCP struct {
 	snd_una, snd_nxt, rcv_nxt              uint32
 	ssthresh                               uint32
 	rx_rttvar, rx_srtt                     int32
-	rx_rto, rx_minrto                      uint32
+	rx_rto, rx_minrto, rx_maxrto           uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
 	interval, ts_flush                     uint32
 	nodelay, updated                       uint32
@@ -205,6 +205,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.buffer = make([]byte, kcp.mtu)
 	kcp.rx_rto = IKCP_RTO_DEF
 	kcp.rx_minrto = IKCP_RTO_MIN
+	kcp.rx_maxrto = IKCP_RTO_MAX
 	kcp.interval = IKCP_INTERVAL
 	kcp.ts_flush = IKCP_INTERVAL
 	kcp.ssthresh = IKCP_THRESH_INIT
@@ -419,7 +420,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 		}
 	}
 	rto = uint32(kcp.rx_srtt) + _imax_(kcp.interval, uint32(kcp.rx_rttvar)<<2)
-	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, kcp.rx_maxrto)
 
 	statRto(int(kcp.rx_rto))
 }
@@ -655,9 +656,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		}
 
 		// only trust window updates from regular packets. i.e: latest update
-		if regular {
-			kcp.rmt_wnd = uint32(wnd)
-		}
+		kcp.rmt_wnd = uint32(wnd)
 		kcp.parse_una(una, current)
 		kcp.shrink_buf()
 
@@ -683,7 +682,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					repeat = kcp.parse_data(seg)
 				}
 			}
-			if regular && repeat {
+			if repeat {
 				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
 		} else if cmd == IKCP_CMD_WASK {
@@ -770,7 +769,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var buffer []byte
 	var ptr []byte
 
+	var current uint32
 	var xmitMax uint32
+	var delayts uint32
 
 	makeBuffer := func() {
 		buffer = xmitBuf.Get().([]byte)[:kcp.mtu]
@@ -784,9 +785,10 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		}
 		size := len(buffer) - len(ptr)
 		if size+space > int(kcp.mtu) {
-			kcp.output(buffer, size, xmitMax)
+			kcp.output(buffer, size, current, xmitMax, delayts)
 			makeBuffer()
 			xmitMax = 0
+			delayts = 0
 		}
 	}
 
@@ -794,8 +796,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	flushBuffer := func() {
 		size := len(buffer) - len(ptr)
 		if size > kcp.reserved {
-			kcp.output(buffer, size, xmitMax)
+			kcp.output(buffer, size, current, xmitMax, delayts)
 			xmitMax = 0
+			delayts = 0
 		}
 	}
 
@@ -821,7 +824,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// probe window size (if remote window size equals zero)
 	if kcp.rmt_wnd == 0 {
-		current := currentMs()
+		current = currentMs()
 		if kcp.probe_wait == 0 {
 			kcp.probe_wait = IKCP_PROBE_INIT
 			kcp.ts_probe = current + kcp.probe_wait
@@ -887,7 +890,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	}
 
 	// check for retransmissions
-	current := currentMs()
+	current = currentMs()
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
@@ -951,6 +954,9 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			}
 			if segment.xmit > xmitMax {
 				xmitMax = segment.xmit
+			}
+			if segment.ts-segment.fts > delayts {
+				delayts = segment.ts - segment.fts
 			}
 		}
 
@@ -1131,6 +1137,10 @@ func (kcp *KCP) NoDelay(nodelay, interval, resend, nc int) int {
 		} else {
 			kcp.rx_minrto = IKCP_RTO_MIN
 		}
+		//reset rx_rto
+		kcp.rx_srtt = 0
+		kcp.rx_rttvar = 0
+		kcp.rx_rto = kcp.rx_minrto * 2
 	}
 	if interval >= 0 {
 		if interval > 5000 {

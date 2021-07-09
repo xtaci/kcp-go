@@ -20,6 +20,19 @@ var (
 	errSynInfo      = errors.New("err syn info")
 	errDialParam    = errors.New("err dial param")
 	errRemoteStream = errors.New("err remote stream")
+
+	errDialVersionNotSupport = errors.New("err dial version not support")
+)
+
+const (
+	CleanTimeout              = time.Second * 5
+	HeartbeatInterval         = time.Second * 30
+	DefaultDeadLink           = 10
+	DefaultAckNoDelayRatio    = 0.7
+	DefaultAckNoDelayCount    = 60
+	DefaultParallelDelayMs    = 350
+	DefaultParallelIntervalMs = 150
+	DefaultParallelDurationMs = 60 * 1000
 )
 
 const (
@@ -37,14 +50,19 @@ const (
 )
 
 const (
-	FlagOffset             = gouuid.Size + IKCP_OVERHEAD
-	CleanTimeout           = time.Second * 5
-	HeartbeatInterval      = time.Second * 30
-	DefaultParallelXmit    = 4
-	DefaultParallelTime    = time.Second * 30
-	DefaultDeadLink        = 10
-	DefaultAckNoDelayRatio = 0.7
-	DefaultAckNoDelayCount = 60
+	FRAME_FLAG_PARALLEL_NTF = 0x08
+	FRAME_FLAG_REPLICA      = 0x04
+)
+
+// FRAME versions
+const (
+	_ byte = iota
+	FV1
+)
+
+const (
+	_ byte = iota
+	DV1
 )
 
 type clean_callback func(uuid gouuid.UUID)
@@ -97,10 +115,11 @@ type (
 		msgss [][]ipv4.Message
 		mu    sync.Mutex
 
-		parallelXmit   uint32
-		xmitMax        uint32
-		parallelTime   time.Duration
-		parallelExpire time.Time
+		parallelDelayMs    uint32
+		parallelIntervalMs uint32
+		parallelDurationMs uint32
+		parallelExpireMs   uint32
+		parallelDelaytsMax uint32
 
 		ackNoDelayRatio float32
 		ackNoDelayCount uint32
@@ -143,7 +162,11 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.uuid = uuid
 	stream.sel = sel
 	stream.cleancb = cleancb
-	stream.headerSize = gouuid.Size
+	if uuid.Version() == gouuid.V1 {
+		stream.headerSize = gouuid.Size
+	} else {
+		stream.headerSize = gouuid.Size + 1
+	}
 	stream.msgss = make([][]ipv4.Message, 0)
 	stream.accepted = accepted
 	stream.tunnels = tunnels
@@ -151,14 +174,15 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.remotes = remoteAddrs
 	stream.hrtTicker = time.NewTicker(HeartbeatInterval)
 	stream.cleanTimer = time.NewTimer(CleanTimeout)
-	stream.parallelXmit = uint32(DefaultParallelXmit)
-	stream.parallelTime = DefaultParallelTime
+	stream.parallelDelayMs = DefaultParallelDelayMs
+	stream.parallelIntervalMs = DefaultParallelIntervalMs
+	stream.parallelDurationMs = DefaultParallelDurationMs
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
 
-	stream.kcp = NewKCP(1, func(buf []byte, size int, xmitMax uint32) {
+	stream.kcp = NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
-			stream.output(buf[:size], xmitMax)
+			stream.output(buf[:size], current, xmitMax, delayts)
 		}
 	})
 	stream.kcp.ReserveBytes(stream.headerSize)
@@ -282,16 +306,31 @@ func (s *UDPStream) SetDeadLink(deadLink int) {
 	s.kcp.dead_link = uint32(deadLink)
 }
 
-func (s *UDPStream) SetParallelXmit(parallelXmit uint32) {
+func (s *UDPStream) SetParallelDelayMs(delayMs uint32) {
+	if delayMs == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.parallelXmit = parallelXmit
+	s.parallelDelayMs = delayMs
 }
 
-func (s *UDPStream) SetParallelTime(parallelTime time.Duration) {
+func (s *UDPStream) SetParallelIntervalMs(intervalMs uint32) {
+	if intervalMs == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.parallelTime = parallelTime
+	s.parallelIntervalMs = intervalMs
+}
+
+func (s *UDPStream) SetParallelDurationMs(durationMs uint32) {
+	if durationMs == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.parallelDurationMs = durationMs
 }
 
 func (s *UDPStream) WaitSnd() int {
@@ -543,7 +582,11 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return errDialParam
 	}
 
-	s.WriteFlag(SYN, []byte(strings.Join(locals, " ")))
+	dialBuf, err := s.encodeDialInfo(locals)
+	if err != nil {
+		return err
+	}
+	s.WriteFlag(SYN, dialBuf)
 
 	dialTimer := time.NewTimer(timeout)
 	defer dialTimer.Stop()
@@ -719,44 +762,49 @@ func (s *UDPStream) flush() (interval uint32) {
 	return
 }
 
-func (s *UDPStream) parallelTun(xmitMax uint32) (parallel int) {
-	if s.parallelXmit <= 1 || s.state == StateNone {
-		return len(s.tunnels)
-	} else if xmitMax >= s.parallelXmit && s.parallelExpire.IsZero() {
-		Logf(INFO, "UDPStream::parallelTun enter uuid:%v accepted:%v parallelXmit:%v xmitMax:%v", s.uuid, s.accepted, s.parallelXmit, xmitMax)
-		s.parallelExpire = time.Now().Add(s.parallelTime)
-		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-		s.xmitMax = xmitMax
-		parallel = int(s.xmitMax) - int(s.parallelXmit) + 2
-		if parallel > len(s.tunnels) {
-			parallel = len(s.tunnels)
-		} else if parallel < 1 {
-			parallel = 1
-		}
-		return parallel
-	} else if s.parallelExpire.IsZero() {
-		return 1
-	} else if s.parallelExpire.After(time.Now()) {
-		if xmitMax > s.xmitMax {
-			s.xmitMax = xmitMax
-		}
-		parallel = int(s.xmitMax) - int(s.parallelXmit) + 2
-		if parallel > len(s.tunnels) {
-			parallel = len(s.tunnels)
-		} else if parallel < 1 {
-			parallel = 1
-		}
-		return parallel
-	} else {
-		Logf(INFO, "UDPStream::parallelTun leave uuid:%v accepted:%v parallelXmit:%v", s.uuid, s.accepted, s.parallelXmit)
-		s.xmitMax = 0
-		s.parallelExpire = time.Time{}
-		return 1
+func (s *UDPStream) tryParallel(current uint32) bool {
+	if current == 0 {
+		current = currentMs()
 	}
+	var trigger bool
+	if current >= s.parallelExpireMs {
+		Logf(INFO, "UDPStream::tryParallel uuid:%v accepted:%v", s.uuid, s.accepted)
+		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
+		trigger = true
+		s.parallelDelaytsMax = 0
+	}
+	s.parallelExpireMs = current + s.parallelDurationMs
+	return trigger
 }
 
-func (s *UDPStream) output(buf []byte, xmitMax uint32) {
-	appendCount := s.parallelTun(xmitMax)
+func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
+	if delayts >= s.parallelDelayMs {
+		trigger = s.tryParallel(current)
+	}
+	if current >= s.parallelExpireMs {
+		return 1, trigger
+	}
+	if delayts > s.parallelDelaytsMax {
+		s.parallelDelaytsMax = delayts
+	}
+	parallel = 2
+	if s.parallelDelaytsMax > s.parallelDelayMs {
+		parallel += int((s.parallelDelaytsMax - s.parallelDelayMs) / s.parallelIntervalMs)
+	}
+	if parallel > len(s.tunnels) {
+		parallel = len(s.tunnels)
+	}
+	return parallel, trigger
+}
+
+func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
+	var appendCount int
+	var trigger bool
+	if s.parallelDelayMs == 0 || s.state == StateNone {
+		appendCount = len(s.tunnels)
+	} else {
+		appendCount, trigger = s.getParallel(current, xmitMax, delayts)
+	}
 	for i := len(s.msgss); i < appendCount; i++ {
 		s.msgss = append(s.msgss, make([]ipv4.Message, 0))
 	}
@@ -765,6 +813,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 
 	msg := ipv4.Message{}
 	copy(buf, s.uuid[:])
+	s.encodeFrameHeader(buf[:s.headerSize], trigger)
 	msg.Buffers = [][]byte{buf}
 	msg.Addr = s.remotes[0]
 	s.msgss[0] = append(s.msgss[0], msg)
@@ -773,6 +822,7 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 		msg := ipv4.Message{}
 		bts := xmitBuf.Get().([]byte)[:len(buf)]
 		copy(bts, buf)
+		s.setFrameReplica(bts[:s.headerSize])
 		msg.Buffers = [][]byte{bts}
 		msg.Addr = s.remotes[i]
 		s.msgss[i] = append(s.msgss[i], msg)
@@ -782,8 +832,13 @@ func (s *UDPStream) output(buf []byte, xmitMax uint32) {
 func (s *UDPStream) input(data []byte) {
 	var kcpInErrors uint64
 
+	trigger, replica := s.decodeFrameHeader(data)
+
 	s.mu.Lock()
-	if ret := s.kcp.Input(data[gouuid.Size:], true, false); ret != 0 {
+	if trigger {
+		s.tryParallel(currentMs())
+	}
+	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++
 	}
 
@@ -881,8 +936,10 @@ func (s *UDPStream) recvSyn(data []byte) (n int, err error) {
 		return len(data), nil
 	}
 
-	endpointInfo := string(data)
-	remotes := strings.Split(endpointInfo, " ")
+	remotes, err := s.decodeDialInfo(data)
+	if err != nil {
+		return len(data), err
+	}
 	if len(remotes) == 0 {
 		return len(data), errSynInfo
 	}
@@ -930,4 +987,84 @@ func (s *UDPStream) recvRst(data []byte) (n int, err error) {
 	Logf(INFO, "UDPStream::recvRst uuid:%v accepted:%v", s.uuid, s.accepted)
 	s.reset()
 	return len(data), io.ErrUnexpectedEOF
+}
+
+//---dial info---
+//version uint8
+//locals uint8 (len) + (uint8 + addr) + (uint8 + addr)...
+func (s *UDPStream) encodeDialInfo(locals []string) ([]byte, error) {
+	if s.uuid.Version() == gouuid.V1 {
+		return []byte(strings.Join(locals, " ")), nil
+	}
+	addrLen := 1
+	for _, local := range locals {
+		_, err := net.ResolveUDPAddr("udp", local)
+		if err != nil {
+			return nil, err
+		}
+		addrLen += (1 + len(local))
+	}
+	buf := make([]byte, 1+addrLen)
+	encodeBuf := ikcp_encode8u(buf, DV1)
+	encodeBuf = ikcp_encode8u(encodeBuf, byte(len(locals)))
+	for _, local := range locals {
+		encodeBuf = encode8uString(encodeBuf, local)
+	}
+	return buf, nil
+}
+
+func (s *UDPStream) decodeDialInfo(buf []byte) ([]string, error) {
+	if s.uuid.Version() == gouuid.V1 {
+		return strings.Split(string(buf), " "), nil
+	}
+	var err error
+	var version byte
+	var addrs byte
+	if buf, err = decode8u(buf, &version); err != nil {
+		return nil, err
+	}
+	if version != DV1 {
+		return nil, errDialVersionNotSupport
+	}
+	if buf, err = decode8u(buf, &addrs); err != nil {
+		return nil, err
+	}
+	remotes := make([]string, addrs)
+	for i := 0; i < int(addrs); i++ {
+		if buf, err = decode8uString(buf, &remotes[i]); err != nil {
+			return nil, err
+		}
+	}
+	return remotes, nil
+}
+
+//uuid + version(4bit) + parallel_notify(1 bit) + replica(1 bit) + none_use(2 bit)
+func (s *UDPStream) encodeFrameHeader(buf []byte, parallel bool) {
+	copy(buf, s.uuid[:])
+	if s.uuid.Version() == gouuid.V1 {
+		return
+	}
+	verFlag := FV1 << 4
+	if parallel {
+		verFlag |= FRAME_FLAG_PARALLEL_NTF
+	}
+	buf[gouuid.Size] = verFlag
+}
+
+func (s *UDPStream) setFrameReplica(buf []byte) {
+	if s.uuid.Version() == gouuid.V1 {
+		return
+	}
+	buf[gouuid.Size] = buf[gouuid.Size] | FRAME_FLAG_REPLICA
+}
+
+func (s *UDPStream) decodeFrameHeader(buf []byte) (bool, bool) {
+	if s.uuid.Version() == gouuid.V1 || len(buf) <= gouuid.Size {
+		return false, false
+	}
+	verFlag := buf[gouuid.Size]
+	if verFlag>>4 != FV1 {
+		return false, false
+	}
+	return verFlag&FRAME_FLAG_PARALLEL_NTF != 0, verFlag&FRAME_FLAG_REPLICA != 0
 }
