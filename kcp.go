@@ -156,7 +156,7 @@ type KCP struct {
 	snd_una, snd_nxt, rcv_nxt              uint32
 	ssthresh                               uint32
 	rx_rttvar, rx_srtt                     int32
-	rx_rto, rx_minrto                      uint32
+	rx_rto, rx_minrto, rx_maxrto           uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
 	interval, ts_flush                     uint32
 	nodelay, updated                       uint32
@@ -205,6 +205,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.buffer = make([]byte, kcp.mtu)
 	kcp.rx_rto = IKCP_RTO_DEF
 	kcp.rx_minrto = IKCP_RTO_MIN
+	kcp.rx_maxrto = IKCP_RTO_MAX
 	kcp.interval = IKCP_INTERVAL
 	kcp.ts_flush = IKCP_INTERVAL
 	kcp.ssthresh = IKCP_THRESH_INIT
@@ -419,7 +420,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 		}
 	}
 	rto = uint32(kcp.rx_srtt) + _imax_(kcp.interval, uint32(kcp.rx_rttvar)<<2)
-	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, kcp.rx_maxrto)
 
 	statRto(int(kcp.rx_rto))
 }

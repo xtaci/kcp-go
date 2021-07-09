@@ -27,12 +27,12 @@ var (
 const (
 	CleanTimeout              = time.Second * 5
 	HeartbeatInterval         = time.Second * 30
-	DefaultParallelXmit       = 5
-	DefaultParallelDelayMs    = 350
-	DefaultParallelDurationMs = 30 * 1000
 	DefaultDeadLink           = 10
 	DefaultAckNoDelayRatio    = 0.7
 	DefaultAckNoDelayCount    = 60
+	DefaultParallelDelayMs    = 350
+	DefaultParallelIntervalMs = 150
+	DefaultParallelDurationMs = 60 * 1000
 )
 
 const (
@@ -116,9 +116,10 @@ type (
 		mu    sync.Mutex
 
 		parallelDelayMs    uint32
+		parallelIntervalMs uint32
 		parallelDurationMs uint32
 		parallelExpireMs   uint32
-		parallelXmit       uint32
+		parallelDelaytsMax uint32
 
 		ackNoDelayRatio float32
 		ackNoDelayCount uint32
@@ -174,6 +175,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.hrtTicker = time.NewTicker(HeartbeatInterval)
 	stream.cleanTimer = time.NewTimer(CleanTimeout)
 	stream.parallelDelayMs = DefaultParallelDelayMs
+	stream.parallelIntervalMs = DefaultParallelIntervalMs
 	stream.parallelDurationMs = DefaultParallelDurationMs
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
@@ -304,14 +306,31 @@ func (s *UDPStream) SetDeadLink(deadLink int) {
 	s.kcp.dead_link = uint32(deadLink)
 }
 
-func (s *UDPStream) SetParallelXmit(parallelXmit uint32) {
+func (s *UDPStream) SetParallelDelayMs(delayMs uint32) {
+	if delayMs == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.parallelDelayMs = delayMs
 }
 
-func (s *UDPStream) SetParallelTime(parallelTime time.Duration) {
+func (s *UDPStream) SetParallelIntervalMs(intervalMs uint32) {
+	if intervalMs == 0 {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.parallelIntervalMs = intervalMs
+}
+
+func (s *UDPStream) SetParallelDurationMs(durationMs uint32) {
+	if durationMs == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.parallelDurationMs = durationMs
 }
 
 func (s *UDPStream) WaitSnd() int {
@@ -743,32 +762,37 @@ func (s *UDPStream) flush() (interval uint32) {
 	return
 }
 
-func (s *UDPStream) tryParallel(current uint32, active bool) bool {
+func (s *UDPStream) tryParallel(current uint32) bool {
 	if current == 0 {
 		current = currentMs()
 	}
-	if active && current < s.parallelExpireMs {
-		return false
+	var trigger bool
+	if current >= s.parallelExpireMs {
+		Logf(INFO, "UDPStream::tryParallel uuid:%v accepted:%v", s.uuid, s.accepted)
+		atomic.AddUint64(&DefaultSnmp.Parallels, 1)
+		trigger = true
+		s.parallelDelaytsMax = 0
 	}
-
 	s.parallelExpireMs = current + s.parallelDurationMs
-	atomic.AddUint64(&DefaultSnmp.Parallels, 1)
-
-	Logf(INFO, "UDPStream::tryParallel uuid:%v accepted:%v", s.uuid, s.accepted)
-	return true
+	return trigger
 }
 
 func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int, trigger bool) {
 	if delayts >= s.parallelDelayMs {
-		// if xmitMax >= 5 {
-		trigger = s.tryParallel(current, true)
+		trigger = s.tryParallel(current)
 	}
-	if s.parallelExpireMs <= current {
+	if current >= s.parallelExpireMs {
 		return 1, trigger
 	}
-	parallel = len(s.tunnels)
-	if parallel > 2 {
-		parallel = 2
+	if delayts > s.parallelDelaytsMax {
+		s.parallelDelaytsMax = delayts
+	}
+	parallel = 1
+	if s.parallelDelaytsMax > s.parallelDelayMs {
+		parallel += int((s.parallelDelaytsMax - s.parallelDelayMs) / s.parallelIntervalMs)
+	}
+	if parallel > len(s.tunnels) {
+		parallel = len(s.tunnels)
 	}
 	return parallel, trigger
 }
@@ -812,7 +836,7 @@ func (s *UDPStream) input(data []byte) {
 
 	s.mu.Lock()
 	if trigger {
-		s.tryParallel(currentMs(), false)
+		s.tryParallel(currentMs())
 	}
 	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++

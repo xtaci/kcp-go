@@ -288,7 +288,7 @@ func RandInt(msgDealMinMs, msgDealMaxMs int) int {
 	return rand.Intn(msgDealMaxMs-msgDealMinMs+1) + msgDealMinMs
 }
 
-func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, msgDealMinMs, msgDealMaxMs int) {
+func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelDelayMs, msgDealMinMs, msgDealMaxMs int) {
 	stream, err := serverTransport.Accept()
 	if err != nil {
 		t.Fatalf("server accept stream failed. err:%v", err)
@@ -299,8 +299,8 @@ func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	if rtoInit != 0 {
 		stream.kcp.rx_rto = uint32(rtoInit)
 	}
-	if parallelXmit != 0 {
-		stream.SetParallelXmit(uint32(parallelXmit))
+	if parallelDelayMs != 0 {
+		stream.SetParallelDelayMs(uint32(parallelDelayMs))
 	}
 
 	buf := make([]byte, 65536)
@@ -316,7 +316,7 @@ func server(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	}
 }
 
-func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, msgCnt, bufSize int) (total, max int) {
+func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelDelayMs, msgCnt, bufSize int) (total, max int) {
 	stream, err := clientTransport.Open(clientSel.PickAddrs(ipsCount))
 	if err != nil {
 		t.Fatalf("client open stream failed. err:%v", err)
@@ -327,8 +327,8 @@ func client(t *testing.T, nodelay, interval, resend, nc, rtoInit, parallelXmit, 
 	if rtoInit != 0 {
 		stream.kcp.rx_rto = uint32(rtoInit)
 	}
-	if parallelXmit != 0 {
-		stream.SetParallelXmit(uint32(parallelXmit))
+	if parallelDelayMs != 0 {
+		stream.SetParallelDelayMs(uint32(parallelDelayMs))
 	}
 
 	buf := make([]byte, bufSize)
@@ -506,11 +506,11 @@ func testTunnelSimulate(t *testing.T, clientCnt, msgCnt, msgDealMinMs, msgDealMa
 	wg := sync.WaitGroup{}
 	wg.Add(clientCnt)
 	for i := 0; i < clientCnt; i++ {
-		go server(t, 1, 20, 2, 1, rtoInterval, 4, msgDealMinMs, msgDealMaxMs)
+		go server(t, 1, 20, 2, 1, rtoInterval, 300, msgDealMinMs, msgDealMaxMs)
 		go func() {
 			defer wg.Done()
 
-			total, max := client(t, 1, 20, 2, 1, rtoInterval, 4, msgCnt, 1000)
+			total, max := client(t, 1, 20, 2, 1, rtoInterval, 300, msgCnt, 1000)
 			statLock.Lock()
 			echoTimeAll += total
 			if max > echoTimeMax {
@@ -963,54 +963,114 @@ func TestSNMP(t *testing.T) {
 	assert.Equal(t, currEstab, DefaultSnmp.CurrEstab)
 }
 
-func TestParallelTun(t *testing.T) {
-	parallelXmit := 3
-	parallelTime := 200 * time.Millisecond
+func TestTryParallel(t *testing.T) {
+	uuid, _ := gouuid.NewV4()
+	s := &UDPStream{
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		headerSize: gouuid.Size + 1,
+	}
+
+	var durationMs uint32 = 100
+	s.SetParallelDurationMs(durationMs)
+
+	current := currentMs()
+	trigger := s.tryParallel(0)
+	assert.True(t, trigger)
+	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+
+	current += 90
+	trigger = s.tryParallel(current)
+	assert.False(t, trigger)
+	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+
+	current += 20
+	trigger = s.tryParallel(current)
+	assert.True(t, trigger)
+	assert.Equal(t, s.parallelExpireMs, current+durationMs)
+}
+
+func TestGetParallel(t *testing.T) {
 	tunnelCnt := 3
 	uuid, _ := gouuid.NewV4()
 	s := &UDPStream{
-		uuid:         uuid,
-		msgss:        make([][]ipv4.Message, 0),
-		parallelXmit: uint32(parallelXmit),
-		parallelTime: parallelTime,
-		tunnels:      make([]*UDPTunnel, tunnelCnt),
-		remotes:      make([]*net.UDPAddr, tunnelCnt),
-		headerSize:   gouuid.Size + 1,
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		tunnels:    make([]*UDPTunnel, tunnelCnt),
+		remotes:    make([]*net.UDPAddr, tunnelCnt),
+		headerSize: gouuid.Size + 1,
 	}
 	assert.Equal(t, 3, len(s.tunnels))
 
-	parallel, trigger := s.getParallel(2)
+	var delayMs uint32 = 200
+	var durationMs uint32 = 100
+	var intervalMs uint32 = 150
+
+	s.SetParallelDelayMs(delayMs)
+	s.SetParallelDurationMs(durationMs)
+	s.SetParallelIntervalMs(intervalMs)
+
+	current := currentMs()
+
+	parallel, trigger := s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(3)
+	parallel, trigger = s.getParallel(current, 0, 250)
 	assert.Equal(t, 2, parallel)
 	assert.True(t, trigger)
 
-	parallel, trigger = s.getParallel(1)
+	parallel, trigger = s.getParallel(current, 0, 340)
 	assert.Equal(t, 2, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(4)
+	parallel, trigger = s.getParallel(current, 0, 350)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(5)
+	parallel, trigger = s.getParallel(current, 0, 500)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
-	parallel, trigger = s.getParallel(1)
+	parallel, trigger = s.getParallel(current, 0, 150)
 	assert.Equal(t, 3, parallel)
 	assert.False(t, trigger)
 
-	time.Sleep(parallelTime)
+	current += durationMs
 
-	parallel, trigger = s.getParallel(1)
+	parallel, trigger = s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
 	assert.False(t, trigger)
 
+	parallel, trigger = s.getParallel(current, 0, 250)
+	assert.Equal(t, 2, parallel)
+	assert.True(t, trigger)
+}
+
+func TestParallelOutput(t *testing.T) {
+	tunnelCnt := 3
+	uuid, _ := gouuid.NewV4()
+	s := &UDPStream{
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		tunnels:    make([]*UDPTunnel, tunnelCnt),
+		remotes:    make([]*net.UDPAddr, tunnelCnt),
+		headerSize: gouuid.Size + 1,
+	}
+	assert.Equal(t, 3, len(s.tunnels))
+
+	var delayMs uint32 = 200
+	var durationMs uint32 = 100
+	var intervalMs uint32 = 150
+
+	s.SetParallelDelayMs(delayMs)
+	s.SetParallelDurationMs(durationMs)
+	s.SetParallelIntervalMs(intervalMs)
+
+	current := currentMs()
+
 	buf := make([]byte, 100)
-	s.output(buf, 1)
+	s.output(buf, current, 0, 0)
 	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
@@ -1026,7 +1086,7 @@ func TestParallelTun(t *testing.T) {
 
 	s.state = StateEstablish
 
-	s.output(buf, 1)
+	s.output(buf, current, 0, 0)
 	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 2, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
@@ -1036,7 +1096,7 @@ func TestParallelTun(t *testing.T) {
 	assert.False(t, par)
 	assert.False(t, replica)
 
-	s.output(buf, 3)
+	s.output(buf, current, 0, 200)
 	assert.Equal(t, 3, len(s.msgss[0]))
 	assert.Equal(t, 2, len(s.msgss[1]))
 	assert.Equal(t, 1, len(s.msgss[2]))
@@ -1049,12 +1109,12 @@ func TestParallelTun(t *testing.T) {
 	assert.True(t, par)
 	assert.True(t, replica)
 
-	s.output(buf, 4)
+	s.output(buf, current, 0, 350)
 	assert.Equal(t, 4, len(s.msgss[0]))
 	assert.Equal(t, 3, len(s.msgss[1]))
 	assert.Equal(t, 2, len(s.msgss[2]))
 
-	s.output(buf, 5)
+	s.output(buf, current, 0, 500)
 	assert.Equal(t, 5, len(s.msgss[0]))
 	assert.Equal(t, 4, len(s.msgss[1]))
 	assert.Equal(t, 3, len(s.msgss[2]))
@@ -1069,17 +1129,19 @@ func TestParallelTun(t *testing.T) {
 
 	uuid, _ = gouuid.NewV1()
 	s = &UDPStream{
-		uuid:         uuid,
-		msgss:        make([][]ipv4.Message, 0),
-		parallelXmit: uint32(parallelXmit),
-		parallelTime: parallelTime,
-		tunnels:      make([]*UDPTunnel, tunnelCnt),
-		remotes:      make([]*net.UDPAddr, tunnelCnt),
-		headerSize:   gouuid.Size,
+		uuid:       uuid,
+		msgss:      make([][]ipv4.Message, 0),
+		tunnels:    make([]*UDPTunnel, tunnelCnt),
+		remotes:    make([]*net.UDPAddr, tunnelCnt),
+		headerSize: gouuid.Size,
 	}
 
+	s.SetParallelDelayMs(delayMs)
+	s.SetParallelDurationMs(durationMs)
+	s.SetParallelIntervalMs(intervalMs)
+
 	buf = make([]byte, 100)
-	s.output(buf, 1)
+	s.output(buf, current, 0, 0)
 	assert.Equal(t, 3, len(s.msgss))
 	assert.Equal(t, 1, len(s.msgss[0]))
 	assert.Equal(t, 1, len(s.msgss[1]))
