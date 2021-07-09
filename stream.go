@@ -787,7 +787,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 	if delayts > s.parallelDelaytsMax {
 		s.parallelDelaytsMax = delayts
 	}
-	parallel = 1
+	parallel = 2
 	if s.parallelDelaytsMax > s.parallelDelayMs {
 		parallel += int((s.parallelDelaytsMax - s.parallelDelayMs) / s.parallelIntervalMs)
 	}

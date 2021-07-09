@@ -986,7 +986,7 @@ func TestTryParallel(t *testing.T) {
 
 	current += 20
 	trigger = s.tryParallel(current)
-	assert.True(t, trigger)
+	assert.False(t, trigger)
 	assert.Equal(t, s.parallelExpireMs, current+durationMs)
 }
 
@@ -1154,6 +1154,30 @@ func TestParallelOutput(t *testing.T) {
 	par, replica = s.decodeFrameHeader(s.msgss[2][0].Buffers[0])
 	assert.False(t, par)
 	assert.False(t, replica)
+}
+
+func TestKcpFlush(t *testing.T) {
+	// var current uint32
+	var xmitMax int
+	var delayts int
+	var outputcnt int
+
+	ouput := func(buf []byte, size int, current_, xmitMax_, delayts_ uint32) {
+		// current = current_
+		xmitMax = int(xmitMax_)
+		delayts = int(delayts_)
+		outputcnt++
+	}
+	kcp := NewKCP(1, ouput)
+	kcp.rx_rto = 30
+
+	buf := make([]byte, 100)
+	kcp.Send(buf)
+	kcp.flush(false)
+
+	assert.Equal(t, 1, outputcnt)
+	assert.Equal(t, 1, xmitMax)
+	assert.Equal(t, 0, delayts)
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
