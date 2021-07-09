@@ -1170,6 +1170,8 @@ func TestKcpFlush(t *testing.T) {
 	}
 	kcp := NewKCP(1, ouput)
 	kcp.rx_rto = 30
+	kcp.cwnd = 10
+	kcp.nocwnd = 1
 
 	buf := make([]byte, 100)
 	kcp.Send(buf)
@@ -1178,6 +1180,33 @@ func TestKcpFlush(t *testing.T) {
 	assert.Equal(t, 1, outputcnt)
 	assert.Equal(t, 1, xmitMax)
 	assert.Equal(t, 0, delayts)
+
+	time.Sleep(time.Millisecond * 30)
+	kcp.flush(false)
+
+	assert.Equal(t, 2, outputcnt)
+	assert.Equal(t, 2, xmitMax)
+	assert.True(t, delayts >= 30)
+
+	time.Sleep(time.Millisecond * 30)
+	kcp.flush(false)
+
+	assert.Equal(t, 2, outputcnt)
+	assert.Equal(t, 2, xmitMax)
+	assert.True(t, delayts >= 30)
+
+	kcp.Send(buf)
+	kcp.flush(false)
+	assert.Equal(t, 3, outputcnt)
+	assert.Equal(t, 1, xmitMax)
+	assert.Equal(t, 0, delayts)
+
+	time.Sleep(time.Millisecond * 30)
+	kcp.flush(false)
+
+	assert.Equal(t, 4, outputcnt)
+	assert.Equal(t, 3, xmitMax)
+	assert.True(t, delayts >= 60)
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
