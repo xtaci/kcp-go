@@ -28,6 +28,7 @@ var directProxyAddr = flag.String("directProxyAddr", "", "direct proxy address")
 var sendIntervalMs = flag.Int("sendIntervalMs", 1000, "msg send interval millisecond")
 var outputIntervalS = flag.Int("outputIntervalS", 1, "output interval second")
 var printRtoMs = flag.Int("printRtoMs", 1000, "print rto ms")
+var printDialCostMs = flag.Int("printDialCostMs", 1000, "print dial cost ms")
 
 func checkError(err error) {
 	if err != nil {
@@ -213,6 +214,7 @@ func main() {
 	log.Printf("sendIntervalMs:%v\n", *sendIntervalMs)
 	log.Printf("outputIntervalS:%v\n", *outputIntervalS)
 	log.Printf("printRtoMs:%v\n", *printRtoMs)
+	log.Printf("printDialCostMs:%v\n", *printDialCostMs)
 
 	clientcount := *clients
 
@@ -224,6 +226,19 @@ func main() {
 	costs := make([]*CostStat, 0, CostStatMax/CostStatInterval)
 	for i := 0; i < cap(costs); i++ {
 		costs = append(costs, &CostStat{idx: i + 1})
+	}
+
+	var dialCount int64
+	var dialCost int64
+	dialCostStat := func(cost time.Duration) {
+		if cost > time.Millisecond*time.Duration(*printDialCostMs) {
+			fmt.Printf("dial cost:%v \n", cost)
+		}
+		cnt := atomic.AddInt64(&dialCount, 1)
+		cst := atomic.AddInt64(&dialCost, int64(cost))
+		if cnt%1000 == 0 {
+			fmt.Printf("dial cost cnt:%v avg:%v \n", cnt, time.Duration(cst/cnt))
+		}
 	}
 
 	fmt.Printf("TestClientEcho clientcount:%d batchCount:%v batchSleep:%v \n", clientcount, batchCount, batchSleep)
@@ -258,9 +273,7 @@ func main() {
 					checkError(err)
 				}
 				cost := time.Since(start)
-				if cost > time.Millisecond*1000 {
-					fmt.Printf("dial addr:%v cost:%v \n", proxyAddrS, cost)
-				}
+				dialCostStat(cost)
 				c := &client{
 					proxy:   proxyAddrS,
 					TCPConn: conn.(*net.TCPConn),
