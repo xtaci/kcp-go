@@ -586,6 +586,7 @@ func (s *UDPStream) dial(locals []string, timeout time.Duration) error {
 		return err
 	}
 	s.WriteFlag(SYN, dialBuf)
+	s.flush()
 
 	dialTimer := time.NewTimer(timeout)
 	defer dialTimer.Stop()
@@ -640,6 +641,8 @@ func (s *UDPStream) accept() (err error) {
 		return err
 	}
 	s.mu.Unlock()
+
+	s.flush()
 	s.establish()
 	return err
 }
@@ -650,7 +653,6 @@ func (s *UDPStream) establish() {
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	atomicSetMax(&DefaultSnmp.MaxConn, currestab)
 
-	s.sched.Put(s.fnvKey, TS_EXCLUSIVE, s.flush, 0)
 	s.sched.Put(s.fnvKey, TS_NORMAL, s.hrtTick, HeartbeatIntervalMs)
 
 	s.mu.Lock()
@@ -779,7 +781,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 func (s *UDPStream) output(buf []byte, current, xmitMax, delayts uint32) {
 	var appendCount int
 	var trigger bool
-	if s.parallelDelayMs == 0 || (s.accepted && s.kcp.rcv_nxt == 1) {
+	if s.parallelDelayMs == 0 || s.state == StateNone {
 		appendCount = len(s.tunnels)
 	} else {
 		appendCount, trigger = s.getParallel(current, xmitMax, delayts)
