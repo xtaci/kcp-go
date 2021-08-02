@@ -120,6 +120,7 @@ type (
 		parallelDurationMs uint32
 		parallelExpireMs   uint32
 		parallelDelaytsMax uint32
+		primaryBreakOff    bool
 
 		ackNoDelayRatio float32
 		ackNoDelayCount uint32
@@ -179,6 +180,7 @@ func NewUDPStream(uuid gouuid.UUID, accepted bool, remotes []string, sel TunnelS
 	stream.parallelDurationMs = DefaultParallelDurationMs
 	stream.ackNoDelayRatio = DefaultAckNoDelayRatio
 	stream.ackNoDelayCount = DefaultAckNoDelayCount
+	stream.primaryBreakOff = true
 
 	stream.kcp = NewKCP(1, func(buf []byte, size int, current, xmitMax, delayts uint32) {
 		if size >= IKCP_OVERHEAD+stream.headerSize {
@@ -773,6 +775,7 @@ func (s *UDPStream) tryParallel(current uint32) bool {
 		trigger = true
 		s.parallelDelaytsMax = 0
 	}
+	s.primaryBreakOff = true
 	s.parallelExpireMs = current + s.parallelDurationMs
 	return trigger
 }
@@ -781,7 +784,7 @@ func (s *UDPStream) getParallel(current, xmitMax, delayts uint32) (parallel int,
 	if delayts >= s.parallelDelayMs {
 		trigger = s.tryParallel(current)
 	}
-	if current >= s.parallelExpireMs {
+	if current >= s.parallelExpireMs && !s.primaryBreakOff {
 		return 1, trigger
 	}
 	if delayts > s.parallelDelaytsMax {
@@ -837,6 +840,9 @@ func (s *UDPStream) input(data []byte) {
 	s.mu.Lock()
 	if trigger {
 		s.tryParallel(currentMs())
+	}
+	if !replica {
+		s.primaryBreakOff = false
 	}
 	if ret := s.kcp.Input(data[s.headerSize:], !replica, false); ret != 0 {
 		kcpInErrors++

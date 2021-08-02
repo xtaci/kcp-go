@@ -1039,6 +1039,12 @@ func TestGetParallel(t *testing.T) {
 	current += durationMs
 
 	parallel, trigger = s.getParallel(current, 0, 150)
+	assert.Equal(t, 3, parallel)
+	assert.False(t, trigger)
+
+	s.primaryBreakOff = false
+
+	parallel, trigger = s.getParallel(current, 0, 150)
 	assert.Equal(t, 1, parallel)
 	assert.False(t, trigger)
 
