@@ -20,7 +20,7 @@ function kcp_protocol.dissector(buffer, pinfo, tree)
         return
     end
 
-    local offset_s = 8
+    local offset_s = 0
     local first_sn = buffer(offset_s + 12, 4):le_int()
     local first_len = buffer(offset_s + 20, 4):le_int()
     local first_cmd_name = get_cmd_name(buffer(offset_s + 4, 1):le_int())
@@ -31,7 +31,7 @@ function kcp_protocol.dissector(buffer, pinfo, tree)
     pinfo.cols.info = string.gsub(udp_info, " U", info .. " U", 1)
 
     -- dssect multi kcp packet in udp
-    local offset = 8
+    local offset = 0
     while offset < buffer:len() do
         local conv_buf = buffer(offset + 0, 4)
         local cmd_buf = buffer(offset + 4, 1)
@@ -44,10 +44,10 @@ function kcp_protocol.dissector(buffer, pinfo, tree)
 
         local tree_title =
             string.format(
-            "KCP Protocol, %s, Sn: %d, Conv: %d, Wnd: %d, Len: %d",
+            "KCP Protocol, %s, Sn: %d, Conv: %u, Wnd: %d, Len: %d",
             cmd_name,
             sn_buf:le_int(),
-            conv_buf:le_int(),
+            conv_buf:le_uint(),
             wnd_buf:le_int(),
             data_len
         )
