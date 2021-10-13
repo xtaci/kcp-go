@@ -195,6 +195,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 // Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
+	return s.Recv(b, time.Time{})
+}
+
+// Recv data from KCP
+func (s *UDPSession) Recv(b []byte, deadline time.Time) (n int, err error) {
 	for {
 		s.mu.Lock()
 		if len(s.bufptr) > 0 { // copy from buffer into b
@@ -231,6 +236,9 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		// deadline for current reading operation
 		var timeout *time.Timer
 		var c <-chan time.Time
+		if !deadline.IsZero() {
+			s.rd = deadline
+		}
 		if !s.rd.IsZero() {
 			if time.Now().After(s.rd) {
 				s.mu.Unlock()
@@ -260,10 +268,17 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 }
 
 // Write implements net.Conn
-func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers([][]byte{b}) }
+func (s *UDPSession) Write(b []byte) (n int, err error) {
+	return s.SendBatch([][]byte{b}, time.Time{})
+}
 
-// WriteBuffers write a vector of byte slices to the underlying connection
-func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
+// Send data to KCP
+func (s *UDPSession) Send(b []byte, deadline time.Time) (n int, err error) {
+	return s.SendBatch([][]byte{b}, deadline)
+}
+
+// Send data to KCP
+func (s *UDPSession) SendBatch(v [][]byte, deadline time.Time) (n int, err error) {
 	for {
 		select {
 		case <-s.chSocketWriteError:
@@ -303,6 +318,9 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 		var timeout *time.Timer
 		var c <-chan time.Time
+		if !deadline.IsZero() {
+			s.wd = deadline
+		}
 		if !s.wd.IsZero() {
 			if time.Now().After(s.wd) {
 				s.mu.Unlock()

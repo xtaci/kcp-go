@@ -243,9 +243,9 @@ func TestTimeout(t *testing.T) {
 	buf := make([]byte, 10)
 
 	//timeout
-	cli.SetDeadline(time.Now().Add(time.Second))
+	deadline := time.Now().Add(time.Second)
 	<-time.After(2 * time.Second)
-	n, err := cli.Read(buf)
+	n, err := cli.Recv(buf, deadline)
 	if n != 0 || err == nil {
 		t.Fail()
 	}
@@ -296,7 +296,7 @@ func TestSendVector(t *testing.T) {
 		v[0] = []byte(fmt.Sprintf("hello%v", i))
 		v[1] = []byte(fmt.Sprintf("world%v", i))
 		msg := fmt.Sprintf("hello%vworld%v", i, i)
-		cli.WriteBuffers(v)
+		cli.SendBatch(v, time.Now().Add(time.Hour))
 		if n, err := cli.Read(buf); err == nil {
 			if string(buf[:n]) != msg {
 				t.Error(string(buf[:n]), msg)
