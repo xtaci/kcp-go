@@ -9,40 +9,32 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
 
-const portEcho = "127.0.0.1:9999"
-const portSink = "127.0.0.1:19999"
-const portTinyBufferEcho = "127.0.0.1:29999"
-const portListerner = "127.0.0.1:9998"
-const salt = "kcptest"
-
+var baseport = uint32(10000)
 var key = []byte("testkey")
-var fec = 4
-var pass = pbkdf2.Key(key, []byte(portSink), 4096, 32, sha1.New)
+var pass = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
 
 func init() {
 	go func() {
-		log.Println(http.ListenAndServe("localhost:6060", nil))
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
 	}()
 
-	go echoServer()
-	go sinkServer()
-	go tinyBufferEchoServer()
-	println("beginning tests, encryption:salsa20, fec:10/3")
+	log.Println("beginning tests, encryption:salsa20, fec:10/3")
 }
 
-func dialEcho() (*UDPSession, error) {
+func dialEcho(port int) (*UDPSession, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
-	sess, err := DialWithOptions(portEcho, block, 10, 3)
+	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
 		panic(err)
 	}
@@ -50,44 +42,45 @@ func dialEcho() (*UDPSession, error) {
 	sess.SetStreamMode(true)
 	sess.SetStreamMode(false)
 	sess.SetStreamMode(true)
-	sess.SetWindowSize(4096, 4096)
-	sess.SetReadBuffer(4 * 1024 * 1024)
-	sess.SetWriteBuffer(4 * 1024 * 1024)
+	sess.SetWindowSize(1024, 1024)
+	sess.SetReadBuffer(16 * 1024 * 1024)
+	sess.SetWriteBuffer(16 * 1024 * 1024)
 	sess.SetStreamMode(true)
 	sess.SetNoDelay(1, 10, 2, 1)
 	sess.SetMtu(1400)
 	sess.SetMtu(1600)
 	sess.SetMtu(1400)
 	sess.SetACKNoDelay(true)
+	sess.SetACKNoDelay(false)
 	sess.SetDeadline(time.Now().Add(time.Minute))
 	return sess, err
 }
 
-func dialSink() (*UDPSession, error) {
-	sess, err := DialWithOptions(portSink, nil, 0, 0)
+func dialSink(port int) (*UDPSession, error) {
+	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), nil, 0, 0)
 	if err != nil {
 		panic(err)
 	}
 
 	sess.SetStreamMode(true)
-	sess.SetWindowSize(4096, 4096)
-	sess.SetReadBuffer(4 * 1024 * 1024)
-	sess.SetWriteBuffer(4 * 1024 * 1024)
+	sess.SetWindowSize(1024, 1024)
+	sess.SetReadBuffer(16 * 1024 * 1024)
+	sess.SetWriteBuffer(16 * 1024 * 1024)
 	sess.SetStreamMode(true)
 	sess.SetNoDelay(1, 10, 2, 1)
 	sess.SetMtu(1400)
-	sess.SetACKNoDelay(true)
+	sess.SetACKNoDelay(false)
 	sess.SetDeadline(time.Now().Add(time.Minute))
 	return sess, err
 }
 
-func dialTinyBufferEcho() (*UDPSession, error) {
+func dialTinyBufferEcho(port int) (*UDPSession, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
-	sess, err := DialWithOptions(portTinyBufferEcho, block, 10, 3)
+	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
 		panic(err)
 	}
@@ -95,29 +88,29 @@ func dialTinyBufferEcho() (*UDPSession, error) {
 }
 
 //////////////////////////
-func listenEcho() (net.Listener, error) {
+func listenEcho(port int) (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
-	return ListenWithOptions(portEcho, block, 10, 3)
+	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 0)
 }
-func listenTinyBufferEcho() (net.Listener, error) {
+func listenTinyBufferEcho(port int) (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
-	return ListenWithOptions(portTinyBufferEcho, block, 10, 3)
+	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 }
 
-func listenSink() (net.Listener, error) {
-	return ListenWithOptions(portSink, nil, 0, 0)
+func listenSink(port int) (net.Listener, error) {
+	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), nil, 0, 0)
 }
 
-func echoServer() {
-	l, err := listenEcho()
+func echoServer(port int) net.Listener {
+	l, err := listenEcho(port)
 	if err != nil {
 		panic(err)
 	}
@@ -139,10 +132,12 @@ func echoServer() {
 			go handleEcho(s.(*UDPSession))
 		}
 	}()
+
+	return l
 }
 
-func sinkServer() {
-	l, err := listenSink()
+func sinkServer(port int) net.Listener {
+	l, err := listenSink(port)
 	if err != nil {
 		panic(err)
 	}
@@ -161,10 +156,12 @@ func sinkServer() {
 			go handleSink(s.(*UDPSession))
 		}
 	}()
+
+	return l
 }
 
-func tinyBufferEchoServer() {
-	l, err := listenTinyBufferEcho()
+func tinyBufferEchoServer(port int) net.Listener {
+	l, err := listenTinyBufferEcho(port)
 	if err != nil {
 		panic(err)
 	}
@@ -178,6 +175,7 @@ func tinyBufferEchoServer() {
 			go handleTinyBufferEcho(s.(*UDPSession))
 		}
 	}()
+	return l
 }
 
 ///////////////////////////
@@ -195,7 +193,7 @@ func handleEcho(conn *UDPSession) {
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			return
 		}
 		conn.Write(buf[:n])
 	}
@@ -214,7 +212,7 @@ func handleSink(conn *UDPSession) {
 	for {
 		_, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			return
 		}
 	}
 }
@@ -225,7 +223,7 @@ func handleTinyBufferEcho(conn *UDPSession) {
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
-			panic(err)
+			return
 		}
 		conn.Write(buf[:n])
 	}
@@ -234,7 +232,11 @@ func handleTinyBufferEcho(conn *UDPSession) {
 ///////////////////////////
 
 func TestTimeout(t *testing.T) {
-	cli, err := dialEcho()
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
@@ -251,7 +253,11 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestSendRecv(t *testing.T) {
-	cli, err := dialEcho()
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
@@ -273,8 +279,41 @@ func TestSendRecv(t *testing.T) {
 	cli.Close()
 }
 
+func TestSendVector(t *testing.T) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+	cli.SetWriteDelay(false)
+	const N = 100
+	buf := make([]byte, 20)
+	v := make([][]byte, 2)
+	for i := 0; i < N; i++ {
+		v[0] = []byte(fmt.Sprintf("hello%v", i))
+		v[1] = []byte(fmt.Sprintf("world%v", i))
+		msg := fmt.Sprintf("hello%vworld%v", i, i)
+		cli.WriteBuffers(v)
+		if n, err := cli.Read(buf); err == nil {
+			if string(buf[:n]) != msg {
+				t.Error(string(buf[:n]), msg)
+			}
+		} else {
+			panic(err)
+		}
+	}
+	cli.Close()
+}
+
 func TestTinyBufferReceiver(t *testing.T) {
-	cli, err := dialTinyBufferEcho()
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := tinyBufferEchoServer(port)
+	defer l.Close()
+
+	cli, err := dialTinyBufferEcho(port)
 	if err != nil {
 		panic(err)
 	}
@@ -314,43 +353,78 @@ func TestTinyBufferReceiver(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
-	cli, err := dialEcho()
+	var n int
+	var err error
+
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
-	buf := make([]byte, 10)
 
+	// double close
 	cli.Close()
 	if cli.Close() == nil {
-		t.Fail()
+		t.Fatal("double close misbehavior")
 	}
-	n, err := cli.Write(buf)
+
+	// write after close
+	buf := make([]byte, 10)
+	n, err = cli.Write(buf)
 	if n != 0 || err == nil {
-		t.Fail()
+		t.Fatal("write after close misbehavior")
 	}
+
+	// write, close, read, read
+	cli, err = dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+	if n, err = cli.Write(buf); err != nil {
+		t.Fatal("write misbehavior")
+	}
+
+	// wait until data arrival
+	time.Sleep(2 * time.Second)
+	// drain
+	cli.Close()
+	n, err = io.ReadFull(cli, buf)
+	if err != nil {
+		t.Fatal("closed conn drain bytes failed", err, n)
+	}
+
+	// after drain, read should return error
 	n, err = cli.Read(buf)
 	if n != 0 || err == nil {
-		t.Fail()
+		t.Fatal("write->close->drain->read misbehavior", err, n)
 	}
 	cli.Close()
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
 	var wg sync.WaitGroup
 	wg.Add(1024)
 	for i := 0; i < 1024; i++ {
-		go parallel_client(&wg)
+		go parallel_client(&wg, port)
 	}
 	wg.Wait()
 }
 
-func parallel_client(wg *sync.WaitGroup) (err error) {
-	cli, err := dialEcho()
+func parallel_client(wg *sync.WaitGroup, port int) (err error) {
+	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
 
 	err = echo_tester(cli, 64, 64)
+	cli.Close()
 	wg.Done()
 	return
 }
@@ -372,8 +446,12 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 }
 
 func speedclient(b *testing.B, nbytes int) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
 	b.ReportAllocs()
-	cli, err := dialEcho()
+	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
@@ -382,6 +460,7 @@ func speedclient(b *testing.B, nbytes int) {
 		b.Fail()
 	}
 	b.SetBytes(int64(nbytes))
+	cli.Close()
 }
 
 func BenchmarkSinkSpeed4K(b *testing.B) {
@@ -401,14 +480,19 @@ func BenchmarkSinkSpeed1M(b *testing.B) {
 }
 
 func sinkclient(b *testing.B, nbytes int) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := sinkServer(port)
+	defer l.Close()
+
 	b.ReportAllocs()
-	cli, err := dialSink()
+	cli, err := dialSink(port)
 	if err != nil {
 		panic(err)
 	}
 
 	sink_tester(cli, nbytes, b.N)
 	b.SetBytes(int64(nbytes))
+	cli.Close()
 }
 
 func echo_tester(cli net.Conn, msglen, msgcount int) error {
@@ -456,7 +540,8 @@ func TestSNMP(t *testing.T) {
 }
 
 func TestListenerClose(t *testing.T) {
-	l, err := ListenWithOptions(portListerner, nil, 10, 3)
+	port := int(atomic.AddUint32(&baseport, 1))
+	l, err := ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), nil, 10, 3)
 	if err != nil {
 		t.Fail()
 	}
@@ -469,7 +554,149 @@ func TestListenerClose(t *testing.T) {
 	}
 
 	l.Close()
-	if l.closeSession("127.0.0.1:1111/1234") {
+	fakeaddr, _ := net.ResolveUDPAddr("udp6", "127.0.0.1:1111")
+	if l.closeSession(fakeaddr) {
 		t.Fail()
+	}
+}
+
+// A wrapper for net.PacketConn that remembers when Close has been called.
+type closedFlagPacketConn struct {
+	net.PacketConn
+	Closed bool
+}
+
+func (c *closedFlagPacketConn) Close() error {
+	c.Closed = true
+	return c.PacketConn.Close()
+}
+
+func newClosedFlagPacketConn(c net.PacketConn) *closedFlagPacketConn {
+	return &closedFlagPacketConn{c, false}
+}
+
+// Listener should close a net.PacketConn that it created.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestListenerOwnedPacketConn(t *testing.T) {
+	// ListenWithOptions creates its own net.PacketConn.
+	l, err := ListenWithOptions("127.0.0.1:0", nil, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+	// Replace the internal net.PacketConn with one that remembers when it
+	// has been closed.
+	pconn := newClosedFlagPacketConn(l.conn)
+	l.conn = pconn
+
+	if pconn.Closed {
+		t.Fatal("owned PacketConn closed before Listener.Close()")
+	}
+
+	err = l.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if !pconn.Closed {
+		t.Fatal("owned PacketConn not closed after Listener.Close()")
+	}
+}
+
+// Listener should not close a net.PacketConn that it did not create.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestListenerNonOwnedPacketConn(t *testing.T) {
+	// Create a net.PacketConn not owned by the Listener.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	// Make it remember when it has been closed.
+	pconn := newClosedFlagPacketConn(c)
+
+	l, err := ServeConn(nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed before Listener.Close()")
+	}
+
+	err = l.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed after Listener.Close()")
+	}
+}
+
+// UDPSession should close a net.PacketConn that it created.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestUDPSessionOwnedPacketConn(t *testing.T) {
+	l := sinkServer(0)
+	defer l.Close()
+
+	// DialWithOptions creates its own net.PacketConn.
+	client, err := DialWithOptions(l.Addr().String(), nil, 0, 0)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+	// Replace the internal net.PacketConn with one that remembers when it
+	// has been closed.
+	pconn := newClosedFlagPacketConn(client.conn)
+	client.conn = pconn
+
+	if pconn.Closed {
+		t.Fatal("owned PacketConn closed before UDPSession.Close()")
+	}
+
+	err = client.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if !pconn.Closed {
+		t.Fatal("owned PacketConn not closed after UDPSession.Close()")
+	}
+}
+
+// UDPSession should not close a net.PacketConn that it did not create.
+// https://github.com/xtaci/kcp-go/issues/165
+func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
+	l := sinkServer(0)
+	defer l.Close()
+
+	// Create a net.PacketConn not owned by the UDPSession.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	// Make it remember when it has been closed.
+	pconn := newClosedFlagPacketConn(c)
+
+	client, err := NewConn2(l.Addr(), nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed before UDPSession.Close()")
+	}
+
+	err = client.Close()
+	if err != nil {
+		panic(err)
+	}
+
+	if pconn.Closed {
+		t.Fatal("non-owned PacketConn closed after UDPSession.Close()")
 	}
 }
