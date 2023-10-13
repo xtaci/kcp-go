@@ -10,3 +10,8 @@ type batchConn interface {
 	WriteBatch(ms []ipv4.Message, flags int) (int, error)
 	ReadBatch(ms []ipv4.Message, flags int) (int, error)
 }
+
+type batchErrDetector interface {
+	ReadBatchUnavailable(err error) bool
+	WriteBatchUnavailable(err error) bool
+}

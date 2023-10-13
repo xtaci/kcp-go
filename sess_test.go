@@ -2,6 +2,7 @@ package kcp
 
 import (
 	"crypto/sha1"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/net/ipv4"
 )
 
 var baseport = uint32(10000)
@@ -88,6 +90,8 @@ func dialTinyBufferEcho(port int) (*UDPSession, error) {
 }
 
 //////////////////////////
+type listenFn func(port int) (net.Listener, error)
+
 func listenEcho(port int) (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
 	//block, _ := NewSimpleXORBlockCrypt(pass)
@@ -105,12 +109,16 @@ func listenTinyBufferEcho(port int) (net.Listener, error) {
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 }
 
-func listenSink(port int) (net.Listener, error) {
+func listenNoEncryption(port int) (net.Listener, error) {
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), nil, 0, 0)
 }
 
-func echoServer(port int) net.Listener {
-	l, err := listenEcho(port)
+func server(
+	port int,
+	listen listenFn,
+	handle func(*UDPSession),
+) net.Listener {
+	l, err := listen(port)
 	if err != nil {
 		panic(err)
 	}
@@ -129,35 +137,19 @@ func echoServer(port int) net.Listener {
 			// coverage test
 			s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
 			s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
-			go handleEcho(s.(*UDPSession))
+			go handle(s.(*UDPSession))
 		}
 	}()
 
 	return l
 }
 
+func echoServer(port int) net.Listener {
+	return server(port, listenEcho, handleEcho)
+}
+
 func sinkServer(port int) net.Listener {
-	l, err := listenSink(port)
-	if err != nil {
-		panic(err)
-	}
-
-	go func() {
-		kcplistener := l.(*Listener)
-		kcplistener.SetReadBuffer(4 * 1024 * 1024)
-		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
-		kcplistener.SetDSCP(46)
-		for {
-			s, err := l.Accept()
-			if err != nil {
-				return
-			}
-
-			go handleSink(s.(*UDPSession))
-		}
-	}()
-
-	return l
+	return server(port, listenNoEncryption, handleSink)
 }
 
 func tinyBufferEchoServer(port int) net.Listener {
@@ -698,5 +690,226 @@ func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
 
 	if pconn.Closed {
 		t.Fatal("non-owned PacketConn closed after UDPSession.Close()")
+	}
+}
+
+type customBatchConn struct {
+	*net.UDPConn
+	calledWriteBatch bool
+	calledReadBatch  bool
+
+	disableWriteBatch     bool
+	disableReadBatch      bool
+	simulateWriteBatchErr bool
+	simulateReadBatchErr  bool
+}
+
+func (c *customBatchConn) WriteBatch(ms []ipv4.Message, flags int) (int, error) {
+	c.calledWriteBatch = true
+	if c.disableWriteBatch {
+		return 0, errors.New("unsupported")
+	}
+	if c.simulateWriteBatchErr {
+		return 0, errors.New("unknown err")
+	}
+	n := 0
+	for k := range ms {
+		if _, err := c.WriteTo(ms[k].Buffers[0], ms[k].Addr); err == nil {
+			n++
+		} else {
+			return n, err
+		}
+	}
+	return n, nil
+}
+
+func (c *customBatchConn) ReadBatch(ms []ipv4.Message, flags int) (int, error) {
+	c.calledReadBatch = true
+	if c.disableReadBatch {
+		return 0, errors.New("unsupported")
+	}
+	if c.simulateReadBatchErr {
+		return 0, errors.New("unknown err")
+	}
+	succ := 0
+	n, addr, err := c.ReadFrom(ms[0].Buffers[0])
+	if err != nil {
+		return succ, err
+	}
+	ms[0].N = n
+	ms[0].Addr = addr
+	succ++
+	return succ, nil
+}
+
+func (c *customBatchConn) ReadBatchUnavailable(err error) bool {
+	return err.Error() == "unsupported"
+}
+
+func (c *customBatchConn) WriteBatchUnavailable(err error) bool {
+	return err.Error() == "unsupported"
+}
+
+func batchListenFn(opt func(pconn *customBatchConn)) listenFn {
+	return func(port int) (net.Listener, error) {
+		udpaddr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("127.0.0.1:%v", port))
+		if err != nil {
+			return nil, err
+		}
+		conn, err := net.ListenUDP("udp", udpaddr)
+		if err != nil {
+			return nil, err
+		}
+		pconn := &customBatchConn{UDPConn: conn}
+		opt(pconn)
+		return serveConn(nil, 0, 0, pconn, true)
+	}
+}
+
+func TestCustomBatchConn(t *testing.T) {
+	listen := batchListenFn(func(pconn *customBatchConn) {})
+	l := server(0, listen, handleEcho)
+	defer l.Close()
+
+	// Create a net.PacketConn not owned by the UDPSession.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	pconn := &customBatchConn{UDPConn: c.(*net.UDPConn)}
+	defer pconn.Close()
+
+	client, err := NewConn2(l.Addr(), nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	wBuf := []byte("hello")
+	_, err = client.Write(wBuf)
+	if err != nil {
+		t.Fatalf("Write() should not fail, err: %v", err)
+	}
+
+	buf := make([]byte, 100)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatalf("Read() should not fail, err: %v", err)
+	}
+	if n != len(wBuf) {
+		t.Fatalf("should read %d bytes, actual n: %d", len(wBuf), n)
+	}
+	if string(wBuf) != string(buf[:n]) {
+		t.Fatalf("read content should be '%s', actual: '%s'", string(wBuf), string(buf[:n]))
+	}
+
+	if !pconn.calledWriteBatch {
+		t.Fatalf("expect to call WriteBatch()")
+	}
+	if !pconn.calledReadBatch {
+		t.Fatalf("expect to call ReadBatch()")
+	}
+}
+
+func TestCustomBatchConnFallback(t *testing.T) {
+	// should fallback to defaultMonitor()
+	listen := batchListenFn(func(pconn *customBatchConn) {
+		pconn.disableReadBatch = true
+		pconn.disableWriteBatch = true
+	})
+	l := server(0, listen, handleEcho)
+	defer l.Close()
+
+	// Create a net.PacketConn not owned by the UDPSession.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	pconn := &customBatchConn{UDPConn: c.(*net.UDPConn)}
+	defer pconn.Close()
+
+	// disabled batch ops, it should fallback to normal Read()/Write()
+	pconn.disableReadBatch = true
+	pconn.disableWriteBatch = true
+
+	client, err := NewConn2(l.Addr(), nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	wBuf := []byte("hello")
+	_, err = client.Write(wBuf)
+	if err != nil {
+		t.Fatalf("Write() should not fail, err: %v", err)
+	}
+
+	buf := make([]byte, 100)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatalf("Read() should not fail, err: %v", err)
+	}
+	if n != len(wBuf) {
+		t.Fatalf("should read %d bytes, actual n: %d", len(wBuf), n)
+	}
+	if string(wBuf) != string(buf[:n]) {
+		t.Fatalf("read content should be '%s', actual: '%s'", string(wBuf), string(buf[:n]))
+	}
+
+	if !pconn.calledWriteBatch {
+		t.Fatalf("expect to call WriteBatch()")
+	}
+	if !pconn.calledReadBatch {
+		t.Fatalf("expect to call ReadBatch()")
+	}
+}
+
+func TestBatchErrDetectorForRealErr(t *testing.T) {
+	l := server(0, listenNoEncryption, handleEcho)
+	defer l.Close()
+
+	// Create a net.PacketConn not owned by the UDPSession.
+	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		panic(err)
+	}
+	defer c.Close()
+	pconn := &customBatchConn{UDPConn: c.(*net.UDPConn)}
+	defer pconn.Close()
+
+	pconn.simulateReadBatchErr = true
+	pconn.simulateWriteBatchErr = true
+
+	client, err := NewConn2(l.Addr(), nil, 0, 0, pconn)
+	if err != nil {
+		panic(err)
+	}
+	defer client.Close()
+
+	client.SetWriteDelay(false)
+
+	wBuf := []byte("hello")
+
+	// no error for the first time
+	_, err = client.Write(wBuf)
+	if err != nil {
+		t.Fatalf("Write() should not fail, err: %v", err)
+	}
+
+	// wait for the notification
+	time.Sleep(2 * time.Duration(client.kcp.interval) * time.Millisecond)
+
+	// error for the second time
+	_, err = client.Write(wBuf)
+	if err == nil {
+		t.Fatalf("Write() should fail")
+	}
+
+	buf := make([]byte, 100)
+	_, err = client.Read(buf)
+	if err == nil {
+		t.Fatalf("Read() should fail")
 	}
 }
