@@ -333,7 +333,7 @@ func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	sz := len(b)
 	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
 	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
-	enc.tsCache[enc.shardCount] = time.Now().UnixNano() / int64(time.Millisecond)
+	enc.tsCache[enc.shardCount] = time.Now().UnixMilli()
 	enc.shardCount++
 
 	// track max datashard length
