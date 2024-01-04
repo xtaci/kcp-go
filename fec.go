@@ -285,6 +285,9 @@ type (
 
 		// RS encoder
 		codec reedsolomon.Encoder
+
+		// record min rto
+		minRTO int
 	}
 )
 
@@ -295,6 +298,7 @@ func newFECEncoder(dataShards, parityShards, offset, minRTO int) *fecEncoder {
 	enc := new(fecEncoder)
 	enc.dataShards = dataShards
 	enc.parityShards = parityShards
+	enc.minRTO = minRTO
 	enc.shardSize = dataShards + parityShards
 	enc.paws = 0xffffffff / uint32(enc.shardSize) * uint32(enc.shardSize)
 	enc.headerOffset = offset
@@ -318,7 +322,7 @@ func newFECEncoder(dataShards, parityShards, offset, minRTO int) *fecEncoder {
 
 // encodes the packet, outputs parity shards if we have collected quorum datashards
 // notice: the contents of 'ps' will be re-written in successive calling
-func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
+func (enc *fecEncoder) encode(b []byte) (ps [][]byte) {
 	// The header format:
 	// | FEC SEQID(4B) | FEC TYPE(2B) | SIZE (2B) | PAYLOAD(SIZE-2) |
 	// |<-headerOffset                |<-payloadOffset
@@ -340,7 +344,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 	//  Generation of Reed-Solomon Erasure Code
 	if enc.shardCount == enc.dataShards {
 		// generate the rs-code only if the data is continuous.
-		if enc.tsCache[enc.shardCount-1]-enc.tsCache[0] < int64(rto) {
+		if enc.tsCache[enc.shardCount-1]-enc.tsCache[0] < int64(enc.minRTO) {
 			// fill '0' into the tail of each datashard
 			for i := 0; i < enc.dataShards; i++ {
 				shard := enc.shardCache[i]
