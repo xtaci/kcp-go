@@ -279,9 +279,9 @@ type (
 		payloadOffset int // FEC payload offset
 
 		// caches
-		shardCache  [][]byte
-		encodeCache [][]byte
-		tsCache     []int64
+		shardCache     [][]byte
+		encodeCache    [][]byte
+		tsLatestPacket int64
 
 		// RS encoder
 		codec reedsolomon.Encoder
@@ -309,7 +309,6 @@ func newFECEncoder(dataShards, parityShards, offset, minRTO int) *fecEncoder {
 	// caches
 	enc.encodeCache = make([][]byte, enc.shardSize)
 	enc.shardCache = make([][]byte, enc.shardSize)
-	enc.tsCache = make([]int64, enc.shardSize)
 	for k := range enc.shardCache {
 		enc.shardCache[k] = make([]byte, mtuLimit)
 	}
@@ -329,7 +328,6 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 	sz := len(b)
 	enc.shardCache[enc.shardCount] = enc.shardCache[enc.shardCount][:sz]
 	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
-	enc.tsCache[enc.shardCount] = time.Now().UnixMilli()
 	enc.shardCount++
 
 	// track max datashard length
@@ -338,9 +336,10 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 	}
 
 	//  Generation of Reed-Solomon Erasure Code
+	now := time.Now().UnixMilli()
 	if enc.shardCount == enc.dataShards {
 		// generate the rs-code only if the data is continuous.
-		if enc.tsCache[enc.shardCount-1]-enc.tsCache[0] < int64(rto) {
+		if now-enc.tsLatestPacket < int64(rto) {
 			// fill '0' into the tail of each datashard
 			for i := 0; i < enc.dataShards; i++ {
 				shard := enc.shardCache[i]
@@ -368,6 +367,8 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 		enc.shardCount = 0
 		enc.maxSize = 0
 	}
+
+	enc.tsLatestPacket = now
 
 	return
 }
