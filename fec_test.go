@@ -35,9 +35,9 @@ func BenchmarkFECEncode(b *testing.B) {
 
 	b.ReportAllocs()
 	b.SetBytes(payLoad)
-	encoder := newFECEncoder(dataSize, paritySize, 0)
+	encoder := newFECEncoder(dataSize, paritySize, 0, 200)
 	for i := 0; i < b.N; i++ {
 		data := make([]byte, payLoad)
-		encoder.encode(data)
+		encoder.encode(data, 200)
 	}
 }
