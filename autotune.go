@@ -21,11 +21,11 @@ func (tune *autoTune) Sample(bit bool, seq uint32) {
 // Find a period for a given signal
 // returns -1 if not found
 //
-//    ---              ------
-//      |              |
-//      |______________|
-//          Period
-//  Falling Edge    Rising Edge
+//	  ---              ------
+//	    |              |
+//	    |______________|
+//	        Period
+//	Falling Edge    Rising Edge
 func (tune *autoTune) FindPeriod(bit bool) int {
 	// last pulse and initial index setup
 	lastPulse := tune.pulses[0]

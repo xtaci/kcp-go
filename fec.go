@@ -110,7 +110,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				dec.decodeCache = make([][]byte, dec.shardSize)
 				dec.flagCache = make([]bool, dec.shardSize)
 				dec.shouldTune = false
-				//log.Println("autotune to :", dec.dataShards, dec.parityShards)
+
 			}
 		}
 	}
@@ -240,7 +240,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	if numExpired > 0 {
 		dec.rx = dec.freeRange(0, numExpired, dec.rx)
 	}
-	return
+	return recovered
 }
 
 // free a range of fecPacket

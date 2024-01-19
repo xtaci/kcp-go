@@ -7,18 +7,21 @@ import (
 	"log"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
+
+	_ "net/http/pprof"
 )
 
-var baseport = uint32(10000)
-var key = []byte("testkey")
-var pass = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
+var (
+	baseport = uint32(10000)
+	key      = []byte("testkey")
+	pass     = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
+)
 
 func init() {
 	go func() {
@@ -29,10 +32,9 @@ func init() {
 }
 
 func dialEcho(port int) (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
@@ -75,10 +77,9 @@ func dialSink(port int) (*UDPSession, error) {
 }
 
 func dialTinyBufferEcho(port int) (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
@@ -89,18 +90,17 @@ func dialTinyBufferEcho(port int) (*UDPSession, error) {
 
 // ////////////////////////
 func listenEcho(port int) (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 0)
 }
+
 func listenTinyBufferEcho(port int) (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 }
@@ -242,7 +242,6 @@ func TestTimeout(t *testing.T) {
 	}
 	buf := make([]byte, 10)
 
-	//timeout
 	cli.SetDeadline(time.Now().Add(time.Second))
 	<-time.After(2 * time.Second)
 	n, err := cli.Read(buf)
@@ -383,7 +382,7 @@ func TestClose(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	if n, err = cli.Write(buf); err != nil {
+	if _, err = cli.Write(buf); err != nil {
 		t.Fatal("write misbehavior")
 	}
 
@@ -446,6 +445,7 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 }
 
 func speedclient(b *testing.B, nbytes int) {
+	b.Helper()
 	port := int(atomic.AddUint32(&baseport, 1))
 	l := echoServer(port)
 	defer l.Close()
@@ -480,6 +480,7 @@ func BenchmarkSinkSpeed1M(b *testing.B) {
 }
 
 func sinkclient(b *testing.B, nbytes int) {
+	b.Helper()
 	port := int(atomic.AddUint32(&baseport, 1))
 	l := sinkServer(port)
 	defer l.Close()

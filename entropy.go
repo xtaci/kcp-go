@@ -36,7 +36,7 @@ type nonceAES128 struct {
 }
 
 func (n *nonceAES128) Init() {
-	var key [16]byte //aes-128
+	var key [16]byte // aes-128
 	io.ReadFull(rand.Reader, key[:])
 	io.ReadFull(rand.Reader, n.seed[:])
 	block, _ := aes.NewCipher(key[:])

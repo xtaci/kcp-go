@@ -9,7 +9,6 @@ import (
 
 	xor "github.com/templexxx/xorsimd"
 	"github.com/tjfoc/gmsm/sm4"
-
 	"golang.org/x/crypto/blowfish"
 	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/pbkdf2"
@@ -52,6 +51,7 @@ func (c *salsa20BlockCrypt) Encrypt(dst, src []byte) {
 	salsa20.XORKeyStream(dst[8:], src[8:], src[:8], &c.key)
 	copy(dst[:8], src[:8])
 }
+
 func (c *salsa20BlockCrypt) Decrypt(dst, src []byte) {
 	salsa20.XORKeyStream(dst[8:], src[8:], src[:8], &c.key)
 	copy(dst[:8], src[:8])

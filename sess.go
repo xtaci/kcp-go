@@ -44,12 +44,10 @@ var (
 	errTimeout          = errors.New("timeout")
 )
 
-var (
-	// a system-wide packet buffer shared among sending, receiving and FEC
-	// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
-	// is aligned to 64bit
-	xmitBuf sync.Pool
-)
+// a system-wide packet buffer shared among sending, receiving and FEC
+// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
+// is aligned to 64bit
+var xmitBuf sync.Pool
 
 func init() {
 	xmitBuf.New = func() interface{} {
@@ -102,9 +100,8 @@ type (
 		nonce Entropy
 
 		// packets waiting to be sent on wire
-		txqueue         []ipv4.Message
-		xconn           batchConn // for x/net
-		xconnWriteError error
+		txqueue []ipv4.Message
+		xconn   batchConn // for x/net
 
 		mu sync.Mutex
 	}
@@ -748,7 +745,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if fecRecovered > 0 {
 		atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 	}
-
 }
 
 type (

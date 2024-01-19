@@ -100,6 +100,7 @@ func TestSalsa20(t *testing.T) {
 }
 
 func cryptTest(t *testing.T, bc BlockCrypt) {
+	t.Helper()
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)
@@ -219,6 +220,7 @@ func BenchmarkSalsa20(b *testing.B) {
 }
 
 func benchCrypt(b *testing.B, bc BlockCrypt) {
+	b.Helper()
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)
@@ -258,6 +260,7 @@ func BenchmarkCsprngMD5(b *testing.B) {
 		data = md5.Sum(data[:])
 	}
 }
+
 func BenchmarkCsprngSHA1(b *testing.B) {
 	var data [sha1.Size]byte
 	b.SetBytes(sha1.Size)
