@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/crypto/pbkdf2"
 
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec,revive // for profiling
 )
 
 var (

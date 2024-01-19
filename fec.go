@@ -370,7 +370,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 
 	enc.tsLatestPacket = now
 
-	return
+	return ps
 }
 
 func (enc *fecEncoder) markData(data []byte) {

@@ -3,19 +3,15 @@ package kcp
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/des"
-	"crypto/sha1"
+	"crypto/sha256"
 	"unsafe"
 
 	xor "github.com/templexxx/xorsimd"
 	"github.com/tjfoc/gmsm/sm4"
-	"golang.org/x/crypto/blowfish"
 	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/salsa20"
 	"golang.org/x/crypto/tea"
-	"golang.org/x/crypto/twofish"
-	"golang.org/x/crypto/xtea"
 )
 
 var (
@@ -77,46 +73,6 @@ func NewSM4BlockCrypt(key []byte) (BlockCrypt, error) {
 func (c *sm4BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
 func (c *sm4BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
-type twofishBlockCrypt struct {
-	encbuf [twofish.BlockSize]byte
-	decbuf [2 * twofish.BlockSize]byte
-	block  cipher.Block
-}
-
-// NewTwofishBlockCrypt https://en.wikipedia.org/wiki/Twofish
-func NewTwofishBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(twofishBlockCrypt)
-	block, err := twofish.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	c.block = block
-	return c, nil
-}
-
-func (c *twofishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
-func (c *twofishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
-
-type tripleDESBlockCrypt struct {
-	encbuf [des.BlockSize]byte
-	decbuf [2 * des.BlockSize]byte
-	block  cipher.Block
-}
-
-// NewTripleDESBlockCrypt https://en.wikipedia.org/wiki/Triple_DES
-func NewTripleDESBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(tripleDESBlockCrypt)
-	block, err := des.NewTripleDESCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	c.block = block
-	return c, nil
-}
-
-func (c *tripleDESBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
-func (c *tripleDESBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
-
 type cast5BlockCrypt struct {
 	encbuf [cast5.BlockSize]byte
 	decbuf [2 * cast5.BlockSize]byte
@@ -136,26 +92,6 @@ func NewCast5BlockCrypt(key []byte) (BlockCrypt, error) {
 
 func (c *cast5BlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
 func (c *cast5BlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
-
-type blowfishBlockCrypt struct {
-	encbuf [blowfish.BlockSize]byte
-	decbuf [2 * blowfish.BlockSize]byte
-	block  cipher.Block
-}
-
-// NewBlowfishBlockCrypt https://en.wikipedia.org/wiki/Blowfish_(cipher)
-func NewBlowfishBlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(blowfishBlockCrypt)
-	block, err := blowfish.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	c.block = block
-	return c, nil
-}
-
-func (c *blowfishBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
-func (c *blowfishBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
 type aesBlockCrypt struct {
 	encbuf [aes.BlockSize]byte
@@ -197,26 +133,6 @@ func NewTEABlockCrypt(key []byte) (BlockCrypt, error) {
 func (c *teaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
 func (c *teaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
 
-type xteaBlockCrypt struct {
-	encbuf [xtea.BlockSize]byte
-	decbuf [2 * xtea.BlockSize]byte
-	block  cipher.Block
-}
-
-// NewXTEABlockCrypt https://en.wikipedia.org/wiki/XTEA
-func NewXTEABlockCrypt(key []byte) (BlockCrypt, error) {
-	c := new(xteaBlockCrypt)
-	block, err := xtea.NewCipher(key)
-	if err != nil {
-		return nil, err
-	}
-	c.block = block
-	return c, nil
-}
-
-func (c *xteaBlockCrypt) Encrypt(dst, src []byte) { encrypt(c.block, dst, src, c.encbuf[:]) }
-func (c *xteaBlockCrypt) Decrypt(dst, src []byte) { decrypt(c.block, dst, src, c.decbuf[:]) }
-
 type simpleXORBlockCrypt struct {
 	xortbl []byte
 }
@@ -224,7 +140,7 @@ type simpleXORBlockCrypt struct {
 // NewSimpleXORBlockCrypt simple xor with key expanding
 func NewSimpleXORBlockCrypt(key []byte) (BlockCrypt, error) {
 	c := new(simpleXORBlockCrypt)
-	c.xortbl = pbkdf2.Key(key, []byte(saltxor), 32, mtuLimit, sha1.New)
+	c.xortbl = pbkdf2.Key(key, []byte(saltxor), 32, mtuLimit, sha256.New)
 	return c, nil
 }
 
