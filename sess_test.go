@@ -1,7 +1,7 @@
 package kcp
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
@@ -20,7 +20,7 @@ import (
 var (
 	baseport = uint32(10000)
 	key      = []byte("testkey")
-	pass     = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
+	pass     = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha256.New)
 )
 
 func init() {
@@ -178,7 +178,7 @@ func tinyBufferEchoServer(port int) net.Listener {
 	return l
 }
 
-///////////////////////////
+// HANDLE ECHO ////////////////////////////
 
 func handleEcho(conn *UDPSession) {
 	conn.SetStreamMode(true)
@@ -229,7 +229,7 @@ func handleTinyBufferEcho(conn *UDPSession) {
 	}
 }
 
-///////////////////////////
+// TIMEOUT TEST ////////////////////////////
 
 func TestTimeout(t *testing.T) {
 	port := int(atomic.AddUint32(&baseport, 1))
@@ -262,9 +262,9 @@ func TestSendRecv(t *testing.T) {
 	}
 	cli.SetWriteDelay(true)
 	cli.SetDUP(1)
-	const N = 100
+	const n = 100
 	buf := make([]byte, 10)
-	for i := 0; i < N; i++ {
+	for i := 0; i < n; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		cli.Write([]byte(msg))
 		if n, err := cli.Read(buf); err == nil {
@@ -288,10 +288,10 @@ func TestSendVector(t *testing.T) {
 		panic(err)
 	}
 	cli.SetWriteDelay(false)
-	const N = 100
+	const n = 100
 	buf := make([]byte, 20)
 	v := make([][]byte, 2)
-	for i := 0; i < N; i++ {
+	for i := 0; i < n; i++ {
 		v[0] = []byte(fmt.Sprintf("hello%v", i))
 		v[1] = []byte(fmt.Sprintf("world%v", i))
 		msg := fmt.Sprintf("hello%vworld%v", i, i)
@@ -316,7 +316,7 @@ func TestTinyBufferReceiver(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	const N = 100
+	const n = 100
 	snd := byte(0)
 	fillBuffer := func(buf []byte) {
 		for i := 0; i < len(buf); i++ {
@@ -337,7 +337,7 @@ func TestTinyBufferReceiver(t *testing.T) {
 	}
 	sndbuf := make([]byte, 7)
 	rcvbuf := make([]byte, 7)
-	for i := 0; i < N; i++ {
+	for i := 0; i < n; i++ {
 		fillBuffer(sndbuf)
 		cli.Write(sndbuf)
 		if n, err := io.ReadFull(cli, rcvbuf); err == nil {
@@ -411,21 +411,21 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1024)
 	for i := 0; i < 1024; i++ {
-		go parallel_client(&wg, port)
+		go parallelClient(&wg, port)
 	}
 	wg.Wait()
 }
 
-func parallel_client(wg *sync.WaitGroup, port int) (err error) {
+func parallelClient(wg *sync.WaitGroup, port int) (err error) {
 	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
 
-	err = echo_tester(cli, 64, 64)
+	err = echoTester(cli, 64, 64)
 	cli.Close()
 	wg.Done()
-	return
+	return err
 }
 
 func BenchmarkEchoSpeed4K(b *testing.B) {
@@ -456,7 +456,7 @@ func speedclient(b *testing.B, nbytes int) {
 		panic(err)
 	}
 
-	if err := echo_tester(cli, nbytes, b.N); err != nil {
+	if err := echoTester(cli, nbytes, b.N); err != nil {
 		b.Fail()
 	}
 	b.SetBytes(int64(nbytes))
@@ -491,12 +491,12 @@ func sinkclient(b *testing.B, nbytes int) {
 		panic(err)
 	}
 
-	sink_tester(cli, nbytes, b.N)
+	sinkTester(cli, nbytes, b.N)
 	b.SetBytes(int64(nbytes))
 	cli.Close()
 }
 
-func echo_tester(cli net.Conn, msglen, msgcount int) error {
+func echoTester(cli net.Conn, msglen, msgcount int) error {
 	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {
 		// send packet
@@ -510,18 +510,18 @@ func echo_tester(cli net.Conn, msglen, msgcount int) error {
 			n, err := cli.Read(buf)
 			if err != nil {
 				return err
-			} else {
-				nrecv += n
-				if nrecv == msglen {
-					break
-				}
 			}
+			nrecv += n
+			if nrecv == msglen {
+				break
+			}
+
 		}
 	}
 	return nil
 }
 
-func sink_tester(cli *UDPSession, msglen, msgcount int) error {
+func sinkTester(cli *UDPSession, msglen, msgcount int) error {
 	// sender
 	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {

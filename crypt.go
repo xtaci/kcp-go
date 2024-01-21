@@ -154,8 +154,8 @@ func NewNoneBlockCrypt(key []byte) (BlockCrypt, error) {
 	return new(noneBlockCrypt), nil
 }
 
-func (c *noneBlockCrypt) Encrypt(dst, src []byte) { copy(dst, src) }
-func (c *noneBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
+func (*noneBlockCrypt) Encrypt(dst, src []byte) { copy(dst, src) }
+func (*noneBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
 
 // packet encryption with local CFB mode
 func encrypt(block cipher.Block, dst, src, buf []byte) {
@@ -177,71 +177,71 @@ func encrypt8(block cipher.Block, dst, src, buf []byte) {
 	base := 0
 	repeat := n / 8
 	left := n % 8
-	ptr_tbl := (*uint64)(unsafe.Pointer(&tbl[0]))
+	ptrTbl := (*uint64)(unsafe.Pointer(&tbl[0]))
 
 	for i := 0; i < repeat; i++ {
 		s := src[base:][0:64]
 		d := dst[base:][0:64]
 		// 1
-		*(*uint64)(unsafe.Pointer(&d[0])) = *(*uint64)(unsafe.Pointer(&s[0])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[0])) = *(*uint64)(unsafe.Pointer(&s[0])) ^ *ptrTbl
 		block.Encrypt(tbl, d[0:8])
 		// 2
-		*(*uint64)(unsafe.Pointer(&d[8])) = *(*uint64)(unsafe.Pointer(&s[8])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[8])) = *(*uint64)(unsafe.Pointer(&s[8])) ^ *ptrTbl
 		block.Encrypt(tbl, d[8:16])
 		// 3
-		*(*uint64)(unsafe.Pointer(&d[16])) = *(*uint64)(unsafe.Pointer(&s[16])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[16])) = *(*uint64)(unsafe.Pointer(&s[16])) ^ *ptrTbl
 		block.Encrypt(tbl, d[16:24])
 		// 4
-		*(*uint64)(unsafe.Pointer(&d[24])) = *(*uint64)(unsafe.Pointer(&s[24])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[24])) = *(*uint64)(unsafe.Pointer(&s[24])) ^ *ptrTbl
 		block.Encrypt(tbl, d[24:32])
 		// 5
-		*(*uint64)(unsafe.Pointer(&d[32])) = *(*uint64)(unsafe.Pointer(&s[32])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[32])) = *(*uint64)(unsafe.Pointer(&s[32])) ^ *ptrTbl
 		block.Encrypt(tbl, d[32:40])
 		// 6
-		*(*uint64)(unsafe.Pointer(&d[40])) = *(*uint64)(unsafe.Pointer(&s[40])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[40])) = *(*uint64)(unsafe.Pointer(&s[40])) ^ *ptrTbl
 		block.Encrypt(tbl, d[40:48])
 		// 7
-		*(*uint64)(unsafe.Pointer(&d[48])) = *(*uint64)(unsafe.Pointer(&s[48])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[48])) = *(*uint64)(unsafe.Pointer(&s[48])) ^ *ptrTbl
 		block.Encrypt(tbl, d[48:56])
 		// 8
-		*(*uint64)(unsafe.Pointer(&d[56])) = *(*uint64)(unsafe.Pointer(&s[56])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[56])) = *(*uint64)(unsafe.Pointer(&s[56])) ^ *ptrTbl
 		block.Encrypt(tbl, d[56:64])
 		base += 64
 	}
 
 	switch left {
 	case 7:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
 	case 6:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
 	case 5:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
 	case 4:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
 	case 3:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
 	case 2:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
 	case 1:
-		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&dst[base])) = *(*uint64)(unsafe.Pointer(&src[base])) ^ *ptrTbl
 		block.Encrypt(tbl, dst[base:])
 		base += 8
 		fallthrough
@@ -350,36 +350,36 @@ func decrypt8(block cipher.Block, dst, src, buf []byte) {
 	base := 0
 	repeat := n / 8
 	left := n % 8
-	ptr_tbl := (*uint64)(unsafe.Pointer(&tbl[0]))
-	ptr_next := (*uint64)(unsafe.Pointer(&next[0]))
+	ptrTbl := (*uint64)(unsafe.Pointer(&tbl[0]))
+	ptrNext := (*uint64)(unsafe.Pointer(&next[0]))
 
 	for i := 0; i < repeat; i++ {
 		s := src[base:][0:64]
 		d := dst[base:][0:64]
 		// 1
 		block.Encrypt(next, s[0:8])
-		*(*uint64)(unsafe.Pointer(&d[0])) = *(*uint64)(unsafe.Pointer(&s[0])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[0])) = *(*uint64)(unsafe.Pointer(&s[0])) ^ *ptrTbl
 		// 2
 		block.Encrypt(tbl, s[8:16])
-		*(*uint64)(unsafe.Pointer(&d[8])) = *(*uint64)(unsafe.Pointer(&s[8])) ^ *ptr_next
+		*(*uint64)(unsafe.Pointer(&d[8])) = *(*uint64)(unsafe.Pointer(&s[8])) ^ *ptrNext
 		// 3
 		block.Encrypt(next, s[16:24])
-		*(*uint64)(unsafe.Pointer(&d[16])) = *(*uint64)(unsafe.Pointer(&s[16])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[16])) = *(*uint64)(unsafe.Pointer(&s[16])) ^ *ptrTbl
 		// 4
 		block.Encrypt(tbl, s[24:32])
-		*(*uint64)(unsafe.Pointer(&d[24])) = *(*uint64)(unsafe.Pointer(&s[24])) ^ *ptr_next
+		*(*uint64)(unsafe.Pointer(&d[24])) = *(*uint64)(unsafe.Pointer(&s[24])) ^ *ptrNext
 		// 5
 		block.Encrypt(next, s[32:40])
-		*(*uint64)(unsafe.Pointer(&d[32])) = *(*uint64)(unsafe.Pointer(&s[32])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[32])) = *(*uint64)(unsafe.Pointer(&s[32])) ^ *ptrTbl
 		// 6
 		block.Encrypt(tbl, s[40:48])
-		*(*uint64)(unsafe.Pointer(&d[40])) = *(*uint64)(unsafe.Pointer(&s[40])) ^ *ptr_next
+		*(*uint64)(unsafe.Pointer(&d[40])) = *(*uint64)(unsafe.Pointer(&s[40])) ^ *ptrNext
 		// 7
 		block.Encrypt(next, s[48:56])
-		*(*uint64)(unsafe.Pointer(&d[48])) = *(*uint64)(unsafe.Pointer(&s[48])) ^ *ptr_tbl
+		*(*uint64)(unsafe.Pointer(&d[48])) = *(*uint64)(unsafe.Pointer(&s[48])) ^ *ptrTbl
 		// 8
 		block.Encrypt(tbl, s[56:64])
-		*(*uint64)(unsafe.Pointer(&d[56])) = *(*uint64)(unsafe.Pointer(&s[56])) ^ *ptr_next
+		*(*uint64)(unsafe.Pointer(&d[56])) = *(*uint64)(unsafe.Pointer(&s[56])) ^ *ptrNext
 		base += 64
 	}
 

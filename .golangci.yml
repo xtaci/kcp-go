@@ -9,7 +9,7 @@ linters:
  #   - errcheck # use revive's instead
     - gci
     - goconst
-#    - gocritic
+    - gocritic
     - gofumpt
     - gosec
     - gosimple
@@ -21,7 +21,7 @@ linters:
     - thelper
     - typecheck
     - stylecheck
-#    - revive
+    - revive
     - typecheck
     - tenv
     - unconvert

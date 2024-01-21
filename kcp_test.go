@@ -96,7 +96,7 @@ func testlink(t *testing.T, client *lossyconn.LossyConn, server *lossyconn.Lossy
 		}
 	}
 
-	echoTester := func(s *UDPSession, raddr net.Addr) {
+	echoTester := func(s *UDPSession, _ net.Addr) {
 		s.SetNoDelay(nodelay, interval, resend, nc)
 		buf := make([]byte, 64)
 		var rtt time.Duration

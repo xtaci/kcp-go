@@ -3,8 +3,8 @@ package kcp
 import (
 	"crypto/aes"
 	"crypto/cipher"
-	"crypto/md5"
 	"crypto/rand"
+	"crypto/sha256"
 	"io"
 )
 
@@ -14,18 +14,18 @@ type Entropy interface {
 	Fill(nonce []byte)
 }
 
-// nonceMD5 nonce generator for packet header
-type nonceMD5 struct {
-	seed [md5.Size]byte
+// nonceSHA256 nonce generator for packet header
+type nonceSHA256 struct {
+	seed [sha256.Size]byte
 }
 
-func (n *nonceMD5) Init() { /*nothing required*/ }
+func (*nonceSHA256) Init() { /* nothing required */ }
 
-func (n *nonceMD5) Fill(nonce []byte) {
+func (n *nonceSHA256) Fill(nonce []byte) {
 	if n.seed[0] == 0 { // entropy update
 		io.ReadFull(rand.Reader, n.seed[:])
 	}
-	n.seed = md5.Sum(n.seed[:])
+	n.seed = sha256.Sum256(n.seed[:])
 	copy(nonce, n.seed[:])
 }
 

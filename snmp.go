@@ -38,7 +38,7 @@ func newSnmp() *Snmp {
 }
 
 // Header returns all field names
-func (s *Snmp) Header() []string {
+func (*Snmp) Header() []string {
 	return []string{
 		"BytesSent",
 		"BytesReceived",

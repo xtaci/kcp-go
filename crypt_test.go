@@ -197,7 +197,7 @@ func BenchmarkCsprngSHA256(b *testing.B) {
 }
 
 func BenchmarkCsprngNonceMD5(b *testing.B) {
-	var ng nonceMD5
+	var ng nonceSHA256
 	ng.Init()
 	b.SetBytes(sha256.Size)
 	data := make([]byte, sha256.Size)

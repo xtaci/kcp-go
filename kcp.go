@@ -137,7 +137,7 @@ type KCP struct {
 	rx_rttvar, rx_srtt                     int32
 	rx_rto, rx_minrto                      uint32
 	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
-	interval, ts_flush                     uint32
+	interval, tsFlush                      uint32
 	nodelay, updated                       uint32
 	ts_probe, probe_wait                   uint32
 	dead_link, incr                        uint32
@@ -179,7 +179,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.rx_rto = IKCP_RTO_DEF
 	kcp.rx_minrto = IKCP_RTO_MIN
 	kcp.interval = IKCP_INTERVAL
-	kcp.ts_flush = IKCP_INTERVAL
+	kcp.tsFlush = IKCP_INTERVAL
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
@@ -187,13 +187,13 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 }
 
 // newSegment creates a KCP segment
-func (kcp *KCP) newSegment(size int) (seg segment) {
+func (*KCP) newSegment(size int) (seg segment) {
 	seg.data = xmitBuf.Get().([]byte)[:size]
-	return
+	return seg
 }
 
 // delSegment recycles a KCP segment
-func (kcp *KCP) delSegment(seg *segment) {
+func (*KCP) delSegment(seg *segment) {
 	if seg.data != nil {
 		xmitBuf.Put(seg.data)
 		seg.data = nil
@@ -300,7 +300,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		// tell remote my window size
 		kcp.probe |= IKCP_ASK_TELL
 	}
-	return
+	return n
 }
 
 // Send is user/upper level send, returns below zero for error
@@ -662,7 +662,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	return 0
 }
 
-func (kcp *KCP) wnd_unused() uint16 {
+func (kcp *KCP) wndUnused() uint16 {
 	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
 		return uint16(int(kcp.rcv_wnd) - len(kcp.rcv_queue))
 	}
@@ -674,7 +674,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var seg segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
-	seg.wnd = kcp.wnd_unused()
+	seg.wnd = kcp.wndUnused()
 	seg.una = kcp.rcv_nxt
 
 	buffer := kcp.buffer
@@ -913,20 +913,20 @@ func (kcp *KCP) Update() {
 	current := currentMs()
 	if kcp.updated == 0 {
 		kcp.updated = 1
-		kcp.ts_flush = current
+		kcp.tsFlush = current
 	}
 
-	slap = _itimediff(current, kcp.ts_flush)
+	slap = _itimediff(current, kcp.tsFlush)
 
 	if slap >= 10000 || slap < -10000 {
-		kcp.ts_flush = current
+		kcp.tsFlush = current
 		slap = 0
 	}
 
 	if slap >= 0 {
-		kcp.ts_flush += kcp.interval
-		if _itimediff(current, kcp.ts_flush) >= 0 {
-			kcp.ts_flush = current + kcp.interval
+		kcp.tsFlush += kcp.interval
+		if _itimediff(current, kcp.tsFlush) >= 0 {
+			kcp.tsFlush = current + kcp.interval
 		}
 		kcp.flush(false)
 	}
@@ -943,7 +943,7 @@ func (kcp *KCP) Update() {
 // or optimize ikcp_update when handling massive kcp connections)
 func (kcp *KCP) Check() uint32 {
 	current := currentMs()
-	ts_flush := kcp.ts_flush
+	tsFlush := kcp.tsFlush
 	tm_flush := int32(0x7fffffff)
 	tm_packet := int32(0x7fffffff)
 	minimal := uint32(0)
@@ -951,16 +951,16 @@ func (kcp *KCP) Check() uint32 {
 		return current
 	}
 
-	if _itimediff(current, ts_flush) >= 10000 ||
-		_itimediff(current, ts_flush) < -10000 {
-		ts_flush = current
+	if _itimediff(current, tsFlush) >= 10000 ||
+		_itimediff(current, tsFlush) < -10000 {
+		tsFlush = current
 	}
 
-	if _itimediff(current, ts_flush) >= 0 {
+	if _itimediff(current, tsFlush) >= 0 {
 		return current
 	}
 
-	tm_flush = _itimediff(ts_flush, current)
+	tm_flush = _itimediff(tsFlush, current)
 
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
@@ -994,9 +994,6 @@ func (kcp *KCP) SetMtu(mtu int) int {
 	}
 
 	buffer := make([]byte, mtu)
-	if buffer == nil {
-		return -2
-	}
 	kcp.mtu = uint32(mtu)
 	kcp.mss = kcp.mtu - IKCP_OVERHEAD - uint32(kcp.reserved)
 	kcp.buffer = buffer

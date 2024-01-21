@@ -244,7 +244,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 }
 
 // free a range of fecPacket
-func (dec *fecDecoder) freeRange(first, n int, q []fecElement) []fecElement {
+func (*fecDecoder) freeRange(first, n int, q []fecElement) []fecElement {
 	for i := first; i < first+n; i++ { // recycle buffer
 		xmitBuf.Put([]byte(q[i].fecPacket))
 	}
