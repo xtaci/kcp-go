@@ -509,7 +509,7 @@ func decrypt16(block cipher.Block, dst, src, buf []byte) {
 	case 1:
 		block.Encrypt(next, src[base:])
 		xor.Bytes16Align(dst[base:], src[base:], tbl)
-		tbl, next = next, tbl
+		tbl = next
 		base += 16
 		fallthrough
 	case 0:

@@ -284,10 +284,9 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 					if len(b) <= int(s.kcp.mss) {
 						s.kcp.Send(b)
 						break
-					} else {
-						s.kcp.Send(b[:s.kcp.mss])
-						b = b[s.kcp.mss:]
 					}
+					s.kcp.Send(b[:s.kcp.mss])
+					b = b[s.kcp.mss:]
 				}
 			}
 
@@ -355,12 +354,11 @@ func (s *UDPSession) Close() error {
 			return nil
 		} else if s.ownConn { // client socket close
 			return s.conn.Close()
-		} else {
-			return nil
 		}
-	} else {
-		return errors.WithStack(io.ErrClosedPipe)
+		return nil
+
 	}
+	return errors.WithStack(io.ErrClosedPipe)
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.

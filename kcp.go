@@ -576,12 +576,13 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		}
 		kcp.shrink_buf()
 
-		if cmd == IKCP_CMD_ACK {
+		switch cmd {
+		case IKCP_CMD_ACK:
 			kcp.parse_ack(sn)
 			kcp.parse_fastack(sn, ts)
 			flag |= 1
 			latest = ts
-		} else if cmd == IKCP_CMD_PUSH {
+		case IKCP_CMD_PUSH:
 			repeat := true
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
@@ -601,13 +602,13 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 			if regular && repeat {
 				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
-		} else if cmd == IKCP_CMD_WASK {
+		case IKCP_CMD_WASK:
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
 			// tell remote my window size
 			kcp.probe |= IKCP_ASK_TELL
-		} else if cmd == IKCP_CMD_WINS {
+		case IKCP_CMD_WINS:
 			// do nothing
-		} else {
+		default:
 			return -3
 		}
 
@@ -719,19 +720,18 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		if kcp.probe_wait == 0 {
 			kcp.probe_wait = IKCP_PROBE_INIT
 			kcp.ts_probe = current + kcp.probe_wait
-		} else {
-			if _itimediff(current, kcp.ts_probe) >= 0 {
-				if kcp.probe_wait < IKCP_PROBE_INIT {
-					kcp.probe_wait = IKCP_PROBE_INIT
-				}
-				kcp.probe_wait += kcp.probe_wait / 2
-				if kcp.probe_wait > IKCP_PROBE_LIMIT {
-					kcp.probe_wait = IKCP_PROBE_LIMIT
-				}
-				kcp.ts_probe = current + kcp.probe_wait
-				kcp.probe |= IKCP_ASK_SEND
+		} else if _itimediff(current, kcp.ts_probe) >= 0 {
+			if kcp.probe_wait < IKCP_PROBE_INIT {
+				kcp.probe_wait = IKCP_PROBE_INIT
 			}
+			kcp.probe_wait += kcp.probe_wait / 2
+			if kcp.probe_wait > IKCP_PROBE_LIMIT {
+				kcp.probe_wait = IKCP_PROBE_LIMIT
+			}
+			kcp.ts_probe = current + kcp.probe_wait
+			kcp.probe |= IKCP_ASK_SEND
 		}
+
 	} else {
 		kcp.ts_probe = 0
 		kcp.probe_wait = 0
@@ -944,7 +944,7 @@ func (kcp *KCP) Update() {
 func (kcp *KCP) Check() uint32 {
 	current := currentMs()
 	tsFlush := kcp.tsFlush
-	tm_flush := int32(0x7fffffff)
+	tmFlush := int32(0x7fffffff)
 	tm_packet := int32(0x7fffffff)
 	minimal := uint32(0)
 	if kcp.updated == 0 {
@@ -960,7 +960,7 @@ func (kcp *KCP) Check() uint32 {
 		return current
 	}
 
-	tm_flush = _itimediff(tsFlush, current)
+	tmFlush = _itimediff(tsFlush, current)
 
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
@@ -974,8 +974,8 @@ func (kcp *KCP) Check() uint32 {
 	}
 
 	minimal = uint32(tm_packet)
-	if tm_packet >= tm_flush {
-		minimal = uint32(tm_flush)
+	if tm_packet >= tmFlush {
+		minimal = uint32(tmFlush)
 	}
 	if minimal >= kcp.interval {
 		minimal = kcp.interval
@@ -1052,7 +1052,7 @@ func (kcp *KCP) WaitSnd() int {
 // if the number of elements to remove is more than half of the size.
 // just shift the rear elements to front, otherwise just reslice q to q[n:]
 // then the cost of runtime.growslice can always be less than n/2
-func (kcp *KCP) remove_front(q []segment, n int) []segment {
+func (*KCP) remove_front(q []segment, n int) []segment {
 	if n > cap(q)/2 {
 		newn := copy(q, q[n:])
 		return q[:newn]
