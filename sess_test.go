@@ -25,7 +25,7 @@ var (
 
 func init() {
 	go func() {
-		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil)) //nolint:gosec // for profiling
 	}()
 
 	log.Println("beginning tests, encryption:salsa20, fec:10/3")
