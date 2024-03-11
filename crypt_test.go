@@ -3,9 +3,8 @@ package kcp
 import (
 	"bytes"
 	"crypto/aes"
-	"crypto/md5"
 	"crypto/rand"
-	"crypto/sha1"
+	"crypto/sha256"
 	"hash/crc32"
 	"io"
 	"testing"
@@ -43,14 +42,6 @@ func TestXOR(t *testing.T) {
 	cryptTest(t, bc)
 }
 
-func TestBlowfish(t *testing.T) {
-	bc, err := NewBlowfishBlockCrypt(pass[:32])
-	if err != nil {
-		t.Fatal(err)
-	}
-	cryptTest(t, bc)
-}
-
 func TestNone(t *testing.T) {
 	bc, err := NewNoneBlockCrypt(pass[:32])
 	if err != nil {
@@ -67,30 +58,6 @@ func TestCast5(t *testing.T) {
 	cryptTest(t, bc)
 }
 
-func Test3DES(t *testing.T) {
-	bc, err := NewTripleDESBlockCrypt(pass[:24])
-	if err != nil {
-		t.Fatal(err)
-	}
-	cryptTest(t, bc)
-}
-
-func TestTwofish(t *testing.T) {
-	bc, err := NewTwofishBlockCrypt(pass[:32])
-	if err != nil {
-		t.Fatal(err)
-	}
-	cryptTest(t, bc)
-}
-
-func TestXTEA(t *testing.T) {
-	bc, err := NewXTEABlockCrypt(pass[:16])
-	if err != nil {
-		t.Fatal(err)
-	}
-	cryptTest(t, bc)
-}
-
 func TestSalsa20(t *testing.T) {
 	bc, err := NewSalsa20BlockCrypt(pass[:32])
 	if err != nil {
@@ -100,6 +67,7 @@ func TestSalsa20(t *testing.T) {
 }
 
 func cryptTest(t *testing.T, bc BlockCrypt) {
+	t.Helper()
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)
@@ -162,14 +130,6 @@ func BenchmarkXOR(b *testing.B) {
 	benchCrypt(b, bc)
 }
 
-func BenchmarkBlowfish(b *testing.B) {
-	bc, err := NewBlowfishBlockCrypt(pass[:32])
-	if err != nil {
-		b.Fatal(err)
-	}
-	benchCrypt(b, bc)
-}
-
 func BenchmarkNone(b *testing.B) {
 	bc, err := NewNoneBlockCrypt(pass[:32])
 	if err != nil {
@@ -186,30 +146,6 @@ func BenchmarkCast5(b *testing.B) {
 	benchCrypt(b, bc)
 }
 
-func Benchmark3DES(b *testing.B) {
-	bc, err := NewTripleDESBlockCrypt(pass[:24])
-	if err != nil {
-		b.Fatal(err)
-	}
-	benchCrypt(b, bc)
-}
-
-func BenchmarkTwofish(b *testing.B) {
-	bc, err := NewTwofishBlockCrypt(pass[:32])
-	if err != nil {
-		b.Fatal(err)
-	}
-	benchCrypt(b, bc)
-}
-
-func BenchmarkXTEA(b *testing.B) {
-	bc, err := NewXTEABlockCrypt(pass[:16])
-	if err != nil {
-		b.Fatal(err)
-	}
-	benchCrypt(b, bc)
-}
-
 func BenchmarkSalsa20(b *testing.B) {
 	bc, err := NewSalsa20BlockCrypt(pass[:32])
 	if err != nil {
@@ -219,6 +155,7 @@ func BenchmarkSalsa20(b *testing.B) {
 }
 
 func benchCrypt(b *testing.B, bc BlockCrypt) {
+	b.Helper()
 	data := make([]byte, mtuLimit)
 	io.ReadFull(rand.Reader, data)
 	dec := make([]byte, mtuLimit)
@@ -242,7 +179,7 @@ func BenchmarkCRC32(b *testing.B) {
 }
 
 func BenchmarkCsprngSystem(b *testing.B) {
-	data := make([]byte, md5.Size)
+	data := make([]byte, sha256.Size)
 	b.SetBytes(int64(len(data)))
 
 	for i := 0; i < b.N; i++ {
@@ -250,28 +187,20 @@ func BenchmarkCsprngSystem(b *testing.B) {
 	}
 }
 
-func BenchmarkCsprngMD5(b *testing.B) {
-	var data [md5.Size]byte
-	b.SetBytes(md5.Size)
+func BenchmarkCsprngSHA256(b *testing.B) {
+	var data [sha256.Size]byte
+	b.SetBytes(sha256.Size)
 
 	for i := 0; i < b.N; i++ {
-		data = md5.Sum(data[:])
-	}
-}
-func BenchmarkCsprngSHA1(b *testing.B) {
-	var data [sha1.Size]byte
-	b.SetBytes(sha1.Size)
-
-	for i := 0; i < b.N; i++ {
-		data = sha1.Sum(data[:])
+		data = sha256.Sum256(data[:])
 	}
 }
 
 func BenchmarkCsprngNonceMD5(b *testing.B) {
-	var ng nonceMD5
+	var ng nonceSHA256
 	ng.Init()
-	b.SetBytes(md5.Size)
-	data := make([]byte, md5.Size)
+	b.SetBytes(sha256.Size)
+	data := make([]byte, sha256.Size)
 	for i := 0; i < b.N; i++ {
 		ng.Fill(data)
 	}

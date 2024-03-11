@@ -44,12 +44,10 @@ var (
 	errTimeout          = errors.New("timeout")
 )
 
-var (
-	// a system-wide packet buffer shared among sending, receiving and FEC
-	// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
-	// is aligned to 64bit
-	xmitBuf sync.Pool
-)
+// a system-wide packet buffer shared among sending, receiving and FEC
+// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
+// is aligned to 64bit
+var xmitBuf sync.Pool
 
 func init() {
 	xmitBuf.New = func() interface{} {
@@ -102,9 +100,8 @@ type (
 		nonce Entropy
 
 		// packets waiting to be sent on wire
-		txqueue         []ipv4.Message
-		xconn           batchConn // for x/net
-		xconnWriteError error
+		txqueue []ipv4.Message
+		xconn   batchConn // for x/net
 
 		mu sync.Mutex
 	}
@@ -293,10 +290,9 @@ RESET_TIMER:
 					if len(b) <= int(s.kcp.mss) {
 						s.kcp.Send(b)
 						break
-					} else {
-						s.kcp.Send(b[:s.kcp.mss])
-						b = b[s.kcp.mss:]
 					}
+					s.kcp.Send(b[:s.kcp.mss])
+					b = b[s.kcp.mss:]
 				}
 			}
 
@@ -368,12 +364,11 @@ func (s *UDPSession) Close() error {
 			return nil
 		} else if s.ownConn { // client socket close
 			return s.conn.Close()
-		} else {
-			return nil
 		}
-	} else {
-		return errors.WithStack(io.ErrClosedPipe)
+		return nil
+
 	}
+	return errors.WithStack(io.ErrClosedPipe)
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
@@ -758,7 +753,6 @@ func (s *UDPSession) kcpInput(data []byte) {
 	if fecRecovered > 0 {
 		atomic.AddUint64(&DefaultSnmp.FECRecovered, fecRecovered)
 	}
-
 }
 
 type (
@@ -942,7 +936,7 @@ func (l *Listener) SetReadDeadline(t time.Time) error {
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
-func (l *Listener) SetWriteDeadline(t time.Time) error { return errInvalidOperation }
+func (*Listener) SetWriteDeadline(t time.Time) error { return errInvalidOperation }
 
 // Close stops listening on the UDP address, and closes the socket
 func (l *Listener) Close() error {

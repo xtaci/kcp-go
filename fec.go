@@ -110,7 +110,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				dec.decodeCache = make([][]byte, dec.shardSize)
 				dec.flagCache = make([]bool, dec.shardSize)
 				dec.shouldTune = false
-				//log.Println("autotune to :", dec.dataShards, dec.parityShards)
+
 			}
 		}
 	}
@@ -240,11 +240,11 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	if numExpired > 0 {
 		dec.rx = dec.freeRange(0, numExpired, dec.rx)
 	}
-	return
+	return recovered
 }
 
 // free a range of fecPacket
-func (dec *fecDecoder) freeRange(first, n int, q []fecElement) []fecElement {
+func (*fecDecoder) freeRange(first, n int, q []fecElement) []fecElement {
 	for i := first; i < first+n; i++ { // recycle buffer
 		xmitBuf.Put([]byte(q[i].fecPacket))
 	}
@@ -370,7 +370,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 
 	enc.tsLatestPacket = now
 
-	return
+	return ps
 }
 
 func (enc *fecEncoder) markData(data []byte) {

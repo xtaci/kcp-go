@@ -1,38 +1,40 @@
 package kcp
 
 import (
-	"crypto/sha1"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/pbkdf2"
+
+	_ "net/http/pprof" //nolint:gosec,revive // for profiling
 )
 
-var baseport = uint32(10000)
-var key = []byte("testkey")
-var pass = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
+var (
+	baseport = uint32(10000)
+	key      = []byte("testkey")
+	pass     = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha256.New)
+)
 
 func init() {
 	go func() {
-		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
+		log.Println(http.ListenAndServe("0.0.0.0:6060", nil)) //nolint:gosec // for profiling
 	}()
 
 	log.Println("beginning tests, encryption:salsa20, fec:10/3")
 }
 
 func dialEcho(port int) (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
@@ -75,10 +77,9 @@ func dialSink(port int) (*UDPSession, error) {
 }
 
 func dialTinyBufferEcho(port int) (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
@@ -89,18 +90,17 @@ func dialTinyBufferEcho(port int) (*UDPSession, error) {
 
 // ////////////////////////
 func listenEcho(port int) (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 0)
 }
+
 func listenTinyBufferEcho(port int) (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 }
@@ -178,7 +178,7 @@ func tinyBufferEchoServer(port int) net.Listener {
 	return l
 }
 
-///////////////////////////
+// HANDLE ECHO ////////////////////////////
 
 func handleEcho(conn *UDPSession) {
 	conn.SetStreamMode(true)
@@ -229,7 +229,7 @@ func handleTinyBufferEcho(conn *UDPSession) {
 	}
 }
 
-///////////////////////////
+// TIMEOUT TEST ////////////////////////////
 
 func TestTimeout(t *testing.T) {
 	port := int(atomic.AddUint32(&baseport, 1))
@@ -242,7 +242,6 @@ func TestTimeout(t *testing.T) {
 	}
 	buf := make([]byte, 10)
 
-	//timeout
 	cli.SetDeadline(time.Now().Add(time.Second))
 	<-time.After(2 * time.Second)
 	n, err := cli.Read(buf)
@@ -263,9 +262,9 @@ func TestSendRecv(t *testing.T) {
 	}
 	cli.SetWriteDelay(true)
 	cli.SetDUP(1)
-	const N = 100
+	const n = 100
 	buf := make([]byte, 10)
-	for i := 0; i < N; i++ {
+	for i := 0; i < n; i++ {
 		msg := fmt.Sprintf("hello%v", i)
 		cli.Write([]byte(msg))
 		if n, err := cli.Read(buf); err == nil {
@@ -289,10 +288,10 @@ func TestSendVector(t *testing.T) {
 		panic(err)
 	}
 	cli.SetWriteDelay(false)
-	const N = 100
+	const n = 100
 	buf := make([]byte, 20)
 	v := make([][]byte, 2)
-	for i := 0; i < N; i++ {
+	for i := 0; i < n; i++ {
 		v[0] = []byte(fmt.Sprintf("hello%v", i))
 		v[1] = []byte(fmt.Sprintf("world%v", i))
 		msg := fmt.Sprintf("hello%vworld%v", i, i)
@@ -317,7 +316,7 @@ func TestTinyBufferReceiver(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	const N = 100
+	const n = 100
 	snd := byte(0)
 	fillBuffer := func(buf []byte) {
 		for i := 0; i < len(buf); i++ {
@@ -338,7 +337,7 @@ func TestTinyBufferReceiver(t *testing.T) {
 	}
 	sndbuf := make([]byte, 7)
 	rcvbuf := make([]byte, 7)
-	for i := 0; i < N; i++ {
+	for i := 0; i < n; i++ {
 		fillBuffer(sndbuf)
 		cli.Write(sndbuf)
 		if n, err := io.ReadFull(cli, rcvbuf); err == nil {
@@ -383,7 +382,7 @@ func TestClose(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	if n, err = cli.Write(buf); err != nil {
+	if _, err = cli.Write(buf); err != nil {
 		t.Fatal("write misbehavior")
 	}
 
@@ -412,21 +411,21 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1024)
 	for i := 0; i < 1024; i++ {
-		go parallel_client(&wg, port)
+		go parallelClient(&wg, port)
 	}
 	wg.Wait()
 }
 
-func parallel_client(wg *sync.WaitGroup, port int) (err error) {
+func parallelClient(wg *sync.WaitGroup, port int) (err error) {
 	cli, err := dialEcho(port)
 	if err != nil {
 		panic(err)
 	}
 
-	err = echo_tester(cli, 64, 64)
+	err = echoTester(cli, 64, 64)
 	cli.Close()
 	wg.Done()
-	return
+	return err
 }
 
 func BenchmarkEchoSpeed4K(b *testing.B) {
@@ -446,6 +445,7 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 }
 
 func speedclient(b *testing.B, nbytes int) {
+	b.Helper()
 	port := int(atomic.AddUint32(&baseport, 1))
 	l := echoServer(port)
 	defer l.Close()
@@ -456,7 +456,7 @@ func speedclient(b *testing.B, nbytes int) {
 		panic(err)
 	}
 
-	if err := echo_tester(cli, nbytes, b.N); err != nil {
+	if err := echoTester(cli, nbytes, b.N); err != nil {
 		b.Fail()
 	}
 	b.SetBytes(int64(nbytes))
@@ -480,6 +480,7 @@ func BenchmarkSinkSpeed1M(b *testing.B) {
 }
 
 func sinkclient(b *testing.B, nbytes int) {
+	b.Helper()
 	port := int(atomic.AddUint32(&baseport, 1))
 	l := sinkServer(port)
 	defer l.Close()
@@ -490,12 +491,12 @@ func sinkclient(b *testing.B, nbytes int) {
 		panic(err)
 	}
 
-	sink_tester(cli, nbytes, b.N)
+	sinkTester(cli, nbytes, b.N)
 	b.SetBytes(int64(nbytes))
 	cli.Close()
 }
 
-func echo_tester(cli net.Conn, msglen, msgcount int) error {
+func echoTester(cli net.Conn, msglen, msgcount int) error {
 	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {
 		// send packet
@@ -509,18 +510,18 @@ func echo_tester(cli net.Conn, msglen, msgcount int) error {
 			n, err := cli.Read(buf)
 			if err != nil {
 				return err
-			} else {
-				nrecv += n
-				if nrecv == msglen {
-					break
-				}
 			}
+			nrecv += n
+			if nrecv == msglen {
+				break
+			}
+
 		}
 	}
 	return nil
 }
 
-func sink_tester(cli *UDPSession, msglen, msgcount int) error {
+func sinkTester(cli *UDPSession, msglen, msgcount int) error {
 	// sender
 	buf := make([]byte, msglen)
 	for i := 0; i < msgcount; i++ {
