@@ -390,7 +390,7 @@ func (s *UDPSession) SetDeadline(t time.Time) error {
 	s.mu.Unlock()
 	s.notifyReadEvent()
 	s.notifyWriteEvent()
-	return nil
+	return s.conn.SetDeadline(t)
 }
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
@@ -399,7 +399,7 @@ func (s *UDPSession) SetReadDeadline(t time.Time) error {
 	s.rd = t
 	s.mu.Unlock()
 	s.notifyReadEvent()
-	return nil
+	return s.conn.SetReadDeadline(t)
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
@@ -408,7 +408,7 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 	s.wd = t
 	s.mu.Unlock()
 	s.notifyWriteEvent()
-	return nil
+	return s.conn.SetWriteDeadline(t)
 }
 
 // SetWriteDelay delays write for bulk transfer until the next update interval
