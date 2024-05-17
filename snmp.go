@@ -15,7 +15,7 @@ type Snmp struct {
 	CurrEstab        uint64 // current number of established connections
 	InErrs           uint64 // UDP read errors reported from net.PacketConn
 	InCsumErrors     uint64 // checksum errors from CRC32
-	KCPInErrors      uint64 // packet iput errors reported from KCP
+	KCPInErrors      uint64 // packet input errors reported from KCP
 	InPkts           uint64 // incoming packets count
 	OutPkts          uint64 // outgoing packets count
 	InSegs           uint64 // incoming KCP segments
