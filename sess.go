@@ -32,8 +32,8 @@ const (
 	// overall crypto header size
 	cryptHeaderSize = nonceSize + crcSize
 
-	// maximum packet size
-	mtuLimit = 1500
+	// maximum packet size. ignore udp header to avoid package divided by IP layer
+	mtuLimit = 1500 - 8
 
 	// accept backlog
 	acceptBacklog = 128
