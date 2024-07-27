@@ -30,7 +30,7 @@ type pulse struct {
 	seq uint32 // sequence of the signal
 }
 
-// autoTune object
+// autoTune object to detect pulses in a signal
 type autoTune struct {
 	pulses [maxAutoTuneSamples]pulse
 }

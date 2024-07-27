@@ -112,6 +112,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		}
 	}
 
+	// if signal is out-of-sync, try to detect the pattern in the signal
 	if dec.shouldTune {
 		autoDS := dec.autoTune.FindPeriod(true)
 		autoPS := dec.autoTune.FindPeriod(false)
