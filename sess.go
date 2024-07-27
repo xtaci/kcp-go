@@ -19,6 +19,30 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
+// [THE GENERALIZED DATA PIPELINE FOR KCP-GO]
+//
+// Outgoing Data Pipeline:                        Incoming Data Pipeline:
+// Stream          (Input Data)                   Packet Network  (Network Interface Card)
+//   |                                               |
+//   v                                               v
+// KCP Output      (Reliable Transport Layer)     Reader/Listener (Reception Queue)
+//   |                                               |
+//   v                                               v
+// FEC Encoding    (Forward Error Correction)     Decryption      (Data Security)
+//   |                                               |
+//   v                                               v
+// CRC32 Checksum  (Error Detection)              CRC32 Checksum  (Error Detection)
+//   |                                               |
+//   v                                               v
+// Encryption      (Data Security)                FEC Decoding    (Forward Error Correction)
+//   |                                               |
+//   v                                               v
+// TxQueue         (Transmission Queue)           KCP Input       (Reliable Transport Layer)
+//   |                                               |
+//   v                                               v
+// Packet Network  (Network Transmission)         Stream          (Input Data)
+
 package kcp
 
 import (
