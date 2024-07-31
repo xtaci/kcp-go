@@ -23,6 +23,8 @@
 package kcp
 
 import (
+	"bytes"
+	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
 	"io"
@@ -116,7 +118,7 @@ func listenEcho(port int) (net.Listener, error) {
 	//block, _ := NewTEABlockCrypt(pass[:16])
 	//block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
-	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 0)
+	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 1)
 }
 func listenTinyBufferEcho(port int) (net.Listener, error) {
 	//block, _ := NewNoneBlockCrypt(pass)
@@ -662,4 +664,33 @@ func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
 	if pconn.Closed {
 		t.Fatal("non-owned PacketConn closed after UDPSession.Close()")
 	}
+}
+
+// this function test the data correctness with FEC and encryption enabled
+func TestReliability(t *testing.T) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+	cli.SetWriteDelay(false)
+	const N = 100000
+	buf := make([]byte, 128)
+	msg := make([]byte, 128)
+
+	for i := 0; i < N; i++ {
+		io.ReadFull(rand.Reader, msg)
+		cli.Write([]byte(msg))
+		if n, err := io.ReadFull(cli, buf); err == nil {
+			if !bytes.Equal(buf[:n], msg) {
+				t.Fail()
+			}
+		} else {
+			panic(err)
+		}
+	}
+	cli.Close()
 }
