@@ -63,8 +63,38 @@ FEC SEQID:
   
 SIZE:
   The size of KCP frame plus 2
+
+KCP Header
++------------------+
+| conv      uint32 |
++------------------+
+| cmd       uint8  |
++------------------+
+| frg       uint8  |
++------------------+
+| wnd      uint16  |
++------------------+
+| ts       uint32  |
++------------------+
+| sn       uint32  |
++------------------+
+| una      uint32  |
++------------------+
+| rto      uint32  |
++------------------+
+| xmit     uint32  |
++------------------+
+| resendts uint32  |
++------------------+
+| fastack  uint32  |
++------------------+
+| acked    uint32  |
++------------------+
+| data     []byte  |
++------------------+
 ```
 
+### Layer-Model of KCP-GO
 ```
 +-----------------+
 | SESSION         |
@@ -83,7 +113,6 @@ SIZE:
 +-----------------+
 | PHY             |
 +-----------------+
-(LAYER MODEL OF KCP-GO)
 ```
 
 ### Looing for a C++ client?
