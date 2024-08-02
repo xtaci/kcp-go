@@ -86,6 +86,8 @@ SIZE:
 (LAYER MODEL OF KCP-GO)
 ```
 
+### Looing for a C++ client?
+1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
 
 ## Examples
 
@@ -274,6 +276,6 @@ Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP. You nee
 ## Links
 
 1. https://github.com/xtaci/smux/ -- A Stream Multiplexing Library for golang with least memory
-1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
+1. **https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++**
 1. https://github.com/skywind3000/kcp -- A Fast and Reliable ARQ Protocol
 1. https://github.com/klauspost/reedsolomon -- Reed-Solomon Erasure Coding in Go
