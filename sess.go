@@ -692,6 +692,9 @@ func (s *UDPSession) update() {
 // GetConv gets conversation id of a session
 func (s *UDPSession) GetConv() uint32 { return s.kcp.conv }
 
+// GetConn gets the underlying packet connection
+func (s *UDPSession) GetConn() net.PacketConn { return s.conn }
+
 // GetRTO gets current rto of the session
 func (s *UDPSession) GetRTO() uint32 {
 	s.mu.Lock()
