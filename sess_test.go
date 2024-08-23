@@ -37,6 +37,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pkg/errors"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -693,4 +694,38 @@ func TestReliability(t *testing.T) {
 		}
 	}
 	cli.Close()
+}
+
+func TestControl(t *testing.T) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	block, _ := NewSalsa20BlockCrypt(pass)
+	l, err := ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 1)
+	if err != nil {
+		panic(err)
+	}
+
+	errorA := errors.New("A")
+	err = l.Control(func(conn net.PacketConn) error {
+		fmt.Printf("Listener Control: conn: %v\n", conn)
+		return errorA
+	})
+
+	if err != errorA {
+		t.Fatal(err)
+	}
+
+	cli, err := dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+
+	errorB := errors.New("B")
+	err = cli.Control(func(conn net.PacketConn) error {
+		fmt.Printf("Client Control: conn: %v\n", conn)
+		return errorB
+	})
+
+	if err != errorB {
+		t.Fatal(err)
+	}
 }
