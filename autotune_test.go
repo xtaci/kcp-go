@@ -66,4 +66,20 @@ func TestAutoTune(t *testing.T) {
 	}
 	assert.Equal(t, -1, tune.FindPeriod(true))
 	assert.Equal(t, 4, tune.FindPeriod(false))
+
+	// minimal test
+	tune = autoTune{}
+	for i := 0; i < 1024; i++ {
+		if i%maxAutoTuneSamples == 0 {
+			tune.Sample(false, uint32(i))
+		} else {
+			tune.Sample(true, uint32(i))
+		}
+	}
+	assert.NotEqual(t, 0, tune.pulses[0].seq)
+	minSeq := tune.pulses[0].seq
+	t.Log("minimal seq", tune.pulses[0].seq)
+
+	tune.Sample(false, minSeq-1)
+	assert.Equal(t, minSeq, tune.pulses[0].seq)
 }
