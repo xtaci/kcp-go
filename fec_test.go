@@ -44,7 +44,7 @@ func TestFECEncodeConsecutive(t *testing.T) {
 		}
 
 		data := make([]byte, payLoad)
-		duration := time.Duration(rand.Int()%210) * time.Millisecond
+		duration := time.Duration(rand.Int()%300) * time.Millisecond
 		t.Logf("Sleep: %v, packet %v", duration, sent)
 		<-time.After(duration)
 
@@ -60,6 +60,8 @@ func TestFECEncodeConsecutive(t *testing.T) {
 					t.Fatalf("expected parity shard:%v actual seqid %v", expected, seqid)
 				}
 			}
+		} else if sent%dataSize == 0 {
+			t.Log("no parity:", len(ps))
 		}
 	}
 }
