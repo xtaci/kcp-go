@@ -26,7 +26,43 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
+	"time"
 )
+
+func TestFECEncodeConsecutive(t *testing.T) {
+	const dataSize = 10
+	const paritySize = 3
+	const payLoad = 1500
+
+	encoder := newFECEncoder(dataSize, paritySize, 0)
+	t.Logf("dataSize:%v, paritySize:%v", dataSize, paritySize)
+	group := 0
+	sent := 0
+	for i := 0; i < 100; i++ {
+		if i%dataSize == 0 {
+			group++
+		}
+
+		data := make([]byte, payLoad)
+		duration := time.Duration(rand.Int()%210) * time.Millisecond
+		t.Logf("Sleep: %v, packet %v", duration, sent)
+		<-time.After(duration)
+
+		ps := encoder.encode(data, 200)
+		sent++
+
+		if len(ps) > 0 {
+			t.Log("has parity:", len(ps))
+			for idx, p := range ps {
+				seqid := binary.LittleEndian.Uint32(p)
+				expected := uint32((group-1)*(dataSize+paritySize) + dataSize + idx)
+				if seqid != expected {
+					t.Fatalf("expected parity shard:%v actual seqid %v", expected, seqid)
+				}
+			}
+		}
+	}
+}
 
 func BenchmarkFECDecode(b *testing.B) {
 	const dataSize = 10
