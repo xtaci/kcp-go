@@ -669,7 +669,7 @@ func (s *UDPSession) postProcess() {
 				}
 			}
 
-			// re-eanble die channel
+			// re-enable die channel
 			chDie = s.die
 
 		case <-chCork: // emulate a corked socket
@@ -683,7 +683,7 @@ func (s *UDPSession) postProcess() {
 				txqueue = txqueue[:0]
 			}
 
-			// re-eanble die channel
+			// re-enable die channel
 			chDie = s.die
 
 		case <-chDie:
