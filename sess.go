@@ -689,7 +689,7 @@ func (s *UDPSession) postProcess() {
 		case <-chDie:
 			// remaining packets in txqueue should be sent out
 			if len(chCork) > 0 || len(s.chPostProcessing) > 0 {
-				chDie = nil // block chDie
+				chDie = nil // block chDie temporarily
 				continue
 			}
 			return
