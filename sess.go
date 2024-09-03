@@ -498,7 +498,7 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 	return true
 }
 
-// SetStreamMode toggles the stream mode on/off
+// Deprecated: toggles the stream mode on/off
 func (s *UDPSession) SetStreamMode(enable bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
