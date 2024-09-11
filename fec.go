@@ -238,7 +238,8 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			}
 		}
 
-		if numDataShard == dec.dataShards { // case 1: if there's no loss on data shards
+		// case 1: if there's no loss on data shards
+		if numDataShard == dec.dataShards {
 			dec.rx = dec.freeRange(first, numshard, dec.rx)
 		} else if numshard >= dec.dataShards { // case 2: loss on data shards, but it's recoverable from parity shards
 			// make the bytes length of each shard equal
@@ -277,7 +278,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		dec.rx = dec.freeRange(0, 1, dec.rx)
 	}
 
-	// timeout policy
+	// FIFO timeout policy
 	current := currentMs()
 	numExpired := 0
 	for k := range dec.rx {
@@ -299,9 +300,12 @@ func (dec *fecDecoder) freeRange(first, n int, q []fecElement) []fecElement {
 		xmitBuf.Put([]byte(q[i].fecPacket))
 	}
 
+	// if n is small, we can avoid the copy
 	if first == 0 && n < cap(q)/2 {
 		return q[n:]
 	}
+
+	// on the other hand, we shift the tail
 	copy(q[first:], q[first+n:])
 	return q[:len(q)-n]
 }
@@ -427,6 +431,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 	return
 }
 
+// put a stamp on the FEC packet header with seqid and type
 func (enc *fecEncoder) markData(data []byte) {
 	binary.LittleEndian.PutUint32(data, enc.next)
 	binary.LittleEndian.PutUint16(data[4:], typeData)
