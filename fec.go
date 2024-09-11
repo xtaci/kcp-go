@@ -414,6 +414,10 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 					enc.markParity(ps[k][enc.headerOffset:])
 					ps[k] = ps[k][:enc.maxSize]
 				}
+			} else {
+				// record the error, and still keep the seqid monotonic increasing
+				atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
+				enc.next = (enc.next + uint32(enc.parityShards)) % enc.paws
 			}
 		} else {
 			// through we do not send non-continuous parity shard, we still increase the next value
