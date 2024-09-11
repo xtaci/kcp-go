@@ -193,7 +193,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	shardBegin := pkt.seqid() - pkt.seqid()%uint32(dec.shardSize)
 	shardEnd := shardBegin + uint32(dec.shardSize) - 1
 
-	// max search range in ordered queue for current shard
+	// Define max search range in ordered queue for current shard
 	searchBegin := insertIdx - int(pkt.seqid()%uint32(dec.shardSize))
 	if searchBegin < 0 {
 		searchBegin = 0
@@ -216,9 +216,10 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			shardsflag[k] = false
 		}
 
-		// assemble shards in shards[searchBegin, searchEnd] to the working set
+		// lookup shards in range [searchBegin, searchEnd] to the working set
 		for i := searchBegin; i <= searchEnd; i++ {
 			seqid := dec.rx[i].seqid()
+			// the shard seqid must be in [shardBegin, shardEnd], i.e. the current FEC group
 			if _itimediff(seqid, shardEnd) > 0 {
 				break
 			} else if _itimediff(seqid, shardBegin) >= 0 {
@@ -384,7 +385,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 		enc.maxSize = sz
 	}
 
-	//  Generation of Reed-Solomon Erasure Code
+	// Generation of Reed-Solomon Erasure Code
 	now := time.Now().UnixMilli()
 	if enc.shardCount == enc.dataShards {
 		// generate the rs-code only if the data is continuous.
