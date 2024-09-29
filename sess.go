@@ -1035,7 +1035,10 @@ func (l *Listener) Accept() (net.Conn, error) {
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	var timeout <-chan time.Time
 	if tdeadline, ok := l.rd.Load().(time.Time); ok && !tdeadline.IsZero() {
-		timeout = time.After(time.Until(tdeadline))
+		timer := time.NewTimer(time.Until(tdeadline))
+		defer timer.Stop()
+
+		timeout = timer.C
 	}
 
 	select {
