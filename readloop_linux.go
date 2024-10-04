@@ -89,7 +89,7 @@ func (s *UDPSession) readLoop() {
 // monitor is the optimized version of monitor for linux utilizing recvmmsg syscall
 func (l *Listener) monitor() {
 	var xconn batchConn
-	if _, ok := l.conn.(*net.UDPConn); ok {
+	if _, ok := l.conn.(udpConn); ok {
 		addr, err := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
 		if err == nil {
 			if addr.IP.To4() != nil {
