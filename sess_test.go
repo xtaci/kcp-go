@@ -729,3 +729,69 @@ func TestControl(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSessionReadAfterClosed(t *testing.T) {
+	us, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	uc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	defer us.Close()
+	defer uc.Close()
+
+	knockDoor := func(c net.Conn, myid string) (string, error) {
+		c.SetDeadline(time.Now().Add(time.Second * 3))
+		_, err := c.Write([]byte(myid))
+		c.SetDeadline(time.Time{})
+		if err != nil {
+			return "", err
+		}
+		c.SetDeadline(time.Now().Add(time.Second * 3))
+		var buf [1024]byte
+		n, err := c.Read(buf[:])
+		c.SetDeadline(time.Time{})
+		return string(buf[:n]), err
+	}
+
+	check := func(c1, c2 *UDPSession) {
+		done := make(chan struct{}, 1)
+		go func() {
+			rid, err := knockDoor(c2, "4321")
+			done <- struct{}{}
+			if err != nil {
+				panic(err)
+			}
+			if rid != "1234" {
+				panic("mismatch id")
+			}
+		}()
+		rid, err := knockDoor(c1, "1234")
+		if err != nil {
+			panic(err)
+		}
+		if rid != "4321" {
+			panic("mismatch id")
+		}
+		<-done
+	}
+
+	c1, err := NewConn3(0, uc.LocalAddr(), nil, 0, 0, us)
+	if err != nil {
+		panic(err)
+	}
+	c2, err := NewConn3(0, us.LocalAddr(), nil, 0, 0, uc)
+	if err != nil {
+		panic(err)
+	}
+	check(c1, c2)
+	c1.Close()
+	c2.Close()
+	//log.Println("conv id 0 is closed")
+
+	c1, err = NewConn3(4321, uc.LocalAddr(), nil, 0, 0, us)
+	if err != nil {
+		panic(err)
+	}
+	c2, err = NewConn3(4321, us.LocalAddr(), nil, 0, 0, uc)
+	if err != nil {
+		panic(err)
+	}
+	check(c1, c2)
+}
