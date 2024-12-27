@@ -402,6 +402,15 @@ RESET_TIMER:
 	}
 }
 
+func (s *UDPSession) isClosed() bool {
+	select {
+	case <-s.die:
+		return true
+	default:
+		return false
+	}
+}
+
 // Close closes the connection.
 func (s *UDPSession) Close() error {
 	var once bool
