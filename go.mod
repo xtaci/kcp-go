@@ -7,8 +7,8 @@ require (
 	github.com/templexxx/xorsimd v0.4.3
 	github.com/tjfoc/gmsm v1.4.1
 	github.com/xtaci/lossyconn v0.0.0-20190602105132-8df528c0c9ae
-	golang.org/x/crypto v0.31.0
-	golang.org/x/net v0.23.0
+	golang.org/x/crypto v0.35.0
+	golang.org/x/net v0.36.0
 )
 
 require (
@@ -16,8 +16,9 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/templexxx/cpu v0.1.1 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.0 // indirect
 )
 
 go 1.21
+toolchain go1.24.1
