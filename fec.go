@@ -389,7 +389,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 		enc.maxSize = sz
 	}
 
-	// Generation of Reed-Solomon Erasure Code
+	// Generation of Reed-Solomon Erasure Code when we have enough datashards
 	now := time.Now().UnixMilli()
 	if enc.shardCount == enc.dataShards {
 		// generate the rs-code only if the data is continuous.
@@ -411,7 +411,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 			if err := enc.codec.Encode(cache); err == nil {
 				ps = enc.shardCache[enc.dataShards:]
 				for k := range ps {
-					enc.markParity(ps[k][enc.headerOffset:])
+					enc.markParity(ps[k][enc.headerOffset:]) // NOTE(x): mark parity will increase the seqid by 1
 					ps[k] = ps[k][:enc.maxSize]
 				}
 			} else {
@@ -425,11 +425,12 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 			enc.next = (enc.next + uint32(enc.parityShards)) % enc.paws
 		}
 
-		// counters resetting
+		// Resetting the shard count and max size
 		enc.shardCount = 0
 		enc.maxSize = 0
 	}
 
+	// record the time of the latest packet
 	enc.tsLatestPacket = now
 
 	return
