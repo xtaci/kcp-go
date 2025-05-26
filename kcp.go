@@ -167,11 +167,11 @@ type KCP struct {
 	fastresend     int32
 	nocwnd, stream int32
 
-	snd_queue      []segment
-	rcv_queue      []segment
-	snd_buf        []segment
-	rcv_buf        []segment
-	rcv_buf_offset int
+	snd_queue     []segment
+	rcv_queue     []segment
+	snd_buf       []segment
+	rcv_buf       []segment
+	rcv_buf_start int
 
 	acklist []ackItem
 
@@ -249,21 +249,19 @@ func (kcp *KCP) PeekSize() (length int) {
 
 // move available data from rcv_buf -> rcv_queue
 func (kcp *KCP) pull_from_rcv_buf() {
-	count := 0
-	for k := range kcp.rcv_buf {
-		pos := (kcp.rcv_buf_offset + k) % int(kcp.rcv_wnd)
-		if pos >= len(kcp.rcv_buf) {
+	for range kcp.rcv_buf {
+		if kcp.rcv_buf_start >= len(kcp.rcv_buf) {
 			break
 		}
-		if seg := &kcp.rcv_buf[pos]; seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
+		if seg := &kcp.rcv_buf[kcp.rcv_buf_start]; seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
 			kcp.rcv_nxt++
+			kcp.rcv_buf_start = (kcp.rcv_buf_start + 1) % int(kcp.rcv_wnd)
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
 			seg.data = nil
 		} else {
 			break
 		}
 	}
-	kcp.rcv_buf_offset = (kcp.rcv_buf_offset + count) % int(kcp.rcv_wnd)
 }
 
 // Receive data from kcp state machine
@@ -485,7 +483,7 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	}
 
 	repeat := false
-	insert_pos := (kcp.rcv_buf_offset + int(_itimediff(sn, kcp.rcv_nxt))) % int(kcp.rcv_wnd)
+	insert_pos := (kcp.rcv_buf_start + int(_itimediff(sn, kcp.rcv_nxt))) % int(kcp.rcv_wnd)
 	if insert_pos < len(kcp.rcv_buf) {
 		if sn == kcp.rcv_buf[insert_pos].sn {
 			repeat = true
