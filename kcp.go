@@ -249,11 +249,13 @@ func (kcp *KCP) PeekSize() (length int) {
 
 // move available data from rcv_buf -> rcv_queue
 func (kcp *KCP) pull_from_rcv_buf() {
-	// move available data from rcv_buf -> rcv_queue
 	count := 0
 	for k := range kcp.rcv_buf {
-		seg := &kcp.rcv_buf[(kcp.rcv_buf_offset+k)%int(kcp.rcv_wnd)]
-		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
+		pos := (kcp.rcv_buf_offset + k) % int(kcp.rcv_wnd)
+		if pos >= len(kcp.rcv_buf) {
+			break
+		}
+		if seg := &kcp.rcv_buf[pos]; seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
 			kcp.rcv_nxt++
 			kcp.rcv_queue = append(kcp.rcv_queue, *seg)
 			seg.data = nil
