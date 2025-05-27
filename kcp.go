@@ -485,7 +485,9 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	repeat := false
 	insert_pos := (kcp.rcv_buf_start + int(_itimediff(sn, kcp.rcv_nxt))) % int(kcp.rcv_wnd)
 	if insert_pos < len(kcp.rcv_buf) {
-		if sn == kcp.rcv_buf[insert_pos].sn {
+		if sn == kcp.rcv_buf[insert_pos].sn &&
+			// avoid a corner case where newseg.sn = 0 and kcp.rcv_buf[insert_pos] is a placeholder.
+			kcp.rcv_buf[insert_pos].data != nil {
 			repeat = true
 		}
 	} else {
@@ -1024,6 +1026,14 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 	}
 	if rcvwnd > 0 {
 		kcp.rcv_wnd = uint32(rcvwnd)
+
+		if kcp.rcv_buf_start < len(kcp.rcv_buf) && kcp.rcv_buf_start > 0 {
+			// Compacts rcv_buf to make it starts at 0.
+			n := copy(kcp.rcv_buf, kcp.rcv_buf[kcp.rcv_buf_start:])
+			kcp.rcv_buf = kcp.rcv_buf[:n]
+		}
+		kcp.rcv_buf_start = 0
+		kcp.rcv_buf = kcp.rcv_buf[:min(len(kcp.rcv_buf), rcvwnd)]
 	}
 	return 0
 }
