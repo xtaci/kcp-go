@@ -1181,6 +1181,12 @@ func Dial(raddr string) (net.Conn, error) { return DialWithOptions(raddr, nil, 0
 //
 // Check https://github.com/klauspost/reedsolomon for details
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
+	return DialWithOptionsAndLocal(raddr, block, dataShards, parityShards, nil)
+}
+
+
+//Some requirements may need to specify a local address, such as intranet penetration
+func DialWithOptionsAndLocal(raddr string, block BlockCrypt, dataShards, parityShards int, laddr *net.UDPAddr) (*UDPSession, error) {
 	// network type detection
 	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
@@ -1191,7 +1197,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		network = "udp"
 	}
 
-	conn, err := net.ListenUDP(network, nil)
+	conn, err := net.ListenUDP(network, laddr)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
