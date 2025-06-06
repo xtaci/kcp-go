@@ -1,7 +1,5 @@
 package kcp
 
-import "fmt"
-
 // RingBuffer is a generic ring (circular) buffer that supports dynamic resizing.
 // It provides efficient FIFO queue behavior with amortized constant time operations.
 type RingBuffer[T any] struct {
@@ -121,6 +119,4 @@ func (r *RingBuffer[T]) grow() {
 	r.elements = newElements
 	r.head = 0
 	r.tail = r.Len()
-
-	fmt.Println("growed to size:", newSize, "head:", r.head, "tail:", r.tail)
 }
