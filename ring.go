@@ -2,96 +2,96 @@ package kcp
 
 import "fmt"
 
-type Ring struct {
+type Ring[T any] struct {
 	head     int
 	tail     int
-	elements []interface{}
+	elements []T
 }
 
-func NewRing(size int) *Ring {
+func NewRing[T any](size int) *Ring[T] {
 	if size <= 8 {
 		size = 8 // Ensure a minimum size
 	}
-	return &Ring{
+	return &Ring[T]{
 		head:     0,
 		tail:     0,
-		elements: make([]interface{}, size),
+		elements: make([]T, size),
 	}
 }
 
-func (r *Ring) Len() int {
+func (r *Ring[T]) Len() int {
 	if r.head <= r.tail {
 		return r.tail - r.head
 	}
 	return len(r.elements) - r.head + r.tail
 }
 
-func (r *Ring) Push(v interface{}) {
+func (r *Ring[T]) Push(v T) {
 	if r.IsFull() {
 		r.grow()
 	}
-
 	r.elements[r.tail] = v
 	r.tail = (r.tail + 1) % len(r.elements)
 }
 
-func (r *Ring) Pop() (interface{}, bool) {
+func (r *Ring[T]) Pop() (T, bool) {
+	var zero T
 	if r.Len() == 0 {
-		return nil, false
+		return zero, false
 	}
-
 	value := r.elements[r.head]
-	r.elements[r.head] = nil // Clear the value to avoid memory leak
+	// clear is not necessary for generic type unless it's a pointer, but we assign zero value just in case
+	r.elements[r.head] = zero
 	r.head = (r.head + 1) % len(r.elements)
 	return value, true
 }
 
-func (r *Ring) Peek() interface{} {
+func (r *Ring[T]) Peek() (T, bool) {
+	var zero T
 	if r.Len() == 0 {
-		return nil
+		return zero, false
 	}
-	return r.elements[r.head]
+	return r.elements[r.head], true
 }
 
-func (r *Ring) Clear() {
+func (r *Ring[T]) Clear() {
 	r.head = 0
 	r.tail = 0
-	r.elements = make([]interface{}, 0, 8)
+	r.elements = make([]T, 0, 8)
 }
 
-func (r *Ring) IsEmpty() bool {
+func (r *Ring[T]) IsEmpty() bool {
 	return r.Len() == 0
 }
 
-func (r *Ring) Size() int {
+func (r *Ring[T]) Size() int {
 	return len(r.elements)
 }
 
-func (r *Ring) IsFull() bool {
-	if (r.tail+1)%len(r.elements) == r.head {
-		return true
-	}
-	return false
+func (r *Ring[T]) IsFull() bool {
+	return (r.tail+1)%len(r.elements) == r.head
 }
 
-// Grow increases the size of the ring buffer if it is full.
-// It copies the existing elements to a new larger slice.
-// If the ring is empty, it initializes it with a minimum size.
-func (r *Ring) grow() {
-	newSize := len(r.elements) * 2
-	if newSize == 0 {
-		newSize = 8 // Minimum size
+func (r *Ring[T]) grow() {
+	currentSize := len(r.elements)
+	var newSize int
+
+	switch {
+	case currentSize < 8:
+		newSize = 8
+	case currentSize <= 4096:
+		newSize = currentSize * 2
+	default:
+		newSize = currentSize + (currentSize+9)/10 // +10% with ceiling
 	}
-	newElements := make([]interface{}, newSize)
+
+	newElements := make([]T, newSize)
 
 	if r.head < r.tail {
-		// | ... head ..... tail ... |
 		copy(newElements, r.elements[r.head:r.tail])
 	} else {
-		// elements:    |... tail head ... |
-		// newElements: | head ..... tail 00000000 |
-		copy(newElements, r.elements[r.head:])
-		copy(newElements[len(r.elements)-r.head:], r.elements[:r.tail])
+		n := copy(newElements, r.elements[r.head:])
+		copy(newElements[n:], r.elements[:r.tail])
 	}
 
 	r.elements = newElements
