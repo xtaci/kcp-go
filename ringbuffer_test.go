@@ -47,6 +47,57 @@ func TestRingSize(t *testing.T) {
 		t.Errorf("Expected length 0 after pushing and popping, got %d", r.Len())
 	}
 }
+
+func TestRingSize2(t *testing.T) {
+	// emulate a condition where head = 32， tail=31, and Len() = 63
+	r := NewRingBuffer[int](64)
+	for i := 0; i < 63; i++ {
+		r.Push(i)
+	}
+	for i := 0; i < 32; i++ {
+		if _, ok := r.Pop(); !ok {
+			t.Errorf("Expected to pop value, but got none")
+		}
+	}
+	for i := 0; i < 32; i++ {
+		r.Push(i + 63)
+		if r.Len() != i+(63-32+1) {
+			t.Errorf("Expected length %d after popping 31 elements, got %d", i+(63-32+1), r.Len())
+		}
+	}
+
+	// check head, tail and Len()
+	if r.head != 32 {
+		t.Errorf("Expected head to be 32, got %d", r.head)
+	}
+	if r.tail != 31 {
+		t.Errorf("Expected tail to be 31, got %d", r.tail)
+	}
+	if r.Len() != 63 {
+		t.Errorf("Expected length to be 63, got %d", r.Len())
+	}
+
+	t.Log("head", r.head, "tail", r.tail, "len", r.Len(), "maxlen", r.MaxLen())
+
+	// now we push one element to trigger grow
+	r.Push(95)
+	if r.MaxLen() != 127 {
+		t.Errorf("Expected capacity to be 128 after grow, got %d", r.MaxLen())
+	}
+
+	if r.Len() != 64 {
+		t.Errorf("Expected length to be 64 after pushing one element, got %d", r.Len())
+	}
+
+	if r.head != 0 {
+		t.Errorf("Expected head to be 0 after grow, got %d", r.head)
+	}
+
+	if r.tail != 64 {
+		t.Errorf("Expected tail to be 64 after grow, got %d", r.tail)
+	}
+}
+
 func TestRingBuffer(t *testing.T) {
 	r := NewRingBuffer[int](1)
 	if r.Len() != 0 {
