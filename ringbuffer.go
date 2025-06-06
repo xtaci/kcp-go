@@ -145,7 +145,7 @@ func (r *RingBuffer[T]) grow() {
 		copy(newElements[n:], r.elements[:r.tail])
 	}
 
-	r.elements = newElements
 	r.head = 0
 	r.tail = r.Len()
+	r.elements = newElements
 }
