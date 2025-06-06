@@ -2,8 +2,27 @@ package kcp
 
 import "testing"
 
+func TestRingSize(t *testing.T) {
+	r := NewRingBuffer[int](1)
+	if r.Len() != 0 {
+		t.Errorf("Expected length 0, got %d", r.Len())
+	}
+
+	// re-zero
+	for i := 0; i < 64; i++ {
+		r.Push(i)
+		r.Pop()
+	}
+	if r.Len() != 0 {
+		t.Errorf("Expected length 0 after pushing and popping, got %d", r.Len())
+	}
+}
 func TestRingBuffer(t *testing.T) {
 	r := NewRingBuffer[int](1)
+	if r.Len() != 0 {
+		t.Errorf("Expected length 0, got %d", r.Len())
+	}
+
 	for i := 0; i < 64; i++ {
 		r.Push(i)
 		if r.Len() != i+1 {

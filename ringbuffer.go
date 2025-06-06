@@ -26,7 +26,8 @@ func (r *RingBuffer[T]) Len() int {
 	if r.head <= r.tail {
 		return r.tail - r.head
 	}
-	return len(r.elements) - r.head + r.tail
+
+	return len(r.elements[r.head:]) + len(r.elements[:r.tail])
 }
 
 // Push adds an element to the tail of the ring.
