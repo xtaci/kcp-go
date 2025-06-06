@@ -127,6 +127,7 @@ func (r *RingBuffer[T]) IsFull() bool {
 //   - If size <= 4096: double the size
 //   - If size > 4096: increase by 10% (rounded up)
 func (r *RingBuffer[T]) grow() {
+	currentLength := r.Len()
 	currentSize := len(r.elements)
 	var newSize int
 
@@ -152,6 +153,6 @@ func (r *RingBuffer[T]) grow() {
 	}
 
 	r.head = 0
-	r.tail = r.Len()
+	r.tail = currentLength
 	r.elements = newElements
 }
