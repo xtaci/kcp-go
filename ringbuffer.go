@@ -76,8 +76,8 @@ func (r *RingBuffer[T]) IsEmpty() bool {
 	return r.Len() == 0
 }
 
-// Size returns the current capacity of the ring buffer.
-func (r *RingBuffer[T]) Size() int {
+// Capacity returns the current capacity of the ring buffer.
+func (r *RingBuffer[T]) Capacity() int {
 	return len(r.elements)
 }
 
@@ -98,7 +98,7 @@ func (r *RingBuffer[T]) grow() {
 	switch {
 	case currentSize < 8:
 		newSize = 8
-	case currentSize <= 4096:
+	case currentSize < 4096:
 		newSize = currentSize * 2
 	default:
 		newSize = currentSize + (currentSize+9)/10 // +10%, rounded up
