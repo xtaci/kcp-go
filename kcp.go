@@ -168,7 +168,7 @@ type KCP struct {
 	nocwnd, stream int32
 
 	snd_queue []segment
-	rcv_queue []segment
+	rcv_queue *RingBuffer[segment]
 	snd_buf   []segment
 	rcv_buf   []segment
 
@@ -204,6 +204,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
+	kcp.rcv_queue = NewRingBuffer[segment](IKCP_WND_RCV * 2)
 	return kcp
 }
 
@@ -213,8 +214,8 @@ func (kcp *KCP) newSegment(size int) (seg segment) {
 	return
 }
 
-// delSegment recycles a KCP segment
-func (kcp *KCP) delSegment(seg *segment) {
+// recycleSegment recycles a KCP segment
+func (kcp *KCP) recycleSegment(seg *segment) {
 	if seg.data != nil {
 		xmitBuf.Put(seg.data)
 		seg.data = nil
@@ -223,26 +224,26 @@ func (kcp *KCP) delSegment(seg *segment) {
 
 // PeekSize checks the size of next message in the recv queue
 func (kcp *KCP) PeekSize() (length int) {
-	if len(kcp.rcv_queue) == 0 {
+	if kcp.rcv_queue.Len() == 0 {
 		return -1
 	}
 
-	seg := &kcp.rcv_queue[0]
+	seg, _ := kcp.rcv_queue.Peek()
 	if seg.frg == 0 {
 		return len(seg.data)
 	}
 
-	if len(kcp.rcv_queue) < int(seg.frg+1) {
+	if kcp.rcv_queue.Len() < int(seg.frg+1) {
 		return -1
 	}
 
-	for k := range kcp.rcv_queue {
-		seg := &kcp.rcv_queue[k]
+	kcp.rcv_queue.ForEach(func(seg segment) bool {
 		length += len(seg.data)
 		if seg.frg == 0 {
-			break
+			return false
 		}
-	}
+		return true
+	})
 	return
 }
 
@@ -264,32 +265,32 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	var fast_recover bool
-	if len(kcp.rcv_queue) >= int(kcp.rcv_wnd) {
+	if kcp.rcv_queue.Len() >= int(kcp.rcv_wnd) {
 		fast_recover = true
 	}
 
 	// merge fragment
-	count := 0
-	for k := range kcp.rcv_queue {
-		seg := &kcp.rcv_queue[k]
+	for {
+		seg, ok := kcp.rcv_queue.Pop()
+		if !ok {
+			break
+		}
+
 		copy(buffer, seg.data)
 		buffer = buffer[len(seg.data):]
 		n += len(seg.data)
-		count++
-		kcp.delSegment(seg)
+		kcp.recycleSegment(&seg)
 		if seg.frg == 0 {
 			break
 		}
 	}
-	if count > 0 {
-		kcp.rcv_queue = kcp.remove_front(kcp.rcv_queue, count)
-	}
 
 	// move available data from rcv_buf -> rcv_queue
-	count = 0
+	count := 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
-		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
+		if seg.sn == kcp.rcv_nxt && kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
+			kcp.rcv_queue.Push(*seg)
 			kcp.rcv_nxt++
 			count++
 		} else {
@@ -298,12 +299,11 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	if count > 0 {
-		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
 		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
 	}
 
 	// fast recover
-	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) && fast_recover {
+	if kcp.rcv_queue.Len() < int(kcp.rcv_wnd) && fast_recover {
 		// ready to send back IKCP_CMD_WINS in ikcp_flush
 		// tell remote my window size
 		kcp.probe |= IKCP_ASK_TELL
@@ -425,7 +425,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 			// have to shift the segments behind forward,
 			// which is an expensive operation for large window
 			seg.acked = 1
-			kcp.delSegment(seg)
+			kcp.recycleSegment(seg)
 			break
 		}
 		if _itimediff(sn, seg.sn) < 0 {
@@ -454,7 +454,7 @@ func (kcp *KCP) parse_una(una uint32) int {
 	for k := range kcp.snd_buf {
 		seg := &kcp.snd_buf[k]
 		if _itimediff(una, seg.sn) > 0 {
-			kcp.delSegment(seg)
+			kcp.recycleSegment(seg)
 			count++
 		} else {
 			break
@@ -513,7 +513,8 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	count := 0
 	for k := range kcp.rcv_buf {
 		seg := &kcp.rcv_buf[k]
-		if seg.sn == kcp.rcv_nxt && len(kcp.rcv_queue)+count < int(kcp.rcv_wnd) {
+		if seg.sn == kcp.rcv_nxt && kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
+			kcp.rcv_queue.Push(*seg)
 			kcp.rcv_nxt++
 			count++
 		} else {
@@ -521,7 +522,6 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 		}
 	}
 	if count > 0 {
-		kcp.rcv_queue = append(kcp.rcv_queue, kcp.rcv_buf[:count]...)
 		kcp.rcv_buf = kcp.remove_front(kcp.rcv_buf, count)
 	}
 
@@ -671,8 +671,8 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 }
 
 func (kcp *KCP) wnd_unused() uint16 {
-	if len(kcp.rcv_queue) < int(kcp.rcv_wnd) {
-		return uint16(int(kcp.rcv_wnd) - len(kcp.rcv_queue))
+	if kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
+		return uint16(int(kcp.rcv_wnd) - kcp.rcv_queue.Len())
 	}
 	return 0
 }
