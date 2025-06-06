@@ -191,3 +191,67 @@ func TestRingBufferGrow(t *testing.T) {
 		}
 	}
 }
+
+func TestRingForEach(t *testing.T) {
+	r := NewRingBuffer[int](10)
+	for i := 0; i < 10; i++ {
+		r.Push(i)
+	}
+
+	sum := 0
+	i := 0
+	r.ForEach(func(v int) bool {
+		if v != i {
+			t.Errorf("Expected index %d, got %d", i, i)
+		}
+		i++
+		sum += v
+		return true
+	})
+
+	if sum != 45 { // 0 + 1 + ... + 9 = 45
+		t.Errorf("Expected sum to be 45, got %d", sum)
+	}
+
+	count := 0
+	r.ForEach(func(v int) bool {
+		count++
+		return true
+	})
+
+	if count != 10 {
+		t.Errorf("Expected count to be 10, got %d", count)
+	}
+}
+
+func TestRingForEachReverse(t *testing.T) {
+	r := NewRingBuffer[int](10)
+	for i := 0; i < 10; i++ {
+		r.Push(i)
+	}
+
+	sum := 0
+	i := 9
+	r.ForEachReverse(func(v int) bool {
+		if v != i {
+			t.Errorf("Expected index %d, got %d", i, i)
+		}
+		i--
+		sum += v
+		return true
+	})
+
+	if sum != 45 { // 0 + 1 + ... + 9 = 45
+		t.Errorf("Expected sum to be 45, got %d", sum)
+	}
+
+	count := 0
+	r.ForEachReverse(func(v int) bool {
+		count++
+		return true
+	})
+
+	if count != 10 {
+		t.Errorf("Expected count to be 10, got %d", count)
+	}
+}
