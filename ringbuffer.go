@@ -137,7 +137,7 @@ func (r *RingBuffer[T]) grow() {
 	newElements := make([]T, newSize)
 
 	// Copy elements to new buffer preserving logical order
-	if r.head <= r.tail {
+	if r.head < r.tail {
 		// Contiguous data: [head ... tail)
 		copy(newElements, r.elements[r.head:r.tail])
 	} else {
