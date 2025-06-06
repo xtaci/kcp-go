@@ -113,7 +113,7 @@ func (r *RingBuffer[T]) IsEmpty() bool {
 
 // MaxLen returns the maximum capacity of the ring buffer.
 func (r *RingBuffer[T]) MaxLen() int {
-	return len(r.elements)
+	return len(r.elements) - 1
 }
 
 // IsFull returns true if the ring buffer is full (tail + 1 == head).
