@@ -2,8 +2,8 @@ package kcp
 
 import "testing"
 
-func TestRing(t *testing.T) {
-	r := NewRing[int](1)
+func TestRingBuffer(t *testing.T) {
+	r := NewRingBuffer[int](1)
 	for i := 0; i < 64; i++ {
 		r.Push(i)
 		if r.Len() != i+1 {

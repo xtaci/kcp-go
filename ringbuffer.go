@@ -2,21 +2,21 @@ package kcp
 
 import "fmt"
 
-// Ring is a generic ring (circular) buffer that supports dynamic resizing.
+// RingBuffer is a generic ring (circular) buffer that supports dynamic resizing.
 // It provides efficient FIFO queue behavior with amortized constant time operations.
-type Ring[T any] struct {
-	head     int   // Index of the next element to be popped
-	tail     int   // Index of the next empty slot to push into
-	elements []T   // Underlying slice storing elements in circular fashion
+type RingBuffer[T any] struct {
+	head     int // Index of the next element to be popped
+	tail     int // Index of the next empty slot to push into
+	elements []T // Underlying slice storing elements in circular fashion
 }
 
-// NewRing creates a new Ring with a specified initial capacity.
+// NewRingBuffer creates a new Ring with a specified initial capacity.
 // If the provided size is <= 8, it defaults to 8.
-func NewRing[T any](size int) *Ring[T] {
+func NewRingBuffer[T any](size int) *RingBuffer[T] {
 	if size <= 8 {
 		size = 8 // Ensure a minimum size
 	}
-	return &Ring[T]{
+	return &RingBuffer[T]{
 		head:     0,
 		tail:     0,
 		elements: make([]T, size),
@@ -24,7 +24,7 @@ func NewRing[T any](size int) *Ring[T] {
 }
 
 // Len returns the number of elements currently in the ring.
-func (r *Ring[T]) Len() int {
+func (r *RingBuffer[T]) Len() int {
 	if r.head <= r.tail {
 		return r.tail - r.head
 	}
@@ -33,7 +33,7 @@ func (r *Ring[T]) Len() int {
 
 // Push adds an element to the tail of the ring.
 // If the ring is full, it will grow automatically.
-func (r *Ring[T]) Push(v T) {
+func (r *RingBuffer[T]) Push(v T) {
 	if r.IsFull() {
 		r.grow()
 	}
@@ -43,7 +43,7 @@ func (r *Ring[T]) Push(v T) {
 
 // Pop removes and returns the element from the head of the ring.
 // It returns the zero value and false if the ring is empty.
-func (r *Ring[T]) Pop() (T, bool) {
+func (r *RingBuffer[T]) Pop() (T, bool) {
 	var zero T
 	if r.Len() == 0 {
 		return zero, false
@@ -57,7 +57,7 @@ func (r *Ring[T]) Pop() (T, bool) {
 
 // Peek returns the element at the head of the ring without removing it.
 // It returns the zero value and false if the ring is empty.
-func (r *Ring[T]) Peek() (T, bool) {
+func (r *RingBuffer[T]) Peek() (T, bool) {
 	var zero T
 	if r.Len() == 0 {
 		return zero, false
@@ -67,24 +67,24 @@ func (r *Ring[T]) Peek() (T, bool) {
 
 // Clear resets the ring to an empty state and reinitializes the buffer.
 // The capacity is preserved.
-func (r *Ring[T]) Clear() {
+func (r *RingBuffer[T]) Clear() {
 	r.head = 0
 	r.tail = 0
 	r.elements = make([]T, len(r.elements)) // Preserve current capacity
 }
 
 // IsEmpty returns true if the ring has no elements.
-func (r *Ring[T]) IsEmpty() bool {
+func (r *RingBuffer[T]) IsEmpty() bool {
 	return r.Len() == 0
 }
 
 // Size returns the current capacity of the ring buffer.
-func (r *Ring[T]) Size() int {
+func (r *RingBuffer[T]) Size() int {
 	return len(r.elements)
 }
 
 // IsFull returns true if the ring buffer is full (tail + 1 == head).
-func (r *Ring[T]) IsFull() bool {
+func (r *RingBuffer[T]) IsFull() bool {
 	return (r.tail+1)%len(r.elements) == r.head
 }
 
@@ -93,7 +93,7 @@ func (r *Ring[T]) IsFull() bool {
 //   - If current size < 8: grow to 8
 //   - If size <= 4096: double the size
 //   - If size > 4096: increase by 10% (rounded up)
-func (r *Ring[T]) grow() {
+func (r *RingBuffer[T]) grow() {
 	currentSize := len(r.elements)
 	var newSize int
 
