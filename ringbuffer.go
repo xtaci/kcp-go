@@ -111,7 +111,7 @@ func (r *RingBuffer[T]) Capacity() int {
 	return len(r.elements)
 }
 
-// IsFull returns true if the ring buffer is full.
+// IsFull returns true if the ring buffer is full (tail + 1 == head).
 func (r *RingBuffer[T]) IsFull() bool {
 	return (r.tail+1)%len(r.elements) == r.head
 }
