@@ -26,7 +26,8 @@ func (r *RingBuffer[T]) Len() int {
 	if r.head <= r.tail {
 		return r.tail - r.head
 	}
-	return len(r.elements) - r.head + r.tail
+
+	return len(r.elements[r.head:]) + len(r.elements[:r.tail])
 }
 
 // Push adds an element to the tail of the ring.
@@ -110,7 +111,7 @@ func (r *RingBuffer[T]) Capacity() int {
 	return len(r.elements)
 }
 
-// IsFull returns true if the ring buffer is full (tail + 1 == head).
+// IsFull returns true if the ring buffer is full.
 func (r *RingBuffer[T]) IsFull() bool {
 	return (r.tail+1)%len(r.elements) == r.head
 }
