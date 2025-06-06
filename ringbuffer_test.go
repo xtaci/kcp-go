@@ -1,6 +1,9 @@
 package kcp
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
 
 func TestRingSize(t *testing.T) {
 	r := NewRingBuffer[int](1)
@@ -12,7 +15,34 @@ func TestRingSize(t *testing.T) {
 	for i := 0; i < 64; i++ {
 		r.Push(i)
 		r.Pop()
+		if r.Len() != 0 {
+			t.Errorf("Expected length 0 after pushing and popping, got %d", r.Len())
+		}
 	}
+
+	left := 1024 * 1024
+	for i := 0; i < left; i++ {
+		r.Push(i)
+	}
+
+	for {
+		use := rand.Int() % (left + 1)
+		left -= use
+		for j := 0; j < use; j++ {
+			if _, ok := r.Pop(); !ok {
+				t.Errorf("Expected to pop value, but got none")
+			}
+		}
+		if r.Len() != left {
+			t.Errorf("Expected length %d after popping, got %d", left, r.Len())
+		}
+
+		t.Log("use", use, "left", left, "head", r.head, "tail", r.tail, "len", r.Len(), "maxlen", r.MaxLen())
+		if left == 0 {
+			break
+		}
+	}
+
 	if r.Len() != 0 {
 		t.Errorf("Expected length 0 after pushing and popping, got %d", r.Len())
 	}
