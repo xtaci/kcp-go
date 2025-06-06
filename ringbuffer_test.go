@@ -67,7 +67,7 @@ func TestRingBufferGrow(t *testing.T) {
 		r.Push(i)
 
 		// Check if capacity is among expected
-		capacity := r.Capacity()
+		capacity := r.MaxLen()
 		valid := false
 		for _, ec := range expectedCapacities {
 			if capacity == ec {
@@ -87,16 +87,16 @@ func TestRingBufferGrow(t *testing.T) {
 
 	// Make sure the growth is 10% increase after 4096
 	r.Push(4096)
-	if r.Capacity() != 4506 {
-		t.Errorf("expected capacity to be 4506 after pushing 4096, got %d", r.Capacity())
+	if r.MaxLen() != 4506 {
+		t.Errorf("expected capacity to be 4506 after pushing 4096, got %d", r.MaxLen())
 	}
 
 	// push to 4506
 	for i := 4097; i <= 4506; i++ {
 		r.Push(i)
 	}
-	if r.Capacity() != 4957 {
-		t.Errorf("expected capacity to be 4957 after pushing 4506, got %d", r.Capacity())
+	if r.MaxLen() != 4957 {
+		t.Errorf("expected capacity to be 4957 after pushing 4506, got %d", r.MaxLen())
 	}
 
 	// Check values are preserved in correct order

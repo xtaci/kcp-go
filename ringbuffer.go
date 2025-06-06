@@ -1,5 +1,10 @@
 package kcp
 
+const (
+	RINGBUFFER_MIN = 8
+	RINGBUFFER_EXP = 4096
+)
+
 // RingBuffer is a generic ring (circular) buffer that supports dynamic resizing.
 // It provides efficient FIFO queue behavior with amortized constant time operations.
 type RingBuffer[T any] struct {
@@ -11,8 +16,8 @@ type RingBuffer[T any] struct {
 // NewRingBuffer creates a new Ring with a specified initial capacity.
 // If the provided size is <= 8, it defaults to 8.
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
-	if size <= 8 {
-		size = 8 // Ensure a minimum size
+	if size <= RINGBUFFER_MIN {
+		size = RINGBUFFER_MIN // Ensure a minimum size
 	}
 	return &RingBuffer[T]{
 		head:     0,
@@ -98,7 +103,7 @@ func (r *RingBuffer[T]) ForEach(fn func(T) bool) {
 func (r *RingBuffer[T]) Clear() {
 	r.head = 0
 	r.tail = 0
-	r.elements = make([]T, len(r.elements)) // Preserve current capacity
+	r.elements = make([]T, RINGBUFFER_MIN)
 }
 
 // IsEmpty returns true if the ring has no elements.
@@ -106,8 +111,8 @@ func (r *RingBuffer[T]) IsEmpty() bool {
 	return r.Len() == 0
 }
 
-// Capacity returns the current capacity of the ring buffer.
-func (r *RingBuffer[T]) Capacity() int {
+// MaxLen returns the maximum capacity of the ring buffer.
+func (r *RingBuffer[T]) MaxLen() int {
 	return len(r.elements)
 }
 
@@ -126,9 +131,9 @@ func (r *RingBuffer[T]) grow() {
 	var newSize int
 
 	switch {
-	case currentSize < 8:
-		newSize = 8
-	case currentSize < 4096:
+	case currentSize < RINGBUFFER_MIN:
+		newSize = RINGBUFFER_MIN
+	case currentSize < RINGBUFFER_EXP:
 		newSize = currentSize * 2
 	default:
 		newSize = currentSize + (currentSize+9)/10 // +10%, rounded up
