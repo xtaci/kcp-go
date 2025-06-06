@@ -237,7 +237,7 @@ func (kcp *KCP) PeekSize() (length int) {
 		return -1
 	}
 
-	kcp.rcv_queue.ForEach(func(seg segment) bool {
+	kcp.rcv_queue.ForEach(func(seg *segment) bool {
 		length += len(seg.data)
 		if seg.frg == 0 {
 			return false

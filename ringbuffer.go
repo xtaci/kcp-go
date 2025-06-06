@@ -72,26 +72,26 @@ func (r *RingBuffer[T]) Peek() (T, bool) {
 // ForEach iterates over each element in the ring buffer,
 // applying the provided function. If the function returns false,
 // iteration stops early.
-func (r *RingBuffer[T]) ForEach(fn func(T) bool) {
+func (r *RingBuffer[T]) ForEach(fn func(*T) bool) {
 	if r.Len() == 0 {
 		return
 	}
 	if r.head < r.tail {
 		// Contiguous data: [head ... tail)
 		for i := r.head; i < r.tail; i++ {
-			if !fn(r.elements[i]) {
+			if !fn(&r.elements[i]) {
 				break // Stop iteration if function returns false
 			}
 		}
 	} else {
 		// Wrapped data: [head ... end) + [0 ... tail)
 		for i := r.head; i < len(r.elements); i++ {
-			if !fn(r.elements[i]) {
+			if !fn(&r.elements[i]) {
 				break // Stop iteration if function returns false
 			}
 		}
 		for i := 0; i < r.tail; i++ {
-			if !fn(r.elements[i]) {
+			if !fn(&r.elements[i]) {
 				break // Stop iteration if function returns false
 			}
 		}
@@ -101,7 +101,7 @@ func (r *RingBuffer[T]) ForEach(fn func(T) bool) {
 // ForEachReverse iterates over each element in the ring buffer in reverse order,
 // applying the provided function. If the function returns false,
 // iteration stops early.
-func (r *RingBuffer[T]) ForEachReverse(fn func(T) bool) {
+func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 	if r.Len() == 0 {
 		return
 	}
@@ -109,18 +109,18 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(T) bool) {
 	if r.head < r.tail {
 		// Contiguous data: [head ... tail)
 		for i := r.tail - 1; i >= r.head; i-- {
-			if !fn(r.elements[i]) {
+			if !fn(&r.elements[i]) {
 				break // Stop iteration if function returns false
 			}
 		}
 	} else {
 		for i := r.tail - 1; i >= 0; i-- {
-			if !fn(r.elements[i]) {
+			if !fn(&r.elements[i]) {
 				break // Stop iteration if function returns false
 			}
 		}
 		for i := len(r.elements) - 1; i >= r.head; i-- {
-			if !fn(r.elements[i]) {
+			if !fn(&r.elements[i]) {
 				break // Stop iteration if function returns false
 			}
 		}

@@ -200,12 +200,12 @@ func TestRingForEach(t *testing.T) {
 
 	sum := 0
 	i := 0
-	r.ForEach(func(v int) bool {
-		if v != i {
-			t.Errorf("Expected index %d, got %d", i, i)
+	r.ForEach(func(v *int) bool {
+		if *v != i {
+			t.Errorf("Expected index %d, got %d", i, *v)
 		}
 		i++
-		sum += v
+		sum += *v
 		return true
 	})
 
@@ -214,7 +214,7 @@ func TestRingForEach(t *testing.T) {
 	}
 
 	count := 0
-	r.ForEach(func(v int) bool {
+	r.ForEach(func(v *int) bool {
 		count++
 		return true
 	})
@@ -232,12 +232,12 @@ func TestRingForEachReverse(t *testing.T) {
 
 	sum := 0
 	i := 9
-	r.ForEachReverse(func(v int) bool {
-		if v != i {
-			t.Errorf("Expected index %d, got %d", i, i)
+	r.ForEachReverse(func(v *int) bool {
+		if *v != i {
+			t.Errorf("Expected index %d, got %d", i, *v)
 		}
 		i--
-		sum += v
+		sum += *v
 		return true
 	})
 
@@ -246,7 +246,7 @@ func TestRingForEachReverse(t *testing.T) {
 	}
 
 	count := 0
-	r.ForEachReverse(func(v int) bool {
+	r.ForEachReverse(func(v *int) bool {
 		count++
 		return true
 	})
