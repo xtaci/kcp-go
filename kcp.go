@@ -682,6 +682,11 @@ func (kcp *KCP) wnd_unused() uint16 {
 
 // flush pending data
 func (kcp *KCP) flush(ackOnly bool) uint32 {
+	defer func() {
+		atomic.StoreUint64(&DefaultSnmp.RingBufferSndQueue, uint64(kcp.snd_queue.MaxLen()))
+		atomic.StoreUint64(&DefaultSnmp.RingBufferRcvQueue, uint64(kcp.rcv_queue.MaxLen()))
+	}()
+
 	var seg segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
