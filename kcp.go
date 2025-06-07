@@ -167,7 +167,7 @@ type KCP struct {
 	fastresend     int32
 	nocwnd, stream int32
 
-	snd_queue []segment
+	snd_queue *RingBuffer[segment]
 	rcv_queue *RingBuffer[segment]
 	snd_buf   []segment
 	rcv_buf   []segment
@@ -205,6 +205,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
 	kcp.rcv_queue = NewRingBuffer[segment](IKCP_WND_RCV * 2)
+	kcp.snd_queue = NewRingBuffer[segment](IKCP_WND_SND * 2)
 	return kcp
 }
 
@@ -320,23 +321,24 @@ func (kcp *KCP) Send(buffer []byte) int {
 
 	// append to previous segment in streaming mode (if possible)
 	if kcp.stream != 0 {
-		n := len(kcp.snd_queue)
-		if n > 0 {
-			seg := &kcp.snd_queue[n-1]
-			if len(seg.data) < int(kcp.mss) {
-				capacity := int(kcp.mss) - len(seg.data)
-				extend := capacity
-				if len(buffer) < capacity {
-					extend = len(buffer)
-				}
+		if n := kcp.snd_queue.Len(); n > 0 {
+			kcp.snd_queue.ForEachReverse(func(seg *segment) bool {
+				if len(seg.data) < int(kcp.mss) {
+					capacity := int(kcp.mss) - len(seg.data)
+					extend := capacity
+					if len(buffer) < capacity {
+						extend = len(buffer)
+					}
 
-				// grow slice, the underlying cap is guaranteed to
-				// be larger than kcp.mss
-				oldlen := len(seg.data)
-				seg.data = seg.data[:oldlen+extend]
-				copy(seg.data[oldlen:], buffer)
-				buffer = buffer[extend:]
-			}
+					// grow slice, the underlying cap is guaranteed to
+					// be larger than kcp.mss
+					oldlen := len(seg.data)
+					seg.data = seg.data[:oldlen+extend]
+					copy(seg.data[oldlen:], buffer)
+					buffer = buffer[extend:]
+				}
+				return false
+			})
 		}
 
 		if len(buffer) == 0 {
@@ -372,7 +374,8 @@ func (kcp *KCP) Send(buffer []byte) int {
 		} else { // stream mode
 			seg.frg = 0
 		}
-		kcp.snd_queue = append(kcp.snd_queue, seg)
+
+		kcp.snd_queue.Push(seg)
 		buffer = buffer[size:]
 	}
 	return 0
@@ -769,20 +772,23 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 
 	// sliding window, controlled by snd_nxt && sna_una+cwnd
 	newSegsCount := 0
-	for k := range kcp.snd_queue {
+	for {
 		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) >= 0 {
 			break
 		}
-		newseg := kcp.snd_queue[k]
+
+		seg, ok := kcp.snd_queue.Pop()
+		if !ok {
+			break
+		}
+
+		newseg := seg
 		newseg.conv = kcp.conv
 		newseg.cmd = IKCP_CMD_PUSH
 		newseg.sn = kcp.snd_nxt
 		kcp.snd_buf = append(kcp.snd_buf, newseg)
 		kcp.snd_nxt++
 		newSegsCount++
-	}
-	if newSegsCount > 0 {
-		kcp.snd_queue = kcp.remove_front(kcp.snd_queue, newSegsCount)
 	}
 
 	// calculate resent
@@ -1054,7 +1060,7 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 
 // WaitSnd gets how many packet is waiting to be sent
 func (kcp *KCP) WaitSnd() int {
-	return len(kcp.snd_buf) + len(kcp.snd_queue)
+	return len(kcp.snd_buf) + kcp.snd_queue.Len()
 }
 
 // remove front n elements from queue
@@ -1071,11 +1077,7 @@ func (kcp *KCP) remove_front(q []segment, n int) []segment {
 
 // Release all cached outgoing segments
 func (kcp *KCP) ReleaseTX() {
-	for k := range kcp.snd_queue {
-		if kcp.snd_queue[k].data != nil {
-			xmitBuf.Put(kcp.snd_queue[k].data)
-		}
-	}
+	kcp.snd_queue.Clear()
 	for k := range kcp.snd_buf {
 		if kcp.snd_buf[k].data != nil {
 			xmitBuf.Put(kcp.snd_buf[k].data)
