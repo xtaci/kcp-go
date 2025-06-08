@@ -143,7 +143,6 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 }
 
 // Clear resets the ring to an empty state and reinitializes the buffer.
-// The capacity is preserved.
 func (r *RingBuffer[T]) Clear() {
 	r.head = 0
 	r.tail = 0
