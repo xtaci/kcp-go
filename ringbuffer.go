@@ -102,12 +102,12 @@ func (r *RingBuffer[T]) ForEach(fn func(*T) bool) {
 		// Wrapped data: [head ... end) + [0 ... tail)
 		for i := r.head; i < len(r.elements); i++ {
 			if !fn(&r.elements[i]) {
-				break // Stop iteration if function returns false
+				return
 			}
 		}
 		for i := 0; i < r.tail; i++ {
 			if !fn(&r.elements[i]) {
-				break // Stop iteration if function returns false
+				return
 			}
 		}
 	}
@@ -131,12 +131,12 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 	} else {
 		for i := r.tail - 1; i >= 0; i-- {
 			if !fn(&r.elements[i]) {
-				break // Stop iteration if function returns false
+				return
 			}
 		}
 		for i := len(r.elements) - 1; i >= r.head; i-- {
 			if !fn(&r.elements[i]) {
-				break // Stop iteration if function returns false
+				return
 			}
 		}
 	}
