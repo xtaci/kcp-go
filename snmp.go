@@ -29,32 +29,33 @@ import (
 
 // Snmp defines network statistics indicator
 type Snmp struct {
-	BytesSent          uint64 // bytes sent from upper level
-	BytesReceived      uint64 // bytes received to upper level
-	MaxConn            uint64 // max number of connections ever reached
-	ActiveOpens        uint64 // accumulated active open connections
-	PassiveOpens       uint64 // accumulated passive open connections
-	CurrEstab          uint64 // current number of established connections
-	InErrs             uint64 // UDP read errors reported from net.PacketConn
-	InCsumErrors       uint64 // checksum errors from CRC32
-	KCPInErrors        uint64 // packet iput errors reported from KCP
-	InPkts             uint64 // incoming packets count
-	OutPkts            uint64 // outgoing packets count
-	InSegs             uint64 // incoming KCP segments
-	OutSegs            uint64 // outgoing KCP segments
-	InBytes            uint64 // UDP bytes received
-	OutBytes           uint64 // UDP bytes sent
-	RetransSegs        uint64 // accmulated retransmited segments
-	FastRetransSegs    uint64 // accmulated fast retransmitted segments
-	EarlyRetransSegs   uint64 // accmulated early retransmitted segments
-	LostSegs           uint64 // number of segs inferred as lost
-	RepeatSegs         uint64 // number of segs duplicated
-	FECRecovered       uint64 // correct packets recovered from FEC
-	FECErrs            uint64 // incorrect packets recovered from FEC
-	FECParityShards    uint64 // FEC segments received
-	FECShortShards     uint64 // number of data shards that's not enough for recovery
-	RingBufferSndQueue uint64 // MaxLen of segments in send queue ring buffer
-	RingBufferRcvQueue uint64 // MaxLen of segments in receive queue ring buffer
+	BytesSent           uint64 // bytes sent from upper level
+	BytesReceived       uint64 // bytes received to upper level
+	MaxConn             uint64 // max number of connections ever reached
+	ActiveOpens         uint64 // accumulated active open connections
+	PassiveOpens        uint64 // accumulated passive open connections
+	CurrEstab           uint64 // current number of established connections
+	InErrs              uint64 // UDP read errors reported from net.PacketConn
+	InCsumErrors        uint64 // checksum errors from CRC32
+	KCPInErrors         uint64 // packet iput errors reported from KCP
+	InPkts              uint64 // incoming packets count
+	OutPkts             uint64 // outgoing packets count
+	InSegs              uint64 // incoming KCP segments
+	OutSegs             uint64 // outgoing KCP segments
+	InBytes             uint64 // UDP bytes received
+	OutBytes            uint64 // UDP bytes sent
+	RetransSegs         uint64 // accmulated retransmited segments
+	FastRetransSegs     uint64 // accmulated fast retransmitted segments
+	EarlyRetransSegs    uint64 // accmulated early retransmitted segments
+	LostSegs            uint64 // number of segs inferred as lost
+	RepeatSegs          uint64 // number of segs duplicated
+	FECRecovered        uint64 // correct packets recovered from FEC
+	FECErrs             uint64 // incorrect packets recovered from FEC
+	FECParityShards     uint64 // FEC segments received
+	FECShortShards      uint64 // number of data shards that's not enough for recovery
+	RingBufferSndQueue  uint64 // MaxLen of segments in send queue ring buffer
+	RingBufferRcvQueue  uint64 // MaxLen of segments in receive queue ring buffer
+	RingBufferSndBuffer uint64 // MaxLen of segments in send buffer ring buffer
 }
 
 func newSnmp() *Snmp {
@@ -90,6 +91,7 @@ func (s *Snmp) Header() []string {
 		"FECShortShards",
 		"RingBufferSndQueue",
 		"RingBufferRcvQueue",
+		"RingBufferSndBuffer",
 	}
 }
 
@@ -123,6 +125,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.FECShortShards),
 		fmt.Sprint(snmp.RingBufferSndQueue),
 		fmt.Sprint(snmp.RingBufferRcvQueue),
+		fmt.Sprint(snmp.RingBufferSndBuffer),
 	}
 }
 
@@ -155,6 +158,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.FECShortShards = atomic.LoadUint64(&s.FECShortShards)
 	d.RingBufferSndQueue = atomic.LoadUint64(&s.RingBufferSndQueue)
 	d.RingBufferRcvQueue = atomic.LoadUint64(&s.RingBufferRcvQueue)
+	d.RingBufferSndBuffer = atomic.LoadUint64(&s.RingBufferSndBuffer)
 	return d
 }
 
@@ -186,6 +190,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.FECShortShards, 0)
 	atomic.StoreUint64(&s.RingBufferSndQueue, 0)
 	atomic.StoreUint64(&s.RingBufferRcvQueue, 0)
+	atomic.StoreUint64(&s.RingBufferSndBuffer, 0)
 }
 
 // DefaultSnmp is the global KCP connection statistics collector

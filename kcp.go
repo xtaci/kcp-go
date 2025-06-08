@@ -679,6 +679,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	defer func() {
 		atomic.StoreUint64(&DefaultSnmp.RingBufferSndQueue, uint64(kcp.snd_queue.MaxLen()))
 		atomic.StoreUint64(&DefaultSnmp.RingBufferRcvQueue, uint64(kcp.rcv_queue.MaxLen()))
+		atomic.StoreUint64(&DefaultSnmp.RingBufferSndBuffer, uint64(kcp.snd_buf.MaxLen()))
 	}()
 
 	var seg segment
