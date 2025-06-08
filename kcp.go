@@ -169,7 +169,7 @@ type KCP struct {
 
 	snd_queue *RingBuffer[segment]
 	rcv_queue *RingBuffer[segment]
-	snd_buf   []segment
+	snd_buf   *RingBuffer[segment]
 	rcv_buf   []segment
 
 	acklist []ackItem
@@ -204,6 +204,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
 	kcp.output = output
+	kcp.snd_buf = NewRingBuffer[segment](IKCP_WND_SND * 2)
 	kcp.rcv_queue = NewRingBuffer[segment](IKCP_WND_RCV * 2)
 	kcp.snd_queue = NewRingBuffer[segment](IKCP_WND_SND * 2)
 	return kcp
@@ -407,8 +408,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 }
 
 func (kcp *KCP) shrink_buf() {
-	if len(kcp.snd_buf) > 0 {
-		seg := &kcp.snd_buf[0]
+	if seg, ok := kcp.snd_buf.Peek(); ok {
 		kcp.snd_una = seg.sn
 	} else {
 		kcp.snd_una = kcp.snd_nxt
@@ -420,8 +420,7 @@ func (kcp *KCP) parse_ack(sn uint32) {
 		return
 	}
 
-	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+	for seg := range kcp.snd_buf.ForEach {
 		if sn == seg.sn {
 			// mark and free space, but leave the segment here,
 			// and wait until `una` to delete this, then we don't
@@ -442,8 +441,7 @@ func (kcp *KCP) parse_fastack(sn, ts uint32) {
 		return
 	}
 
-	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+	for seg := range kcp.snd_buf.ForEach {
 		if _itimediff(sn, seg.sn) < 0 {
 			break
 		} else if sn != seg.sn && _itimediff(seg.ts, ts) <= 0 {
@@ -454,8 +452,7 @@ func (kcp *KCP) parse_fastack(sn, ts uint32) {
 
 func (kcp *KCP) parse_una(una uint32) int {
 	count := 0
-	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+	for seg := range kcp.snd_buf.ForEach {
 		if _itimediff(una, seg.sn) > 0 {
 			kcp.recycleSegment(seg)
 			count++
@@ -463,9 +460,7 @@ func (kcp *KCP) parse_una(una uint32) int {
 			break
 		}
 	}
-	if count > 0 {
-		kcp.snd_buf = kcp.remove_front(kcp.snd_buf, count)
-	}
+	kcp.snd_buf.Discard(count)
 	return count
 }
 
@@ -791,7 +786,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 		newseg.conv = kcp.conv
 		newseg.cmd = IKCP_CMD_PUSH
 		newseg.sn = kcp.snd_nxt
-		kcp.snd_buf = append(kcp.snd_buf, newseg)
+		kcp.snd_buf.Push(newseg)
 		kcp.snd_nxt++
 		newSegsCount++
 	}
@@ -807,9 +802,7 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	minrto := int32(kcp.interval)
 
-	ref := kcp.snd_buf[:len(kcp.snd_buf)] // for bounds check elimination
-	for k := range ref {
-		segment := &ref[k]
+	for segment := range kcp.snd_buf.ForEach {
 		needsend := false
 		if segment.acked == 1 {
 			continue
@@ -981,8 +974,7 @@ func (kcp *KCP) Check() uint32 {
 
 	tm_flush = _itimediff(ts_flush, current)
 
-	for k := range kcp.snd_buf {
-		seg := &kcp.snd_buf[k]
+	for seg := range kcp.snd_buf.ForEach {
 		diff := _itimediff(seg.resendts, current)
 		if diff <= 0 {
 			return current
@@ -1065,7 +1057,7 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 
 // WaitSnd gets how many packet is waiting to be sent
 func (kcp *KCP) WaitSnd() int {
-	return len(kcp.snd_buf) + kcp.snd_queue.Len()
+	return kcp.snd_buf.Len() + kcp.snd_queue.Len()
 }
 
 // remove front n elements from queue
@@ -1083,9 +1075,9 @@ func (kcp *KCP) remove_front(q []segment, n int) []segment {
 // Release all cached outgoing segments
 func (kcp *KCP) ReleaseTX() {
 	kcp.snd_queue.Clear()
-	for k := range kcp.snd_buf {
-		if kcp.snd_buf[k].data != nil {
-			xmitBuf.Put(kcp.snd_buf[k].data)
+	for seg := range kcp.snd_buf.ForEach {
+		if seg.data != nil {
+			xmitBuf.Put(seg.data)
 		}
 	}
 	kcp.snd_queue = nil
