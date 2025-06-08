@@ -226,11 +226,11 @@ func (kcp *KCP) recycleSegment(seg *segment) {
 
 // PeekSize checks the size of next message in the recv queue
 func (kcp *KCP) PeekSize() (length int) {
-	if kcp.rcv_queue.Len() == 0 {
+	seg, ok := kcp.rcv_queue.Peek()
+	if !ok {
 		return -1
 	}
 
-	seg, _ := kcp.rcv_queue.Peek()
 	if seg.frg == 0 {
 		return len(seg.data)
 	}
@@ -239,13 +239,12 @@ func (kcp *KCP) PeekSize() (length int) {
 		return -1
 	}
 
-	kcp.rcv_queue.ForEach(func(seg *segment) bool {
+	for seg := range kcp.rcv_queue.ForEach {
 		length += len(seg.data)
 		if seg.frg == 0 {
-			return false
+			break
 		}
-		return true
-	})
+	}
 	return
 }
 
@@ -323,7 +322,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 	// append to previous segment in streaming mode (if possible)
 	if kcp.stream != 0 {
 		if n := kcp.snd_queue.Len(); n > 0 {
-			kcp.snd_queue.ForEachReverse(func(seg *segment) bool {
+			for seg := range kcp.snd_queue.ForEachReverse {
 				if len(seg.data) < int(kcp.mss) {
 					capacity := int(kcp.mss) - len(seg.data)
 					extend := capacity
@@ -338,8 +337,8 @@ func (kcp *KCP) Send(buffer []byte) int {
 					copy(seg.data[oldlen:], buffer)
 					buffer = buffer[extend:]
 				}
-				return false
-			})
+				break
+			}
 		}
 
 		if len(buffer) == 0 {
