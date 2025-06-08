@@ -134,6 +134,25 @@ func TestRingBuffer(t *testing.T) {
 	if r.Len() != 64 {
 		t.Errorf("Expected length 64 after pushing 32 more elements, got %d", r.Len())
 	}
+
+	// ringbuffer should be [32 ... 63, 0 ... 31]
+	evicted := 0
+	round := 0
+	expectedHead := []int{62, 28}
+	for !r.IsEmpty() {
+		evicted += r.Discard(30)
+		if round < len(expectedHead) {
+			if v, ok := r.Peek(); !ok || *v != expectedHead[round] {
+				t.Errorf("Invalid discard state: unexpected %d", *v)
+			}
+		} else if _, ok := r.Peek(); ok {
+			t.Errorf("Unexpected non-nil head element")
+		}
+		if r.Len()+evicted != 64 {
+			t.Errorf("Unexpected ringbuffer length after discard op")
+		}
+		round++
+	}
 }
 
 func TestRingBufferGrow(t *testing.T) {

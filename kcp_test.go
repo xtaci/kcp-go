@@ -141,10 +141,9 @@ func testlink(t *testing.T, client *lossyconn.LossyConn, server *lossyconn.Lossy
 
 func BenchmarkFlush(b *testing.B) {
 	kcp := NewKCP(1, func(buf []byte, size int) {})
-	kcp.snd_buf = make([]segment, 1024)
-	for k := range kcp.snd_buf {
-		kcp.snd_buf[k].xmit = 1
-		kcp.snd_buf[k].resendts = currentMs() + 10000
+	kcp.snd_buf = NewRingBuffer[segment](1024)
+	for range kcp.snd_buf.MaxLen() {
+		kcp.snd_buf.Push(segment{xmit: 1, resendts: currentMs() + 10000})
 	}
 	b.ResetTimer()
 	b.ReportAllocs()

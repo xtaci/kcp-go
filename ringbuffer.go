@@ -61,12 +61,27 @@ func (r *RingBuffer[T]) Pop() (T, bool) {
 
 // Peek returns the element at the head of the ring without removing it.
 // It returns the zero value and false if the ring is empty.
-func (r *RingBuffer[T]) Peek() (T, bool) {
-	var zero T
+func (r *RingBuffer[T]) Peek() (*T, bool) {
 	if r.Len() == 0 {
-		return zero, false
+		return nil, false
 	}
-	return r.elements[r.head], true
+	return &r.elements[r.head], true
+}
+
+// Discard discards the first N elements from the ring buffer.
+// Returns the number of elements that are actually discarded (<= n).
+func (r *RingBuffer[T]) Discard(n int) int {
+	n = min(n, r.Len())
+	if n == r.Len() {
+		r.Clear()
+		return n
+	}
+	var zero T
+	for range n {
+		r.elements[r.head] = zero
+		r.head = (r.head + 1) % len(r.elements)
+	}
+	return n
 }
 
 // ForEach iterates over each element in the ring buffer,
