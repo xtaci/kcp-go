@@ -146,7 +146,11 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 func (r *RingBuffer[T]) Clear() {
 	r.head = 0
 	r.tail = 0
-	r.elements = make([]T, RINGBUFFER_MIN)
+
+	var zero T
+	for i := range r.elements {
+		r.elements[i] = zero // Clear each slot to avoid retaining references
+	}
 }
 
 // IsEmpty returns true if the ring has no elements.
