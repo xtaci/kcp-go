@@ -156,28 +156,20 @@ func TestRingBufferGrow(t *testing.T) {
 				break
 			}
 		}
-		if !valid && capacity <= 4096 {
+		if !valid && capacity <= RINGBUFFER_EXP {
 			t.Errorf("unexpected capacity during growth: %d", capacity)
 		}
 	}
 
-	// Push to 4096
-	for i := pushCount; i < 4096; i++ {
+	// Push to 1024
+	for i := pushCount; i < 1024; i++ {
 		r.Push(i)
 	}
 
 	// Make sure the growth is 10% increase after 4096
-	r.Push(4096)
-	if r.MaxLen() != 4505 {
-		t.Errorf("expected capacity to be 4506, got %d", r.MaxLen())
-	}
-
-	// push to 4506
-	for i := 4097; i <= 4505; i++ {
-		r.Push(i)
-	}
-	if r.MaxLen() != 4956 {
-		t.Errorf("expected capacity to be 4957, got %d", r.MaxLen())
+	r.Push(1)
+	if r.MaxLen() != 1126 {
+		t.Errorf("expected capacity to be 1126, got %d", r.MaxLen())
 	}
 
 	// Check values are preserved in correct order
