@@ -95,7 +95,7 @@ func (r *RingBuffer[T]) ForEach(fn func(*T) bool) {
 		// Contiguous data: [head ... tail)
 		for i := r.head; i < r.tail; i++ {
 			if !fn(&r.elements[i]) {
-				break // Stop iteration if function returns false
+				return
 			}
 		}
 	} else {
@@ -125,7 +125,7 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 		// Contiguous data: [head ... tail)
 		for i := r.tail - 1; i >= r.head; i-- {
 			if !fn(&r.elements[i]) {
-				break // Stop iteration if function returns false
+				return
 			}
 		}
 	} else {
