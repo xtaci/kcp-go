@@ -194,10 +194,6 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				//log.Println("autotune to :", dec.dataShards, dec.parityShards)
 			}
 		}
-	}
-
-	// parameters in tuning
-	if dec.shouldTune {
 		return nil
 	}
 
@@ -256,11 +252,9 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			}
 		}
 
-		shardRecovered := false
 		// case 1: if there's no loss on data shards
 		if numDataShard == dec.dataShards {
-			shardRecovered = true
-
+			// do nothing if all shards are present
 		} else if numshard >= dec.dataShards { // case 2: loss on data shards, but it's recoverable from parity shards
 			// make the bytes length of each shard equal
 			for k := range shards {
@@ -288,16 +282,14 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			}
 
 			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
-			shardRecovered = true
 		}
 
-		if shardRecovered {
-			if _itimediff(shardId, dec.minShardId) > 0 {
-				dec.minShardId = shardId
-			}
-			delete(dec.shardSet, shardId) // discard the shards that are not needed anymore
-			atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
+		if _itimediff(shardId, dec.minShardId) > 0 {
+			dec.minShardId = shardId
+			atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.minShardId))
 		}
+		delete(dec.shardSet, shardId) // discard the shards that are not needed anymore
+		atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
 
 		// flush obsolete shards
 		dec.flushShards()
@@ -308,7 +300,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 // leaderID returns the leader id for the given shard
 func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
-	return seqid % uint32(dec.shardSize)
+	return seqid / uint32(dec.shardSize)
 }
 
 func (dec *fecDecoder) flushShards() {
