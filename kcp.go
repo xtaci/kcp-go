@@ -153,23 +153,42 @@ func (seg *segment) encode(ptr []byte) []byte {
 }
 
 // segmentHeap is a min-heap of segments, used for receiving segments in order
-type segmentHeap []segment
-
-func (h segmentHeap) Len() int { return len(h) }
-
-func (h segmentHeap) Less(i, j int) bool {
-	return _itimediff(h[j].sn, h[i].sn) > 0
+type segmentHeap struct {
+	segments []segment
+	marks    map[uint32]struct{} // to avoid duplicates
 }
 
-func (h segmentHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
-func (h *segmentHeap) Push(x interface{}) { *h = append(*h, x.(segment)) }
+func newSegmentHeap() *segmentHeap {
+	h := &segmentHeap{
+		marks: make(map[uint32]struct{}),
+	}
+	heap.Init(h)
+	return h
+}
+
+func (h *segmentHeap) Len() int { return len(h.segments) }
+
+func (h *segmentHeap) Less(i, j int) bool {
+	return _itimediff(h.segments[j].sn, h.segments[i].sn) > 0
+}
+
+func (h *segmentHeap) Swap(i, j int) { h.segments[i], h.segments[j] = h.segments[j], h.segments[i] }
+func (h *segmentHeap) Push(x interface{}) {
+	h.segments = append(h.segments, x.(segment))
+	h.marks[x.(segment).sn] = struct{}{}
+}
 
 func (h *segmentHeap) Pop() interface{} {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	*h = old[0 : n-1]
+	n := len(h.segments)
+	x := h.segments[n-1]
+	h.segments = h.segments[0 : n-1]
+	delete(h.marks, x.sn)
 	return x
+}
+
+func (h *segmentHeap) Has(sn uint32) bool {
+	_, exists := h.marks[sn]
+	return exists
 }
 
 // KCP defines a single KCP connection
@@ -191,7 +210,7 @@ type KCP struct {
 	snd_queue *RingBuffer[segment]
 	rcv_queue *RingBuffer[segment]
 	snd_buf   *RingBuffer[segment]
-	rcv_buf   segmentHeap
+	rcv_buf   *segmentHeap
 
 	acklist []ackItem
 
@@ -228,6 +247,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.snd_buf = NewRingBuffer[segment](IKCP_WND_SND * 2)
 	kcp.rcv_queue = NewRingBuffer[segment](IKCP_WND_RCV * 2)
 	kcp.snd_queue = NewRingBuffer[segment](IKCP_WND_SND * 2)
+	kcp.rcv_buf = newSegmentHeap()
 	return kcp
 }
 
@@ -309,13 +329,13 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 
 	// move available data from rcv_buf -> rcv_queue
 	for kcp.rcv_buf.Len() > 0 {
-		seg := heap.Pop(&kcp.rcv_buf).(segment)
+		seg := heap.Pop(kcp.rcv_buf).(segment)
 		if seg.sn == kcp.rcv_nxt && kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
 			kcp.rcv_queue.Push(seg)
 			kcp.rcv_nxt++
 		} else {
 			// push back segment
-			heap.Push(&kcp.rcv_buf, seg)
+			heap.Push(kcp.rcv_buf, seg)
 			break
 		}
 	}
@@ -494,33 +514,25 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 	}
 
 	repeat := false
-	for i := range kcp.rcv_buf {
-		seg := &kcp.rcv_buf[i]
-		if seg.sn == sn {
-			repeat = true
-			break
-		}
-	}
-
-	if !repeat {
+	if !kcp.rcv_buf.Has(sn) {
 		// replicate the content if it's new
 		dataCopy := xmitBuf.Get().([]byte)[:len(newseg.data)]
 		copy(dataCopy, newseg.data)
 		newseg.data = dataCopy
 
 		// insert the new segment into rcv_buf
-		heap.Push(&kcp.rcv_buf, newseg)
+		heap.Push(kcp.rcv_buf, newseg)
 	}
 
 	// move available data from rcv_buf -> rcv_queue
 	for kcp.rcv_buf.Len() > 0 {
-		seg := heap.Pop(&kcp.rcv_buf).(segment)
+		seg := heap.Pop(kcp.rcv_buf).(segment)
 		if seg.sn == kcp.rcv_nxt && kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
 			kcp.rcv_queue.Push(seg)
 			kcp.rcv_nxt++
 		} else {
 			// push back segment
-			heap.Push(&kcp.rcv_buf, seg)
+			heap.Push(kcp.rcv_buf, seg)
 			break
 		}
 	}
