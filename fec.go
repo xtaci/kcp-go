@@ -218,6 +218,11 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		return nil
 	}
 
+	// count
+	if in.flag() == typeParity {
+		atomic.AddUint64(&DefaultSnmp.FECParityShards, 1)
+	}
+
 	// insert the packet into the shard heap
 	pkt := fecPacket(xmitBuf.Get().([]byte)[:len(in)])
 	copy(pkt, in)
@@ -276,8 +281,12 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 						recovered = append(recovered, shards[k])
 					}
 				}
+			} else {
+				// record the error, and still keep the seqid monotonic increasing
+				atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
 			}
 
+			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
 			shardRecovered = true
 		}
 
