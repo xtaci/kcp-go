@@ -158,7 +158,7 @@ type segmentHeap []segment
 func (h segmentHeap) Len() int { return len(h) }
 
 func (h segmentHeap) Less(i, j int) bool {
-	return h[i].sn < h[j].sn
+	return _itimediff(h[j].sn, h[i].sn) > 0
 }
 
 func (h segmentHeap) Swap(i, j int)       { h[i], h[j] = h[j], h[i] }
