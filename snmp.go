@@ -49,7 +49,7 @@ type Snmp struct {
 	EarlyRetransSegs    uint64 // accmulated early retransmitted segments
 	LostSegs            uint64 // number of segs inferred as lost
 	RepeatSegs          uint64 // number of segs duplicated
-	FECFullShards       uint64 // number of FEC segments that are full
+	FECFullShardSet     uint64 // number of FEC segments that are full
 	FECRecovered        uint64 // correct packets recovered from FEC
 	FECErrs             uint64 // incorrect packets recovered from FEC
 	FECParityShards     uint64 // FEC segments received
@@ -125,7 +125,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.EarlyRetransSegs),
 		fmt.Sprint(snmp.LostSegs),
 		fmt.Sprint(snmp.RepeatSegs),
-		fmt.Sprint(snmp.FECFullShards),
+		fmt.Sprint(snmp.FECFullShardSet),
 		fmt.Sprint(snmp.FECParityShards),
 		fmt.Sprint(snmp.FECErrs),
 		fmt.Sprint(snmp.FECRecovered),
@@ -161,7 +161,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.EarlyRetransSegs = atomic.LoadUint64(&s.EarlyRetransSegs)
 	d.LostSegs = atomic.LoadUint64(&s.LostSegs)
 	d.RepeatSegs = atomic.LoadUint64(&s.RepeatSegs)
-	d.FECFullShards = atomic.LoadUint64(&s.FECFullShards)
+	d.FECFullShardSet = atomic.LoadUint64(&s.FECFullShardSet)
 	d.FECParityShards = atomic.LoadUint64(&s.FECParityShards)
 	d.FECErrs = atomic.LoadUint64(&s.FECErrs)
 	d.FECRecovered = atomic.LoadUint64(&s.FECRecovered)
@@ -196,7 +196,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.EarlyRetransSegs, 0)
 	atomic.StoreUint64(&s.LostSegs, 0)
 	atomic.StoreUint64(&s.RepeatSegs, 0)
-	atomic.StoreUint64(&s.FECFullShards, 0)
+	atomic.StoreUint64(&s.FECFullShardSet, 0)
 	atomic.StoreUint64(&s.FECParityShards, 0)
 	atomic.StoreUint64(&s.FECErrs, 0)
 	atomic.StoreUint64(&s.FECRecovered, 0)

@@ -256,7 +256,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		// case 1: if there's no loss on data shards
 		if numDataShard == dec.dataShards {
 			// do nothing if all shards are present
-			atomic.AddUint64(&DefaultSnmp.FECFullShards, 1)
+			atomic.AddUint64(&DefaultSnmp.FECFullShardSet, 1)
 		} else if numshard >= dec.dataShards { // case 2: loss on data shards, but it's recoverable from parity shards
 			// make the bytes length of each shard equal
 			for k := range shards {
