@@ -183,6 +183,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				dec.dataShards = autoDS
 				dec.parityShards = autoPS
 				dec.shardSize = autoDS + autoPS
+				dec.shardSet = make(map[uint32]*shardHeap)
 				codec, err := reedsolomon.New(autoDS, autoPS)
 				if err != nil {
 					return nil
@@ -284,6 +285,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
 		}
 
+		// update the minimum shard id
 		if _itimediff(shardId, dec.minShardId) > 0 {
 			dec.minShardId = shardId
 			atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.minShardId))
@@ -305,7 +307,7 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
-		if _itimediff(shardId, dec.minShardId) < 0 {
+		if _itimediff(shardId, dec.minShardId) <= 0 {
 			delete(dec.shardSet, shardId)
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 			atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
