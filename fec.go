@@ -300,11 +300,12 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	return
 }
 
-// leaderID returns the leader id for the given shard
+// getShardId calculates the shard id based on the sequence id
 func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 	return seqid / uint32(dec.shardSize)
 }
 
+// flushShards removes shards that are too old from the shardSet
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
 		// discard shards that are too old
