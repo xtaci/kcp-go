@@ -66,6 +66,64 @@ func TestFECEncodeConsecutive(t *testing.T) {
 	}
 }
 
+func TestFECDecodeLoss(t *testing.T) {
+	// This function lose 2 random packet from 10 datashards and 3 parity shards.
+	// so each group of 13 packets should be able to recover from the loss.
+	const dataShards = 10
+	const parityShards = 3
+	const groupSize = dataShards + parityShards
+	const payLoad = 1400
+	decoder := newFECDecoder(dataShards, parityShards)
+	t.Logf("dataSize:%v, paritySize:%v", dataShards, parityShards)
+	sent := 0
+	recovered := 0
+	parityLost := 0
+
+	for group := 0; group < 100; group++ {
+		losses := make(map[int]bool)
+
+		lost := 0
+		for lost < 3 {
+			pos := rand.Intn(dataShards + parityShards)
+			if !losses[pos] {
+				losses[pos] = true
+				if pos >= dataShards {
+					parityLost++
+				}
+				lost++
+			}
+		}
+
+		if len(losses) != parityShards {
+			t.Fatalf("Expected %v losses, got %v", parityShards, len(losses))
+		}
+
+		for i := 0; i < dataShards+parityShards; i++ {
+			sent++
+			if losses[i] {
+				t.Logf("Lost packet %v in group %v", groupSize*group+i, group)
+				continue
+			}
+
+			pkt := make([]byte, payLoad)
+			binary.LittleEndian.PutUint32(pkt, uint32(groupSize*group+i))
+			if i%(dataShards+parityShards) >= dataShards {
+				binary.LittleEndian.PutUint16(pkt[4:], typeParity)
+			} else {
+				binary.LittleEndian.PutUint16(pkt[4:], typeData)
+			}
+
+			rec := decoder.decode(pkt)
+			if len(rec) > 0 {
+				recovered += len(rec)
+				t.Log("Recovered", len(rec), "packets from group", group)
+			}
+		}
+	}
+	t.Log("Total recovered packets:", recovered)
+	t.Log("Total parity lost:", parityLost)
+}
+
 func BenchmarkFECDecode(b *testing.B) {
 	const dataSize = 10
 	const paritySize = 3

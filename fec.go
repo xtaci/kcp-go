@@ -200,7 +200,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 	// get shard
 	shardId := dec.getShardId(in.seqid())
-	if _itimediff(shardId, dec.minShardId) <= 0 {
+	if _itimediff(shardId, dec.minShardId) < 0 {
 		return nil
 	}
 
@@ -228,7 +228,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 	// collected enough shards
 	if shard.Len() >= dec.dataShards {
-		var numshard, numDataShard, maxlen int
+		var numDataShard, maxlen int
 
 		// zero working set for decoding
 		shards := dec.decodeCache
@@ -244,7 +244,6 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			seqid := pkt.seqid()
 			shards[seqid%uint32(dec.shardSize)] = pkt.data()
 			shardsflag[seqid%uint32(dec.shardSize)] = true
-			numshard++
 			if pkt.flag() == typeData {
 				numDataShard++
 			}
@@ -257,7 +256,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		if numDataShard == dec.dataShards {
 			// do nothing if all shards are present
 			atomic.AddUint64(&DefaultSnmp.FECFullShardSet, 1)
-		} else if numshard >= dec.dataShards { // case 2: loss on data shards, but it's recoverable from parity shards
+		} else { // case 2: loss on data shards, but it's recoverable from parity shards
 			// make the bytes length of each shard equal
 			for k := range shards {
 				if shards[k] != nil {
@@ -308,7 +307,7 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
-		if _itimediff(shardId, dec.minShardId) <= 0 {
+		if _itimediff(shardId, dec.minShardId) < 0 {
 			delete(dec.shardSet, shardId)
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
 			atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
