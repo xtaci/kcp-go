@@ -83,7 +83,7 @@ func TestFECDecodeLoss(t *testing.T) {
 		losses := make(map[int]bool)
 
 		lost := 0
-		for lost < 3 {
+		for lost < parityShards {
 			pos := rand.Intn(dataShards + parityShards)
 			if !losses[pos] {
 				losses[pos] = true
