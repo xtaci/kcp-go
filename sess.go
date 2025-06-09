@@ -432,12 +432,6 @@ func (s *UDPSession) Close() error {
 		// try best to send all queued messages especially the data in txqueue
 		s.mu.Lock()
 		s.kcp.flush(false)
-
-		// release pending segments to recyle memory
-		s.kcp.ReleaseTX()
-		if s.fecDecoder != nil {
-			s.fecDecoder.release()
-		}
 		s.mu.Unlock()
 
 		if s.l != nil { // belongs to listener

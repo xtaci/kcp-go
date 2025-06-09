@@ -1074,15 +1074,3 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 func (kcp *KCP) WaitSnd() int {
 	return kcp.snd_buf.Len() + kcp.snd_queue.Len()
 }
-
-// Release all cached outgoing segments
-func (kcp *KCP) ReleaseTX() {
-	kcp.snd_queue.Clear()
-	for seg := range kcp.snd_buf.ForEach {
-		if seg.data != nil {
-			xmitBuf.Put(seg.data)
-		}
-	}
-	kcp.snd_queue = nil
-	kcp.snd_buf = nil
-}
