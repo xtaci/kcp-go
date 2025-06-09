@@ -53,6 +53,7 @@ type Snmp struct {
 	FECErrs             uint64 // incorrect packets recovered from FEC
 	FECParityShards     uint64 // FEC segments received
 	FECShortShards      uint64 // number of data shards that's not enough for recovery
+	FECShardSet         uint64 // number of parity shards that are not yet received
 	RingBufferSndQueue  uint64 // MaxLen of segments in send queue ring buffer
 	RingBufferRcvQueue  uint64 // MaxLen of segments in receive queue ring buffer
 	RingBufferSndBuffer uint64 // MaxLen of segments in send buffer ring buffer
@@ -89,6 +90,7 @@ func (s *Snmp) Header() []string {
 		"FECErrs",
 		"FECRecovered",
 		"FECShortShards",
+		"FECShardSet",
 		"RingBufferSndQueue",
 		"RingBufferRcvQueue",
 		"RingBufferSndBuffer",
@@ -123,6 +125,7 @@ func (s *Snmp) ToSlice() []string {
 		fmt.Sprint(snmp.FECErrs),
 		fmt.Sprint(snmp.FECRecovered),
 		fmt.Sprint(snmp.FECShortShards),
+		fmt.Sprint(snmp.FECShardSet),
 		fmt.Sprint(snmp.RingBufferSndQueue),
 		fmt.Sprint(snmp.RingBufferRcvQueue),
 		fmt.Sprint(snmp.RingBufferSndBuffer),
@@ -156,6 +159,7 @@ func (s *Snmp) Copy() *Snmp {
 	d.FECErrs = atomic.LoadUint64(&s.FECErrs)
 	d.FECRecovered = atomic.LoadUint64(&s.FECRecovered)
 	d.FECShortShards = atomic.LoadUint64(&s.FECShortShards)
+	d.FECShardSet = atomic.LoadUint64(&s.FECShardSet)
 	d.RingBufferSndQueue = atomic.LoadUint64(&s.RingBufferSndQueue)
 	d.RingBufferRcvQueue = atomic.LoadUint64(&s.RingBufferRcvQueue)
 	d.RingBufferSndBuffer = atomic.LoadUint64(&s.RingBufferSndBuffer)
@@ -188,6 +192,7 @@ func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.FECErrs, 0)
 	atomic.StoreUint64(&s.FECRecovered, 0)
 	atomic.StoreUint64(&s.FECShortShards, 0)
+	atomic.StoreUint64(&s.FECShardSet, 0)
 	atomic.StoreUint64(&s.RingBufferSndQueue, 0)
 	atomic.StoreUint64(&s.RingBufferRcvQueue, 0)
 	atomic.StoreUint64(&s.RingBufferSndBuffer, 0)

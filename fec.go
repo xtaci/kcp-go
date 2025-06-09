@@ -211,6 +211,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	if !ok {
 		shard = newShardHeap()
 		dec.shardSet[shardId] = shard
+		atomic.AddUint64(&DefaultSnmp.FECShardSet, 1)
 	}
 
 	// de-duplicate
@@ -240,7 +241,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 			shardsflag[k] = false
 		}
 
-		// pop all packets from the heap
+		// pop all packets from the shard heap
 		for shard.Len() > 0 {
 			pkt := shard.Pop().(fecElement)
 			seqid := pkt.seqid()
@@ -295,6 +296,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				dec.minShardId = shardId
 			}
 			delete(dec.shardSet, shardId) // discard the shards that are not needed anymore
+			atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
 		}
 
 		// flush obsolete shards
@@ -314,6 +316,7 @@ func (dec *fecDecoder) flushShards() {
 		if _itimediff(shardId, dec.minShardId) < 0 {
 			delete(dec.shardSet, shardId)
 			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
+			atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
 		}
 	}
 }
