@@ -285,6 +285,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
 		}
+
 	}
 
 	// update the minimum shard id based on the current shard
@@ -307,7 +308,7 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
 		// discard shards that are too old
-		if _itimediff(shardId, dec.minShardId) < maxShardSets {
+		if _itimediff(shardId, dec.minShardId) > maxShardSets {
 			delete(dec.shardSet, shardId)
 		}
 	}
