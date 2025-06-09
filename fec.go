@@ -63,7 +63,7 @@ func (bts fecPacket) seqid() uint32 { return binary.LittleEndian.Uint32(bts) }
 func (bts fecPacket) flag() uint16  { return binary.LittleEndian.Uint16(bts[4:]) }
 func (bts fecPacket) data() []byte  { return bts[6:] }
 
-// fecElement has auxcilliary time field
+// fecElement has an extra time field
 type fecElement struct {
 	fecPacket
 	ts uint32
@@ -71,8 +71,8 @@ type fecElement struct {
 
 // shardHeap holds a corelated set of datashards from the peers
 type shardHeap struct {
-	packets []fecElement
-	marks   map[uint32]struct{} // to avoid duplicates
+	elements []fecElement
+	marks    map[uint32]struct{} // to avoid duplicates
 }
 
 func newShardHeap() *shardHeap {
@@ -83,22 +83,22 @@ func newShardHeap() *shardHeap {
 	return h
 }
 
-func (h *shardHeap) Len() int { return len(h.packets) }
+func (h *shardHeap) Len() int { return len(h.elements) }
 
 func (h *shardHeap) Less(i, j int) bool {
-	return _itimediff(h.packets[j].seqid(), h.packets[i].seqid()) > 0
+	return _itimediff(h.elements[j].seqid(), h.elements[i].seqid()) > 0
 }
 
-func (h *shardHeap) Swap(i, j int) { h.packets[i], h.packets[j] = h.packets[j], h.packets[i] }
+func (h *shardHeap) Swap(i, j int) { h.elements[i], h.elements[j] = h.elements[j], h.elements[i] }
 func (h *shardHeap) Push(x interface{}) {
-	h.packets = append(h.packets, x.(fecElement))
+	h.elements = append(h.elements, x.(fecElement))
 	h.marks[x.(fecElement).seqid()] = struct{}{}
 }
 
 func (h *shardHeap) Pop() interface{} {
-	n := len(h.packets)
-	x := h.packets[n-1]
-	h.packets = h.packets[0 : n-1]
+	n := len(h.elements)
+	x := h.elements[n-1]
+	h.elements = h.elements[0 : n-1]
 	delete(h.marks, x.seqid())
 	return x
 }
@@ -300,11 +300,12 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	return
 }
 
-// leaderID returns the leader id for the given shard
+// getShardId calculates the shard id based on the sequence id
 func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 	return seqid / uint32(dec.shardSize)
 }
 
+// flushShards removes shards that are too old from the shardSet
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
 		// discard shards that are too old
