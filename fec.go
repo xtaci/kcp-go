@@ -53,6 +53,7 @@ const (
 	fecHeaderSizePlus2 = fecHeaderSize + 2 // plus 2B data size
 	typeData           = 0xf1
 	typeParity         = 0xf2
+	maxShardSets       = 3
 )
 
 // fecPacket is a decoded FEC packet
@@ -240,15 +241,15 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 		// pop all packets from the shard heap
 		for shard.Len() > 0 {
-			pkt := shard.Pop().(fecElement)
-			seqid := pkt.seqid()
-			shards[seqid%uint32(dec.shardSize)] = pkt.data()
+			elem := shard.Pop().(fecElement)
+			seqid := elem.seqid()
+			shards[seqid%uint32(dec.shardSize)] = elem.data()
 			shardsflag[seqid%uint32(dec.shardSize)] = true
-			if pkt.flag() == typeData {
+			if elem.flag() == typeData {
 				numDataShard++
 			}
-			if len(pkt.data()) > maxlen {
-				maxlen = len(pkt.data())
+			if len(elem.data()) > maxlen {
+				maxlen = len(elem.data())
 			}
 		}
 
@@ -284,18 +285,16 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
 		}
-
-		// update the minimum shard id
-		if _itimediff(shardId, dec.minShardId) > 0 {
-			dec.minShardId = shardId
-			atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.minShardId))
-		}
-		delete(dec.shardSet, shardId) // discard the shards that are not needed anymore
-		atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
-
-		// flush obsolete shards
-		dec.flushShards()
 	}
+
+	// update the minimum shard id based on the current shard
+	if _itimediff(shardId, dec.minShardId) > 0 {
+		dec.minShardId = shardId
+		atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.minShardId))
+	}
+
+	// discard shards that are too old
+	dec.flushShards()
 
 	return
 }
@@ -307,12 +306,13 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
-		if _itimediff(shardId, dec.minShardId) < 0 {
+		// discard shards that are too old
+		if _itimediff(shardId, dec.minShardId) < maxShardSets {
 			delete(dec.shardSet, shardId)
-			atomic.AddUint64(&DefaultSnmp.FECShortShards, 1)
-			atomic.AddUint64(&DefaultSnmp.FECShardSet, ^uint64(0))
 		}
 	}
+
+	atomic.StoreUint64(&DefaultSnmp.FECShardSet, uint64(len(dec.shardSet)))
 }
 
 type (
