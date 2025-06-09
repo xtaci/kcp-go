@@ -308,7 +308,8 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
 		// discard shards that are too old
-		if _itimediff(shardId, dec.minShardId) > maxShardSets {
+		if _itimediff(dec.minShardId, shardId) > maxShardSets {
+			//println("flushing shard", shardId, "minShardId", dec.minShardId, _itimediff(dec.minShardId, shardId))
 			delete(dec.shardSet, shardId)
 		}
 	}
