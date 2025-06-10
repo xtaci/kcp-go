@@ -63,15 +63,9 @@ func (bts fecPacket) seqid() uint32 { return binary.LittleEndian.Uint32(bts) }
 func (bts fecPacket) flag() uint16  { return binary.LittleEndian.Uint16(bts[4:]) }
 func (bts fecPacket) data() []byte  { return bts[6:] }
 
-// fecElement has an extra time field
-type fecElement struct {
-	fecPacket
-	ts uint32
-}
-
 // shardHeap holds a corelated set of datashards from the peers
 type shardHeap struct {
-	elements []fecElement
+	elements []fecPacket
 	marks    map[uint32]struct{} // to avoid duplicates
 }
 
@@ -91,8 +85,8 @@ func (h *shardHeap) Less(i, j int) bool {
 
 func (h *shardHeap) Swap(i, j int) { h.elements[i], h.elements[j] = h.elements[j], h.elements[i] }
 func (h *shardHeap) Push(x interface{}) {
-	h.elements = append(h.elements, x.(fecElement))
-	h.marks[x.(fecElement).seqid()] = struct{}{}
+	h.elements = append(h.elements, x.(fecPacket))
+	h.marks[x.(fecPacket).seqid()] = struct{}{}
 }
 
 func (h *shardHeap) Pop() interface{} {
@@ -225,7 +219,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	// insert the packet into the shard heap
 	pkt := fecPacket(xmitBuf.Get().([]byte)[:len(in)])
 	copy(pkt, in)
-	shard.Push(fecElement{pkt, currentMs()})
+	shard.Push(pkt)
 
 	// collected enough shards
 	if shard.Len() >= dec.dataShards {
@@ -241,15 +235,15 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 		// pop all packets from the shard heap
 		for shard.Len() > 0 {
-			elem := shard.Pop().(fecElement)
-			seqid := elem.seqid()
-			shards[seqid%uint32(dec.shardSize)] = elem.data()
+			pkt := shard.Pop().(fecPacket)
+			seqid := pkt.seqid()
+			shards[seqid%uint32(dec.shardSize)] = pkt.data()
 			shardsflag[seqid%uint32(dec.shardSize)] = true
-			if elem.flag() == typeData {
+			if pkt.flag() == typeData {
 				numDataShard++
 			}
-			if len(elem.data()) > maxlen {
-				maxlen = len(elem.data())
+			if len(pkt.data()) > maxlen {
+				maxlen = len(pkt.data())
 			}
 		}
 
