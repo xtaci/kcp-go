@@ -23,7 +23,6 @@
 package kcp
 
 import (
-	"container/heap"
 	"encoding/binary"
 	"sync/atomic"
 	"time"
@@ -152,45 +151,6 @@ func (seg *segment) encode(ptr []byte) []byte {
 	return ptr
 }
 
-// segmentHeap is a min-heap of segments, used for receiving segments in order
-type segmentHeap struct {
-	segments []segment
-	marks    map[uint32]struct{} // to avoid duplicates
-}
-
-func newSegmentHeap() *segmentHeap {
-	h := &segmentHeap{
-		marks: make(map[uint32]struct{}),
-	}
-	heap.Init(h)
-	return h
-}
-
-func (h *segmentHeap) Len() int { return len(h.segments) }
-
-func (h *segmentHeap) Less(i, j int) bool {
-	return _itimediff(h.segments[j].sn, h.segments[i].sn) > 0
-}
-
-func (h *segmentHeap) Swap(i, j int) { h.segments[i], h.segments[j] = h.segments[j], h.segments[i] }
-func (h *segmentHeap) Push(x interface{}) {
-	h.segments = append(h.segments, x.(segment))
-	h.marks[x.(segment).sn] = struct{}{}
-}
-
-func (h *segmentHeap) Pop() interface{} {
-	n := len(h.segments)
-	x := h.segments[n-1]
-	h.segments = h.segments[0 : n-1]
-	delete(h.marks, x.sn)
-	return x
-}
-
-func (h *segmentHeap) Has(sn uint32) bool {
-	_, exists := h.marks[sn]
-	return exists
-}
-
 // KCP defines a single KCP connection
 type KCP struct {
 	conv, mtu, mss, state                  uint32
@@ -210,7 +170,15 @@ type KCP struct {
 	snd_queue *RingBuffer[segment]
 	rcv_queue *RingBuffer[segment]
 	snd_buf   *RingBuffer[segment]
-	rcv_buf   *segmentHeap
+	// `rcv_buf` is a slice of size `rcv_wnd` that stores incoming segments.
+	// `rcv_buf_nxt` is the index of `rcv_buf` that stores the segment with sn=`rcv_nxt`.
+	// Simlarly, `rcv_buf` at `(rcv_buf_nxt + X) mod rcv_wnd` stores segment with sn=`rcv_nxt + X`.
+	//
+	// A segment that has mismatched `sn` or nil `data` in `rcv_buf` represents a missing state.
+	// Though `rcv_nxt mod rcv_wnd` can be directly used as the index of next segment, it has complexity
+	// on corner case handling when `uint32_max mod rcv_wnd` is not zero.
+	rcv_buf     []segment
+	rcv_buf_nxt int
 
 	acklist []ackItem
 
@@ -247,7 +215,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.snd_buf = NewRingBuffer[segment](IKCP_WND_SND * 2)
 	kcp.rcv_queue = NewRingBuffer[segment](IKCP_WND_RCV * 2)
 	kcp.snd_queue = NewRingBuffer[segment](IKCP_WND_SND * 2)
-	kcp.rcv_buf = newSegmentHeap()
+	kcp.rcv_buf = make([]segment, IKCP_WND_RCV)
 	return kcp
 }
 
@@ -328,17 +296,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	}
 
 	// move available data from rcv_buf -> rcv_queue
-	for kcp.rcv_buf.Len() > 0 {
-		seg := heap.Pop(kcp.rcv_buf).(segment)
-		if seg.sn == kcp.rcv_nxt && kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
-			kcp.rcv_queue.Push(seg)
-			kcp.rcv_nxt++
-		} else {
-			// push back segment
-			heap.Push(kcp.rcv_buf, seg)
-			break
-		}
-	}
+	kcp.fill_rcv_queue()
 
 	// fast recover
 	if kcp.rcv_queue.Len() < int(kcp.rcv_wnd) && fast_recover {
@@ -505,38 +463,48 @@ func (kcp *KCP) ack_push(sn, ts uint32) {
 	kcp.acklist = append(kcp.acklist, ackItem{sn, ts})
 }
 
+// move available data from rcv_buf -> rcv_queue
+func (kcp *KCP) fill_rcv_queue() {
+	for range kcp.rcv_wnd {
+		if kcp.rcv_queue.Len() >= int(kcp.rcv_wnd) {
+			return
+		}
+		if seg := &kcp.rcv_buf[kcp.rcv_buf_nxt]; seg.sn == kcp.rcv_nxt && seg.data != nil {
+			kcp.rcv_queue.Push(*seg)
+			kcp.rcv_nxt++
+			kcp.rcv_buf_nxt = (kcp.rcv_buf_nxt + 1) % len(kcp.rcv_buf)
+			seg.data = nil
+		} else {
+			return
+		}
+	}
+}
+
 // returns true if data has repeated
 func (kcp *KCP) parse_data(newseg segment) bool {
 	sn := newseg.sn
+	dist_from_rcv_nxt := int(_itimediff(sn, kcp.rcv_nxt))
 	if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) >= 0 ||
-		_itimediff(sn, kcp.rcv_nxt) < 0 {
+		dist_from_rcv_nxt < 0 {
 		return true
 	}
 
 	repeat := false
-	if !kcp.rcv_buf.Has(sn) {
+	insert_pos := kcp.rcv_buf_nxt
+	if dist_from_rcv_nxt > 0 {
+		insert_pos = (insert_pos + dist_from_rcv_nxt) % len(kcp.rcv_buf)
+	}
+	if seg := &kcp.rcv_buf[insert_pos]; seg.sn != sn || seg.data == nil {
 		// replicate the content if it's new
 		dataCopy := xmitBuf.Get().([]byte)[:len(newseg.data)]
 		copy(dataCopy, newseg.data)
-		newseg.data = dataCopy
-
-		// insert the new segment into rcv_buf
-		heap.Push(kcp.rcv_buf, newseg)
+		seg.sn = sn
+		seg.data = dataCopy
+	} else {
+		repeat = true
 	}
 
-	// move available data from rcv_buf -> rcv_queue
-	for kcp.rcv_buf.Len() > 0 {
-		seg := heap.Pop(kcp.rcv_buf).(segment)
-		if seg.sn == kcp.rcv_nxt && kcp.rcv_queue.Len() < int(kcp.rcv_wnd) {
-			kcp.rcv_queue.Push(seg)
-			kcp.rcv_nxt++
-		} else {
-			// push back segment
-			heap.Push(kcp.rcv_buf, seg)
-			break
-		}
-	}
-
+	kcp.fill_rcv_queue()
 	return repeat
 }
 
@@ -1066,6 +1034,20 @@ func (kcp *KCP) WndSize(sndwnd, rcvwnd int) int {
 	}
 	if rcvwnd > 0 {
 		kcp.rcv_wnd = uint32(rcvwnd)
+
+		ori_rcv_buf := kcp.rcv_buf
+		ori_rcv_buf_nxt := kcp.rcv_buf_nxt
+
+		kcp.rcv_buf = make([]segment, rcvwnd)
+		kcp.rcv_buf_nxt = 0
+
+		// optional compaction
+		for i := range min(len(ori_rcv_buf), rcvwnd) {
+			if ori_seg := &ori_rcv_buf[ori_rcv_buf_nxt]; ori_seg.sn == kcp.rcv_nxt+uint32(i) && ori_seg.data != nil {
+				kcp.rcv_buf[i] = *ori_seg
+			}
+			ori_rcv_buf_nxt = (ori_rcv_buf_nxt + 1) % len(ori_rcv_buf)
+		}
 	}
 	return 0
 }
