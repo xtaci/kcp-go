@@ -29,6 +29,8 @@ import (
 	"testing"
 	"time"
 
+	"container/heap"
+
 	"github.com/xtaci/lossyconn"
 )
 
@@ -152,5 +154,31 @@ func BenchmarkFlush(b *testing.B) {
 		mu.Lock()
 		kcp.flush(false)
 		mu.Unlock()
+	}
+}
+
+// TestSegmentHeap tests the segmentHeap data structure
+func TestSegmentHeap(t *testing.T) {
+	h := newSegmentHeap()
+	segments := []segment{
+		{sn: 1},
+		{sn: 2},
+		{sn: 3},
+	}
+
+	for _, seg := range segments {
+		heap.Push(h, seg)
+		t.Logf("pushed segment with seq %d", seg.sn)
+	}
+
+	if h.Len() != len(segments) {
+		t.Errorf("expected length %d, got %d", len(segments), h.Len())
+	}
+
+	for i := 0; i < len(segments); i++ {
+		seg := heap.Pop(h).(segment)
+		if seg.sn != segments[i].sn {
+			t.Errorf("expected seq %d, got %d", segments[i].sn, seg.sn)
+		}
 	}
 }
