@@ -825,11 +825,8 @@ func (s *UDPSession) kcpInput(data []byte) {
 			// If there're some packets recovered from FEC, feed them into kcp
 			for _, r := range recovers {
 				if len(r) >= 2 { // must be larger than 2bytes
-					sz := binary.LittleEndian.Uint16(r)
-					if int(sz) <= len(r) && sz >= 2 {
-						if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret != 0 {
-							kcpInErrors++
-						}
+					if ret := s.kcp.Input(r[2:], false, s.ackNoDelay); ret != 0 {
+						kcpInErrors++
 					}
 				}
 				// recycle the buffer
