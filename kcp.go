@@ -792,12 +792,11 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			break
 		}
 
-		seg, ok := kcp.snd_queue.Pop()
+		newseg, ok := kcp.snd_queue.Pop()
 		if !ok {
 			break
 		}
 
-		newseg := seg
 		newseg.conv = kcp.conv
 		newseg.cmd = IKCP_CMD_PUSH
 		newseg.sn = kcp.snd_nxt
