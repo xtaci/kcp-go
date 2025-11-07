@@ -32,6 +32,9 @@ import (
 func (s *UDPSession) defaultReadLoop() {
 	buf := make([]byte, mtuLimit)
 	var src string
+	if s.remote != nil {
+		src = s.remote.String() // set source address if remote is known
+	}
 	for {
 		if n, addr, err := s.conn.ReadFrom(buf); err == nil {
 			if s.isClosed() {

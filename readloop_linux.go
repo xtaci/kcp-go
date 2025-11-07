@@ -45,6 +45,9 @@ func (s *UDPSession) readLoop() {
 
 	// x/net version
 	var src string
+	if s.remote != nil {
+		src = s.remote.String() // set source address if remote is known
+	}
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
