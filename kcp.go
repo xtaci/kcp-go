@@ -825,16 +825,16 @@ func (kcp *KCP) flush(ackOnly bool) uint32 {
 			needsend = true
 			segment.rto = kcp.rx_rto
 			segment.resendts = current + segment.rto
-		} else if segment.fastack >= resent { // fast retransmit
+		} else if segment.fastack >= resent && segment.fastack != 0xFFFFFFFF { // fast retransmit
 			needsend = true
-			segment.fastack = 0
+			segment.fastack = 0xFFFFFFFF // must wait until RTO to reset
 			segment.rto = kcp.rx_rto
 			segment.resendts = current + segment.rto
 			change++
 			fastRetransSegs++
-		} else if segment.fastack > 0 && newSegsCount == 0 { // early retransmit
+		} else if segment.fastack > 0 && segment.fastack != 0xFFFFFFFF && newSegsCount == 0 { // early retransmit
 			needsend = true
-			segment.fastack = 0
+			segment.fastack = 0xFFFFFFFF
 			segment.rto = kcp.rx_rto
 			segment.resendts = current + segment.rto
 			change++
