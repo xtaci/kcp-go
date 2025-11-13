@@ -680,7 +680,8 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		kcp.flush(false)
 	} else if ackNoDelay && len(kcp.acklist) > 0 { // ack immediately
 		kcp.flush(true)
-	} else if len(kcp.acklist) >= int(kcp.mtu/IKCP_OVERHEAD) { // flash ack
+	} else if len(kcp.acklist) >= int(kcp.mtu/IKCP_OVERHEAD) { // clocking
+		// this serves as the clock for low-latency network.(i.e. the latency is less than the interval.)
 		kcp.flush(true)
 	}
 	return 0
