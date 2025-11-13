@@ -521,24 +521,27 @@ func sinkclient(b *testing.B, nbytes int) {
 }
 
 func echo_tester(cli net.Conn, msglen, msgcount int) error {
-	buf := make([]byte, msglen)
-	for i := 0; i < msgcount; i++ {
-		// send packet
-		if _, err := cli.Write(buf); err != nil {
-			return err
+	go func() {
+		buf := make([]byte, msglen)
+		for i := 0; i < msgcount; i++ {
+			// send packet
+			if _, err := cli.Write(buf); err != nil {
+				panic(err)
+			}
 		}
+	}()
 
-		// receive packet
-		nrecv := 0
-		for {
-			n, err := cli.Read(buf)
-			if err != nil {
-				return err
-			} else {
-				nrecv += n
-				if nrecv == msglen {
-					break
-				}
+	// receive packet
+	nrecv := 0
+	buf := make([]byte, msglen)
+	for {
+		n, err := cli.Read(buf)
+		if err != nil {
+			return err
+		} else {
+			nrecv += n
+			if nrecv == msglen*msgcount {
+				break
 			}
 		}
 	}
