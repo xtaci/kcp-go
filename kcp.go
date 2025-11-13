@@ -684,7 +684,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 	}
 
 	if windowSlides || shouldFastAck { // if window has slided
-		// if a fastack has triggered, flush immediately
+		// or, if a fastack has triggered, flush immediately
 		kcp.flush(false)
 	} else if len(kcp.acklist) >= int(kcp.mtu/IKCP_OVERHEAD) { // clocking
 		// this serves as the clock for low-latency network.(i.e. the latency is less than the interval.)
