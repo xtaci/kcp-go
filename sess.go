@@ -76,6 +76,9 @@ const (
 	// accept backlog
 	acceptBacklog = 128
 
+	// dev backlog
+	devBacklog = 2048
+
 	// max latency for consecutive FEC encoding, in millisecond
 	maxFECEncodeLatency = 500
 )
@@ -180,7 +183,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chSocketReadError = make(chan struct{})
 	sess.chSocketWriteError = make(chan struct{})
-	sess.chPostProcessing = make(chan []byte, acceptBacklog)
+	sess.chPostProcessing = make(chan []byte, devBacklog)
 	sess.remote = remote
 	sess.conn = conn
 	sess.ownConn = ownConn
