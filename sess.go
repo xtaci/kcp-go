@@ -81,6 +81,9 @@ const (
 
 	// max latency for consecutive FEC encoding, in millisecond
 	maxFECEncodeLatency = 500
+
+	// max batch size
+	maxBatchSize = 64
 )
 
 var (
@@ -611,8 +614,7 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 //
 //	KCP output -> FEC encoding -> CRC32 integrity -> Encryption -> TxQueue
 func (s *UDPSession) postProcess() {
-	txqueue := make([]ipv4.Message, 0, acceptBacklog)
-	chCork := make(chan struct{}, 1)
+	txqueue := make([]ipv4.Message, 0, devBacklog)
 	chDie := s.die
 
 	for {
@@ -665,18 +667,7 @@ func (s *UDPSession) postProcess() {
 			}
 
 			// notify chCork only when chPostProcessing is empty
-			if len(s.chPostProcessing) == 0 {
-				select {
-				case chCork <- struct{}{}:
-				default:
-				}
-			}
-
-			// re-enable die channel
-			chDie = s.die
-
-		case <-chCork: // emulate a corked socket
-			if len(txqueue) > 0 {
+			if len(s.chPostProcessing) == 0 || len(txqueue) >= maxBatchSize {
 				s.tx(txqueue)
 				// recycle
 				for k := range txqueue {
@@ -691,7 +682,7 @@ func (s *UDPSession) postProcess() {
 
 		case <-chDie:
 			// remaining packets in txqueue should be sent out
-			if len(chCork) > 0 || len(s.chPostProcessing) > 0 {
+			if len(s.chPostProcessing) > 0 {
 				chDie = nil // block chDie temporarily
 				continue
 			}
