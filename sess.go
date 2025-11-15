@@ -49,7 +49,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
-	"fmt"
 	"hash/crc32"
 	"io"
 	"net"
@@ -694,7 +693,7 @@ func (s *UDPSession) postProcess() {
 				if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
 					err := limiter.WaitN(ctx, bytesToSend)
 					if err != nil {
-						fmt.Println("Limiter error:", err)
+						panic(err)
 					}
 				}
 				s.tx(txqueue)
