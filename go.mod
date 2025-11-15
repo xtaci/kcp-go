@@ -8,6 +8,7 @@ require (
 	github.com/xtaci/lossyconn v0.0.0-20190602105132-8df528c0c9ae
 	golang.org/x/crypto v0.36.0
 	golang.org/x/net v0.38.0
+	golang.org/x/time v0.14.0
 )
 
 require (
@@ -18,6 +19,6 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-go 1.23.0
+go 1.24.0
 
 toolchain go1.24.2

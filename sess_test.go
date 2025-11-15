@@ -78,6 +78,7 @@ func dialEcho(port int) (*UDPSession, error) {
 	sess.SetACKNoDelay(true)
 	sess.SetACKNoDelay(false)
 	sess.SetDeadline(time.Now().Add(time.Minute))
+	sess.SetRateLimit(200 * 1024 * 1024)
 	return sess, err
 }
 
@@ -214,6 +215,7 @@ func handleEcho(conn *UDPSession) {
 	conn.SetACKNoDelay(false)
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
+	conn.SetRateLimit(200 * 1024 * 1024)
 	buf := make([]byte, 65536)
 	for {
 		n, err := conn.Read(buf)
