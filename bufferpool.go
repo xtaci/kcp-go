@@ -36,7 +36,7 @@ type bufferPool struct {
 func newBufferPool(size int) *bufferPool {
 	return &bufferPool{
 		xmitBuf: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return make([]byte, size)
 			},
 		},
