@@ -24,11 +24,10 @@ package kcp
 
 import "sync"
 
+// A system-wide packet buffer shared among sending, receiving and FEC
+// to mitigate high-frequency memory allocation of packets.
 var defaultBufferPool = newBufferPool(mtuLimit)
 
-// a system-wide packet buffer shared among sending, receiving and FEC
-// to mitigate high-frequency memory allocation for packets, bytes from xmitBuf
-// is aligned to 64bit
 type bufferPool struct {
 	xmitBuf sync.Pool
 }
