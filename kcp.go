@@ -54,6 +54,13 @@ const (
 	IKCP_SN_OFFSET   = 12
 )
 
+type PacketType int8
+
+const (
+	IKCP_PACKET_REGULAR PacketType = iota
+	IKCP_PACKET_FEC
+)
+
 type FlushType int8
 
 const (
@@ -594,7 +601,7 @@ func (kcp *KCP) parse_data(newseg segment) bool {
 // codecs.
 //
 // 'ackNoDelay' will trigger immediate ACK, but surely it will not be efficient in bandwidth
-func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
+func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 	snd_una := kcp.snd_una
 	if len(data) < IKCP_OVERHEAD {
 		return -1
@@ -639,7 +646,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 		}
 
 		// only trust window updates from regular packets. i.e: latest update
-		if regular {
+		if pktType == IKCP_PACKET_REGULAR {
 			kcp.rmt_wnd = uint32(wnd)
 		}
 		if kcp.parse_una(una) > 0 {
@@ -670,10 +677,10 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 					repeat = kcp.parse_data(seg)
 				}
 			}
-			if regular && repeat {
+			if pktType == IKCP_PACKET_REGULAR && repeat {
 				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
-			kcp.DebugLog(IKCP_LOG_IN_PUSH, "conv", conv, "sn", sn, "una", una, "ts", ts, "regular", regular, "repeat", repeat)
+			kcp.DebugLog(IKCP_LOG_IN_PUSH, "conv", conv, "sn", sn, "una", una, "ts", ts, "packet type", pktType, "repeat", repeat)
 		} else if cmd == IKCP_CMD_WASK {
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
 			// tell remote my window size
@@ -692,7 +699,7 @@ func (kcp *KCP) Input(data []byte, regular, ackNoDelay bool) int {
 
 	// update rtt with the latest ts
 	// ignore the FEC packet
-	if flag != 0 && regular {
+	if flag != 0 && pktType == IKCP_PACKET_REGULAR {
 		current := currentMs()
 		if _itimediff(current, latest) >= 0 {
 			kcp.update_ack(_itimediff(current, latest))

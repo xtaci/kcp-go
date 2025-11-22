@@ -829,7 +829,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 			// FEC decoding
 			recovers := s.fecDecoder.decode(f)
 			if f.flag() == typeData {
-				if ret := s.kcp.Input(data[fecHeaderSizePlus2:], true, s.ackNoDelay); ret != 0 {
+				if ret := s.kcp.Input(data[fecHeaderSizePlus2:], IKCP_PACKET_REGULAR, s.ackNoDelay); ret != 0 {
 					kcpInErrors++
 				}
 			}
@@ -839,7 +839,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 				if len(r) >= 2 { // must be larger than 2bytes
 					sz := binary.LittleEndian.Uint16(r)
 					if int(sz) <= len(r) && sz >= 2 {
-						if ret := s.kcp.Input(r[2:sz], false, s.ackNoDelay); ret != 0 {
+						if ret := s.kcp.Input(r[2:sz], IKCP_PACKET_FEC, s.ackNoDelay); ret != 0 {
 							kcpInErrors++
 						}
 					}
@@ -865,7 +865,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		}
 	} else {
 		s.mu.Lock()
-		if ret := s.kcp.Input(data, true, s.ackNoDelay); ret != 0 {
+		if ret := s.kcp.Input(data, IKCP_PACKET_REGULAR, s.ackNoDelay); ret != 0 {
 			kcpInErrors++
 		}
 		if n := s.kcp.PeekSize(); n > 0 {
