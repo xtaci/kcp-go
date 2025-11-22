@@ -200,8 +200,8 @@ func BenchmarkDebugLog(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		// 在 Release 模式下，这行代码会被编译器完全“擦除”
-		// 就像这一行不存在一样，连参数的 Interface 转换都不会发生
+		// In release mode, this line of code will be completely 'erased' by the compiler,
+		// as if it doesn't exist at all, and even the parameter's interface conversion will not occur.
 		kcp.DebugLog(IKCP_LOG_OUT_WASK, "conv", kcp.conv, "wnd", kcp.snd_wnd)
 	}
 }
