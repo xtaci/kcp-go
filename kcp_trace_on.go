@@ -1,9 +1,9 @@
 //go:build debug
 
-// only build tag debug is set, then DebugLog will be enabled in compile time
+// only build tag debug is set, then debugLog will be enabled in compile time
 package kcp
 
-func (kcp *KCP) DebugLog(logtype KCPLogType, args ...any) {
+func (kcp *KCP) debugLog(logtype KCPLogType, args ...any) {
 	if kcp.logmask&logtype == 0 {
 		return
 	}
@@ -11,29 +11,29 @@ func (kcp *KCP) DebugLog(logtype KCPLogType, args ...any) {
 	var msg string
 	switch logtype {
 	case IKCP_LOG_OUTPUT:
-		msg = "kcp output"
+		msg = "[KCP OUTPUT]"
 	case IKCP_LOG_INPUT:
-		msg = "kcp input"
+		msg = "[KCP INPUT]"
 	case IKCP_LOG_SEND:
-		msg = "kcp send"
+		msg = "[KCP SEND]"
 	case IKCP_LOG_RECV:
-		msg = "kcp recv"
+		msg = "[KCP RECV]"
 	case IKCP_LOG_OUT_ACK:
-		msg = "kcp output ack"
+		msg = "[KCP OUTPUT ACK]"
 	case IKCP_LOG_OUT_PUSH:
-		msg = "kcp output push"
+		msg = "[KCP OUTPUT PUSH]"
 	case IKCP_LOG_OUT_WASK:
-		msg = "kcp output wask"
+		msg = "[KCP OUTPUT WASK]"
 	case IKCP_LOG_OUT_WINS:
-		msg = "kcp output wins"
+		msg = "[KCP OUTPUT WINS]"
 	case IKCP_LOG_IN_ACK:
-		msg = "kcp input ack"
+		msg = "[KCP INPUT ACK]"
 	case IKCP_LOG_IN_PUSH:
-		msg = "kcp input push"
+		msg = "[KCP INPUT PUSH]"
 	case IKCP_LOG_IN_WASK:
-		msg = "kcp input wask"
+		msg = "[KCP INPUT WASK]"
 	case IKCP_LOG_IN_WINS:
-		msg = "kcp input wins"
+		msg = "[KCP INPUT WINS]"
 	}
-	kcp.logoutput(msg, args...)
+	kcp.log(msg, args...)
 }

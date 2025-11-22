@@ -695,7 +695,7 @@ func (s *UDPSession) postProcess() {
 					}
 				}
 				s.tx(txqueue)
-				s.kcp.DebugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
+				s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
 				// recycle
 				for k := range txqueue {
 					defaultBufferPool.Put(txqueue[k].Buffers[0])

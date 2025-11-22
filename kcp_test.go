@@ -196,12 +196,12 @@ func BenchmarkDebugLog(b *testing.B) {
 		conv:    123,
 		snd_wnd: 456,
 	}
-	kcp.logoutput = slog.Debug
+	kcp.log = slog.Debug
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// In release mode, this line of code will be completely 'erased' by the compiler,
 		// as if it doesn't exist at all, and even the parameter's interface conversion will not occur.
-		kcp.DebugLog(IKCP_LOG_OUT_WASK, "conv", kcp.conv, "wnd", kcp.snd_wnd)
+		kcp.debugLog(IKCP_LOG_OUT_WASK, "conv", kcp.conv, "wnd", kcp.snd_wnd)
 	}
 }

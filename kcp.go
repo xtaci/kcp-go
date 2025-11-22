@@ -259,7 +259,7 @@ type KCP struct {
 	buffer []byte
 	output output_callback
 
-	logoutput logoutput_callback
+	log logoutput_callback
 }
 
 type ackItem struct {
@@ -367,7 +367,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		n += len(seg.data)
 		kcp.recycleSegment(&seg)
 		if seg.frg == 0 {
-			kcp.DebugLog(IKCP_LOG_RECV, "stream", kcp.stream, "conv", kcp.conv, "sn", seg.sn, "ts", seg.ts, "datalen", n)
+			kcp.debugLog(IKCP_LOG_RECV, "stream", kcp.stream, "conv", kcp.conv, "sn", seg.sn, "ts", seg.ts, "datalen", n)
 			break
 		}
 	}
@@ -401,7 +401,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 		return -1
 	}
 
-	kcp.DebugLog(IKCP_LOG_SEND, "stream", kcp.stream, "conv", kcp.conv, "datalen", len(buffer))
+	kcp.debugLog(IKCP_LOG_SEND, "stream", kcp.stream, "conv", kcp.conv, "datalen", len(buffer))
 
 	// append to previous segment in streaming mode (if possible)
 	if kcp.stream != 0 {
@@ -634,7 +634,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 		data = ikcp_decode32u(data, &una)
 		data = ikcp_decode32u(data, &length)
 
-		kcp.DebugLog(IKCP_LOG_INPUT, "conv", conv, "cmd", cmd, "frg", frg, "wnd", wnd, "ts", ts, "sn", sn, "una", una, "len", length, "datalen", len(data))
+		kcp.debugLog(IKCP_LOG_INPUT, "conv", conv, "cmd", cmd, "frg", frg, "wnd", wnd, "ts", ts, "sn", sn, "una", una, "len", length, "datalen", len(data))
 
 		if len(data) < int(length) {
 			return -2
@@ -655,7 +655,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 		kcp.shrink_buf()
 
 		if cmd == IKCP_CMD_ACK {
-			kcp.DebugLog(IKCP_LOG_IN_ACK, "conv", conv, "sn", sn, "una", una, "ts", ts, "rto", kcp.rx_rto)
+			kcp.debugLog(IKCP_LOG_IN_ACK, "conv", conv, "sn", sn, "una", una, "ts", ts, "rto", kcp.rx_rto)
 			kcp.parse_ack(sn)
 			flushSegments = flushSegments || kcp.parse_fastack(sn, ts)
 			flag |= 1
@@ -680,14 +680,14 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 			if pktType == IKCP_PACKET_REGULAR && repeat {
 				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
-			kcp.DebugLog(IKCP_LOG_IN_PUSH, "conv", conv, "sn", sn, "una", una, "ts", ts, "packet type", pktType, "repeat", repeat)
+			kcp.debugLog(IKCP_LOG_IN_PUSH, "conv", conv, "sn", sn, "una", una, "ts", ts, "packettype", pktType, "repeat", repeat)
 		} else if cmd == IKCP_CMD_WASK {
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
 			// tell remote my window size
 			kcp.probe |= IKCP_ASK_TELL
-			kcp.DebugLog(IKCP_LOG_IN_WASK, "conv", conv, "wnd", wnd, "ts", ts)
+			kcp.debugLog(IKCP_LOG_IN_WASK, "conv", conv, "wnd", wnd, "ts", ts)
 		} else if cmd == IKCP_CMD_WINS {
-			kcp.DebugLog(IKCP_LOG_IN_WINS, "conv", conv, "wnd", wnd, "ts", ts)
+			kcp.debugLog(IKCP_LOG_IN_WINS, "conv", conv, "wnd", wnd, "ts", ts)
 		} else {
 			return -3
 		}
@@ -806,7 +806,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 			if _itimediff(ack.sn, kcp.rcv_nxt) >= 0 || len(kcp.acklist)-1 == i {
 				seg.sn, seg.ts = ack.sn, ack.ts
 				ptr = seg.encode(ptr)
-				kcp.DebugLog(IKCP_LOG_OUT_ACK, "conv", seg.conv, "sn", seg.sn, "una", seg.una, "ts", seg.ts)
+				kcp.debugLog(IKCP_LOG_OUT_ACK, "conv", seg.conv, "sn", seg.sn, "una", seg.una, "ts", seg.ts)
 			}
 		}
 		kcp.acklist = kcp.acklist[0:0]
@@ -843,7 +843,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 		seg.cmd = IKCP_CMD_WASK
 		makeSpace(IKCP_OVERHEAD)
 		ptr = seg.encode(ptr)
-		kcp.DebugLog(IKCP_LOG_OUT_WASK, "conv", seg.conv, "wnd", seg.wnd, "ts", seg.ts)
+		kcp.debugLog(IKCP_LOG_OUT_WASK, "conv", seg.conv, "wnd", seg.wnd, "ts", seg.ts)
 	}
 
 	// flush window probing commands
@@ -851,7 +851,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 		seg.cmd = IKCP_CMD_WINS
 		makeSpace(IKCP_OVERHEAD)
 		ptr = seg.encode(ptr)
-		kcp.DebugLog(IKCP_LOG_OUT_WINS, "conv", seg.conv, "wnd", seg.wnd, "ts", seg.ts)
+		kcp.debugLog(IKCP_LOG_OUT_WINS, "conv", seg.conv, "wnd", seg.wnd, "ts", seg.ts)
 	}
 
 	kcp.probe = 0
@@ -944,7 +944,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 				copy(ptr, segment.data)
 				ptr = ptr[len(segment.data):]
 
-				kcp.DebugLog(IKCP_LOG_OUT_PUSH, "conv", seg.conv, "sn", seg.sn, "una", seg.una, "ts", seg.ts)
+				kcp.debugLog(IKCP_LOG_OUT_PUSH, "conv", seg.conv, "sn", seg.sn, "una", seg.una, "ts", seg.ts)
 
 				if segment.xmit >= kcp.dead_link {
 					kcp.state = 0xFFFFFFFF
@@ -1161,5 +1161,5 @@ func (kcp *KCP) SetLogger(mask KCPLogType, logger logoutput_callback) {
 		return
 	}
 	kcp.logmask = mask
-	kcp.logoutput = logger
+	kcp.log = logger
 }
