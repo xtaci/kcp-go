@@ -23,13 +23,13 @@
 package kcp
 
 import (
+	"container/heap"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"testing"
 	"time"
-
-	"container/heap"
 
 	"github.com/xtaci/lossyconn"
 )
@@ -180,5 +180,28 @@ func TestSegmentHeap(t *testing.T) {
 		if seg.sn != segments[i].sn {
 			t.Errorf("expected seq %d, got %d", segments[i].sn, seg.sn)
 		}
+	}
+}
+
+// BenchmarkDebugLog test DebugLog cost time with build tags debug on/off
+// trace log on:
+//
+//	go test -benchmem -run=^$ -bench ^BenchmarkDebugLog$ -tags debug
+//
+// trace log off:
+//
+//	go test -benchmem -run=^$ -bench ^BenchmarkDebugLog$
+func BenchmarkDebugLog(b *testing.B) {
+	kcp := &KCP{
+		conv:    123,
+		snd_wnd: 456,
+	}
+	kcp.logoutput = slog.Debug
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// 在 Release 模式下，这行代码会被编译器完全“擦除”
+		// 就像这一行不存在一样，连参数的 Interface 转换都不会发生
+		kcp.DebugLog(IKCP_LOG_OUT_WASK, "conv", kcp.conv, "wnd", kcp.snd_wnd)
 	}
 }
