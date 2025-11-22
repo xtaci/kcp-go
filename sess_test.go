@@ -29,9 +29,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,9 +43,11 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-var baseport = uint32(10000)
-var key = []byte("testkey")
-var pass = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
+var (
+	baseport = uint32(10000)
+	key      = []byte("testkey")
+	pass     = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
+)
 
 func init() {
 	go func() {
@@ -54,10 +58,10 @@ func init() {
 }
 
 func dialEcho(port int) (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewNoneBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
@@ -101,10 +105,10 @@ func dialSink(port int) (*UDPSession, error) {
 }
 
 func dialTinyBufferEcho(port int) (*UDPSession, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewNoneBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
@@ -115,18 +119,19 @@ func dialTinyBufferEcho(port int) (*UDPSession, error) {
 
 // ////////////////////////
 func listenEcho(port int) (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewNoneBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 1)
 }
+
 func listenTinyBufferEcho(port int) (net.Listener, error) {
-	//block, _ := NewNoneBlockCrypt(pass)
-	//block, _ := NewSimpleXORBlockCrypt(pass)
-	//block, _ := NewTEABlockCrypt(pass[:16])
-	//block, _ := NewAESBlockCrypt(pass)
+	// block, _ := NewNoneBlockCrypt(pass)
+	// block, _ := NewSimpleXORBlockCrypt(pass)
+	// block, _ := NewTEABlockCrypt(pass[:16])
+	// block, _ := NewAESBlockCrypt(pass)
 	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 }
@@ -269,7 +274,7 @@ func TestTimeout(t *testing.T) {
 	}
 	buf := make([]byte, 10)
 
-	//timeout
+	// timeout
 	cli.SetDeadline(time.Now().Add(time.Second))
 	<-time.After(2 * time.Second)
 	n, err := cli.Read(buf)
@@ -788,7 +793,7 @@ func TestSessionReadAfterClosed(t *testing.T) {
 	check(c1, c2)
 	c1.Close()
 	c2.Close()
-	//log.Println("conv id 0 is closed")
+	// log.Println("conv id 0 is closed")
 
 	c1, err = NewConn3(4321, uc.LocalAddr(), nil, 0, 0, us)
 	if err != nil {
@@ -799,4 +804,54 @@ func TestSessionReadAfterClosed(t *testing.T) {
 		panic(err)
 	}
 	check(c1, c2)
+}
+
+func newLoggerWithMilliseconds() *slog.Logger {
+	timeFormat := "2006-01-02 15:04:05.000"
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if a.Key == slog.TimeKey {
+				a.Value = slog.StringValue(time.Now().Format(timeFormat))
+			}
+			return a
+		},
+	})
+	return slog.New(handler)
+}
+
+// TestSetLogger if want logging kcp trace need set build tags with debug
+// trace log on:
+//
+//	go test -run ^TestSetLogger$ -tags debug
+//
+// trace log off:
+//
+//	go test -run ^TestSetLogger$
+func TestSetLogger(t *testing.T) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+	cli.SetWriteDelay(true)
+	cli.SetDUP(1)
+	cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
+	const N = 100
+	buf := make([]byte, 10)
+	for i := 0; i < N; i++ {
+		msg := fmt.Sprintf("trace%v", i)
+		cli.Write([]byte(msg))
+		if n, err := cli.Read(buf); err == nil {
+			if string(buf[:n]) != msg {
+				t.Fail()
+			}
+		} else {
+			panic(err)
+		}
+	}
+	cli.Close()
 }

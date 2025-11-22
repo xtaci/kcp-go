@@ -607,6 +607,11 @@ func (s *UDPSession) SetRateLimit(bytesPerSecond uint32) {
 	s.rateLimiter.Store(limiter)
 }
 
+// SetLogger configures the kcp trace logger
+func (s *UDPSession) SetLogger(mask KCPLogType, logger logoutput_callback) {
+	s.kcp.SetLogger(mask, logger)
+}
+
 // Control applys a procedure to the underly socket fd.
 // CAUTION: BE VERY CAREFUL TO USE THIS FUNCTION, YOU MAY BREAK THE PROTOCOL.
 func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
@@ -690,6 +695,7 @@ func (s *UDPSession) postProcess() {
 					}
 				}
 				s.tx(txqueue)
+				s.kcp.DebugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
 				// recycle
 				for k := range txqueue {
 					defaultBufferPool.Put(txqueue[k].Buffers[0])
