@@ -152,7 +152,7 @@ func BenchmarkFlush(b *testing.B) {
 	var mu sync.Mutex
 	for i := 0; i < b.N; i++ {
 		mu.Lock()
-		kcp.flush(IFLUSH_FULL)
+		kcp.flush(IKCP_FLUSH_FULL)
 		mu.Unlock()
 	}
 }
