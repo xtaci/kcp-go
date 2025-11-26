@@ -101,9 +101,6 @@ func (timeoutError) Error() string   { return "timeout" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
 
-func init() {
-}
-
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
