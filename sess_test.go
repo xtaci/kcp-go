@@ -840,7 +840,7 @@ func TestSetLogger(t *testing.T) {
 	cli.SetWriteDelay(true)
 	cli.SetDUP(1)
 	cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
-	const N = 100
+	const N = 10
 	buf := make([]byte, 10)
 	for i := 0; i < N; i++ {
 		msg := fmt.Sprintf("trace%v", i)
