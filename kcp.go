@@ -944,7 +944,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 				copy(ptr, segment.data)
 				ptr = ptr[len(segment.data):]
 
-				kcp.debugLog(IKCP_LOG_OUT_PUSH, "conv", seg.conv, "sn", seg.sn, "una", seg.una, "ts", seg.ts)
+				kcp.debugLog(IKCP_LOG_OUT_PUSH, "conv", segment.conv, "sn", segment.sn, "una", segment.una, "ts", segment.ts, "xmit", segment.xmit)
 
 				if segment.xmit >= kcp.dead_link {
 					kcp.state = 0xFFFFFFFF
