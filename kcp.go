@@ -608,7 +608,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 	}
 
 	var latest uint32 // the latest ack packet
-	var flag int
+	var updateRTT int
 	var inSegs uint64
 	var flushSegments bool // signal to flush segments
 
@@ -658,7 +658,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 			kcp.debugLog(IKCP_LOG_IN_ACK, "conv", conv, "sn", sn, "una", una, "ts", ts, "rto", kcp.rx_rto)
 			kcp.parse_ack(sn)
 			flushSegments = flushSegments || kcp.parse_fastack(sn, ts)
-			flag |= 1
+			updateRTT |= 1
 			latest = ts
 		} else if cmd == IKCP_CMD_PUSH {
 			repeat := true
@@ -699,7 +699,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 
 	// update rtt with the latest ts
 	// ignore the FEC packet
-	if flag != 0 && pktType == IKCP_PACKET_REGULAR {
+	if updateRTT != 0 && pktType == IKCP_PACKET_REGULAR {
 		current := currentMs()
 		if _itimediff(current, latest) >= 0 {
 			kcp.update_ack(_itimediff(current, latest))
