@@ -762,7 +762,7 @@ func (kcp *KCP) wnd_unused() uint16 {
 }
 
 // flush pending data
-func (kcp *KCP) flush(flushType FlushType) uint32 {
+func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 	var seg segment
 	seg.conv = kcp.conv
 	seg.cmd = IKCP_CMD_ACK
@@ -893,7 +893,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 	 */
 	current := currentMs()
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
-	minrto := int32(kcp.interval)
+	nextUpdate = kcp.interval
 
 	if flushType == IKCP_FLUSH_FULL {
 		for segment := range kcp.snd_buf.ForEach {
@@ -952,8 +952,8 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 			}
 
 			// get the nearest rto
-			if rto := _itimediff(segment.resendts, current); rto > 0 && rto < minrto {
-				minrto = rto
+			if rto := _itimediff(segment.resendts, current); rto > 0 && uint32(rto) < nextUpdate {
+				nextUpdate = uint32(rto)
 			}
 		}
 	}
@@ -1005,7 +1005,7 @@ func (kcp *KCP) flush(flushType FlushType) uint32 {
 		}
 	}
 
-	return uint32(minrto)
+	return nextUpdate
 }
 
 // (deprecated)
