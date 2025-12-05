@@ -49,7 +49,7 @@ const (
 	IKCP_DEADLINK    = 20
 	IKCP_THRESH_INIT = 2
 	IKCP_THRESH_MIN  = 2
-	IKCP_PROBE_INIT  = 7000   // 7 secs to probe window size
+	IKCP_PROBE_INIT  = 500    // 500ms to probe window size
 	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
 	IKCP_SN_OFFSET   = 12
 )
