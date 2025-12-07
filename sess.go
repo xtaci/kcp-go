@@ -224,11 +224,14 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 			// copy the data to a new buffer, and reserve header space
 			copy(bts[sess.headerSize:], buf)
 
-			// delivery to post processing
+			// delivery to post processing (non-blocking to avoid deadlock under lock)
 			select {
 			case sess.chPostProcessing <- bts:
 			case <-sess.die:
 				return
+			default:
+				// drop and recycle to avoid blocking; KCP will retransmit if needed
+				defaultBufferPool.Put(bts)
 			}
 
 		}
@@ -337,7 +340,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 RESET_TIMER:
 	var timeout *time.Timer
 	var c <-chan time.Time
-	if twd, ok := s.rd.Load().(time.Time); ok && !twd.IsZero() {
+	if twd, ok := s.wd.Load().(time.Time); ok && !twd.IsZero() {
 		timeout = time.NewTimer(time.Until(twd))
 		c = timeout.C
 		defer timeout.Stop()
