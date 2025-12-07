@@ -365,15 +365,16 @@ RESET_TIMER:
 			for _, b := range v {
 				n += len(b)
 				// handle each slice for packet splitting
-				for {
-					if len(b) <= int(s.kcp.mss) {
-						s.kcp.Send(b)
-						break
-					} else {
-						s.kcp.Send(b[:s.kcp.mss])
-						b = b[s.kcp.mss:]
-					}
-				}
+				s.kcp.Send(b)
+				// for {
+				// 	if len(b) <= int(s.kcp.mss) {
+				// 		s.kcp.Send(b)
+				// 		break
+				// 	} else {
+				// 		s.kcp.Send(b[:s.kcp.mss])
+				// 		b = b[s.kcp.mss:]
+				// 	}
+				// }
 			}
 
 			waitsnd = s.kcp.WaitSnd()
@@ -491,8 +492,9 @@ func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
 
 // SetMtu sets the maximum transmission unit(not including UDP header)
 func (s *UDPSession) SetMtu(mtu int) bool {
-	if mtu > mtuLimit {
-		return false
+	mtuMax := mtuLimit - s.headerSize
+	if mtu > mtuMax {
+		mtu = mtuMax
 	}
 
 	s.mu.Lock()
