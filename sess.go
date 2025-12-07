@@ -337,7 +337,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 RESET_TIMER:
 	var timeout *time.Timer
 	var c <-chan time.Time
-	if twd, ok := s.rd.Load().(time.Time); ok && !twd.IsZero() {
+	if twd, ok := s.wd.Load().(time.Time); ok && !twd.IsZero() {
 		timeout = time.NewTimer(time.Until(twd))
 		c = timeout.C
 		defer timeout.Stop()
