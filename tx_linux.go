@@ -36,7 +36,7 @@ import (
 // tx is the optimized procedure to transmit packets utilizing the linux sendmmsg system call
 func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	// default version
-	if s.xconn == nil || s.xconnWriteError != nil {
+	if s.platform.batchConn == nil || s.platform.batchWriteError != nil {
 		s.defaultTx(txqueue)
 		return
 	}
@@ -45,7 +45,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for len(txqueue) > 0 {
-		if n, err := s.xconn.WriteBatch(txqueue, 0); err == nil {
+		if n, err := s.platform.batchConn.WriteBatch(txqueue, 0); err == nil {
 			for k := range txqueue[:n] {
 				nbytes += len(txqueue[k].Buffers[0])
 			}
@@ -58,7 +58,7 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			if operr, ok := err.(*net.OpError); ok {
 				if se, ok := operr.Err.(*os.SyscallError); ok {
 					if se.Syscall == "sendmmsg" {
-						s.xconnWriteError = se
+						s.platform.batchWriteError = se
 						s.defaultTx(txqueue)
 						return
 					}

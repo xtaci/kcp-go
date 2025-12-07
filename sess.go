@@ -54,7 +54,6 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -149,18 +148,13 @@ type (
 		// packets waiting to be sent on wire
 		chPostProcessing chan []byte
 
-		xconn           batchConn // for x/net
-		xconnWriteError error
+		// platform optimized
+		platform platform
 
 		// rate limiter (bytes per second)
 		rateLimiter atomic.Value
 
 		mu sync.Mutex
-	}
-
-	udpConn interface {
-		SyscallConn() (syscall.RawConn, error)
-		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
 	}
 
 	setReadBuffer interface {
@@ -193,18 +187,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.l = l
 	sess.block = block
 	sess.recvbuf = make([]byte, mtuLimit)
-
-	// cast to writebatch conn
-	if _, ok := conn.(udpConn); ok {
-		addr, err := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
-		if err == nil {
-			if addr.IP.To4() != nil {
-				sess.xconn = ipv4.NewPacketConn(conn)
-			} else {
-				sess.xconn = ipv6.NewPacketConn(conn)
-			}
-		}
-	}
+	sess.initPlatform()
 
 	// FEC codec initialization
 	sess.fecDecoder = newFECDecoder(dataShards, parityShards)

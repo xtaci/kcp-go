@@ -32,13 +32,16 @@ import (
 
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
-	"golang.org/x/net/ipv6"
+)
+
+const (
+	batchSize = 256
 )
 
 // readLoop is the optimized version of readLoop for linux utilizing recvmmsg syscall
 func (s *UDPSession) readLoop() {
 	// default version
-	if s.xconn == nil {
+	if s.platform.batchConn == nil {
 		s.defaultReadLoop()
 		return
 	}
@@ -51,7 +54,7 @@ func (s *UDPSession) readLoop() {
 	}
 
 	for {
-		if count, err := s.xconn.ReadBatch(msgs, 0); err == nil {
+		if count, err := s.platform.batchConn.ReadBatch(msgs, 0); err == nil {
 			if s.isClosed() {
 				return
 			}
@@ -88,20 +91,10 @@ func (s *UDPSession) readLoop() {
 
 // monitor is the optimized version of monitor for linux utilizing recvmmsg syscall
 func (l *Listener) monitor() {
-	var xconn batchConn
-	if _, ok := l.conn.(udpConn); ok {
-		addr, err := net.ResolveUDPAddr("udp", l.conn.LocalAddr().String())
-		if err == nil {
-			if addr.IP.To4() != nil {
-				xconn = ipv4.NewPacketConn(l.conn)
-			} else {
-				xconn = ipv6.NewPacketConn(l.conn)
-			}
-		}
-	}
+	batchConn := newBatchConn(l.conn)
 
 	// default version
-	if xconn == nil {
+	if batchConn == nil {
 		l.defaultMonitor()
 		return
 	}
@@ -113,7 +106,7 @@ func (l *Listener) monitor() {
 	}
 
 	for {
-		if count, err := xconn.ReadBatch(msgs, 0); err == nil {
+		if count, err := batchConn.ReadBatch(msgs, 0); err == nil {
 			for i := 0; i < count; i++ {
 				msg := &msgs[i]
 				l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
