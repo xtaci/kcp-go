@@ -65,6 +65,30 @@ type BlockCrypt interface {
 	Decrypt(dst, src []byte)
 }
 
+var _ BlockCrypt = &aeadCrypt{}
+
+type aeadCrypt struct {
+	cipher.AEAD
+}
+
+func (aeadCrypt) Encrypt(_, _ []byte) {
+	panic("called Encrypt on AEAD crypt")
+}
+
+func (aeadCrypt) Decrypt(_, _ []byte) {
+	panic("called Decrypt on AEAD crypt")
+}
+
+func NewAEADCrypt(aead cipher.AEAD) BlockCrypt {
+	if aead == nil {
+		return nil
+	}
+
+	return &aeadCrypt{aead}
+}
+
+var _ BlockCrypt = &blockCrypt{}
+
 type blockCrypt struct {
 	enc, dec       sync.Mutex
 	encbuf, decbuf []byte // 64bit alignment enc/dec buffer
