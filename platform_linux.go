@@ -34,8 +34,7 @@ import (
 
 type (
 	platform struct {
-		batchConn       batchConn
-		batchWriteError error
+		batchConn batchConn
 	}
 
 	// udpConn is an interface implemented by net.UDPConn.

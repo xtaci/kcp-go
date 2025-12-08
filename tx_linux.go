@@ -25,8 +25,6 @@
 package kcp
 
 import (
-	"net"
-	"os"
 	"sync/atomic"
 
 	"github.com/pkg/errors"
@@ -36,7 +34,7 @@ import (
 // tx is the optimized procedure to transmit packets utilizing the linux sendmmsg system call
 func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	// default version
-	if s.platform.batchConn == nil || s.platform.batchWriteError != nil {
+	if s.platform.batchConn == nil {
 		s.defaultTx(txqueue)
 		return
 	}
@@ -47,18 +45,6 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	for len(txqueue) > 0 {
 		n, err := s.platform.batchConn.WriteBatch(txqueue, 0)
 		if err != nil {
-			// compatibility issue:
-			// for linux kernel<=2.6.32, support for sendmmsg is not available
-			// an error of type os.SyscallError will be returned
-			if operr, ok := err.(*net.OpError); ok {
-				if se, ok := operr.Err.(*os.SyscallError); ok {
-					if se.Syscall == "sendmmsg" {
-						s.platform.batchWriteError = se
-						s.defaultTx(txqueue)
-						return
-					}
-				}
-			}
 			s.notifyWriteError(errors.WithStack(err))
 			break
 		}
