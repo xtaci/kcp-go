@@ -224,11 +224,14 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 			// copy the data to a new buffer, and reserve header space
 			copy(bts[sess.headerSize:], buf)
 
-			// delivery to post processing
+			// delivery to post processing (non-blocking to avoid deadlock under lock)
 			select {
 			case sess.chPostProcessing <- bts:
 			case <-sess.die:
 				return
+			default:
+				// drop and recycle to avoid blocking; KCP will retransmit if needed
+				defaultBufferPool.Put(bts)
 			}
 
 		}
@@ -488,14 +491,15 @@ func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
 
 // SetMtu sets the maximum transmission unit(not including UDP header)
 func (s *UDPSession) SetMtu(mtu int) bool {
-	if mtu > mtuLimit {
-		return false
+	maxMtu := mtuLimit - s.headerSize
+	if mtu > maxMtu {
+		mtu = maxMtu
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.kcp.SetMtu(mtu)
-	return true
+	ret := s.kcp.SetMtu(mtu - s.headerSize) // kcp mtu is not including udp header
+	return ret == 0
 }
 
 // Deprecated: toggles the stream mode on/off

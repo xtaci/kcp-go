@@ -69,12 +69,9 @@ func dialEcho(port int) (*UDPSession, error) {
 	}
 
 	sess.SetStreamMode(true)
-	sess.SetStreamMode(false)
-	sess.SetStreamMode(true)
 	sess.SetWindowSize(1024, 1024)
 	sess.SetReadBuffer(16 * 1024 * 1024)
 	sess.SetWriteBuffer(16 * 1024 * 1024)
-	sess.SetStreamMode(true)
 	sess.SetNoDelay(1, 10, 2, 1)
 	sess.SetMtu(1400)
 	sess.SetMtu(1600)
@@ -83,6 +80,7 @@ func dialEcho(port int) (*UDPSession, error) {
 	sess.SetACKNoDelay(false)
 	sess.SetDeadline(time.Now().Add(time.Minute))
 	sess.SetRateLimit(200 * 1024 * 1024)
+	sess.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
 	return sess, err
 }
 
@@ -96,7 +94,6 @@ func dialSink(port int) (*UDPSession, error) {
 	sess.SetWindowSize(1024, 1024)
 	sess.SetReadBuffer(16 * 1024 * 1024)
 	sess.SetWriteBuffer(16 * 1024 * 1024)
-	sess.SetStreamMode(true)
 	sess.SetNoDelay(1, 10, 2, 1)
 	sess.SetMtu(1400)
 	sess.SetACKNoDelay(false)
@@ -804,6 +801,38 @@ func TestSessionReadAfterClosed(t *testing.T) {
 		panic(err)
 	}
 	check(c1, c2)
+}
+
+func TestSetMTU(t *testing.T) {
+	port := int(atomic.AddUint32(&baseport, 1))
+	l := echoServer(port)
+	defer l.Close()
+
+	cli, err := dialEcho(port)
+	if err != nil {
+		panic(err)
+	}
+	ok := cli.SetMtu(50)
+	if ok {
+		t.Fatal("can not set mtu small than 50")
+	}
+	cli.SetMtu(1500)
+	cli.SetWriteDelay(false)
+	cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
+
+	sendBytes := make([]byte, 1500)
+	rand.Read(sendBytes)
+	cli.Write(sendBytes)
+
+	buf := make([]byte, 1500)
+	if n, err := io.ReadFull(cli, buf); err == nil {
+		if !bytes.Equal(buf[:n], sendBytes) {
+			t.Fail()
+		}
+	} else {
+		panic(err)
+	}
+	cli.Close()
 }
 
 func newLoggerWithMilliseconds() *slog.Logger {
