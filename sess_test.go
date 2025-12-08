@@ -812,17 +812,20 @@ func TestSetMTU(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	// cli.SetStreamMode(false)
+	ok := cli.SetMtu(50)
+	if ok {
+		t.Fatal("can not set mtu small than 50")
+	}
 	cli.SetMtu(1500)
 	cli.SetWriteDelay(false)
-	// cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
+	cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
 
 	sendBytes := make([]byte, 1500)
 	rand.Read(sendBytes)
 	cli.Write(sendBytes)
 
 	buf := make([]byte, 1500)
-	if n, err := cli.Read(buf); err == nil {
+	if n, err := io.ReadFull(cli, buf); err == nil {
 		if !bytes.Equal(buf[:n], sendBytes) {
 			t.Fail()
 		}

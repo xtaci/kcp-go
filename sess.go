@@ -365,16 +365,15 @@ RESET_TIMER:
 			for _, b := range v {
 				n += len(b)
 				// handle each slice for packet splitting
-				s.kcp.Send(b)
-				// for {
-				// 	if len(b) <= int(s.kcp.mss) {
-				// 		s.kcp.Send(b)
-				// 		break
-				// 	} else {
-				// 		s.kcp.Send(b[:s.kcp.mss])
-				// 		b = b[s.kcp.mss:]
-				// 	}
-				// }
+				for {
+					if len(b) <= int(s.kcp.mss) {
+						s.kcp.Send(b)
+						break
+					} else {
+						s.kcp.Send(b[:s.kcp.mss])
+						b = b[s.kcp.mss:]
+					}
+				}
 			}
 
 			waitsnd = s.kcp.WaitSnd()
@@ -492,15 +491,15 @@ func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
 
 // SetMtu sets the maximum transmission unit(not including UDP header)
 func (s *UDPSession) SetMtu(mtu int) bool {
-	mtuMax := mtuLimit - s.headerSize
-	if mtu > mtuMax {
-		mtu = mtuMax
+	maxMtu := mtuLimit - s.headerSize
+	if mtu > maxMtu {
+		mtu = maxMtu
 	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.kcp.SetMtu(mtu)
-	return true
+	ret := s.kcp.SetMtu(mtu - s.headerSize) // kcp mtu is not including udp header
+	return ret == 0
 }
 
 // Deprecated: toggles the stream mode on/off
