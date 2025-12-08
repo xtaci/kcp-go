@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"github.com/pion/transport/v4/deadline"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -534,6 +535,8 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 
 func newRateLimitTestSession(bucket *ratelimit.Bucket) *UDPSession {
 	s := &UDPSession{
+		readDeadline:       deadline.New(),
+		writeDeadline:      deadline.New(),
 		die:                make(chan struct{}),
 		writeGate:          make(chan struct{}, 1),
 		chWriteEvent:       make(chan struct{}, 1),

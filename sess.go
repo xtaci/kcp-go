@@ -58,6 +58,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"github.com/pion/transport/v4/deadline"
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -137,15 +138,14 @@ type (
 		fecEncoder *fecEncoder
 
 		// settings
-		remote     net.Addr               // remote peer address
-		pushedFrom net.Addr               // peer pinned by pushedPacket when remote is nil
-		rd         atomic.Value           // read deadline
-		readNotify atomic.Pointer[func()] // see SetReadNotify
-		wd         atomic.Value           // write deadline
-		headerSize int                    // the header size additional to a KCP frame
-		ackNoDelay bool                   // send ACKs immediately for each incoming packet (testing only)
-		writeDelay bool                   // delay kcp.flush() for Write() for bulk transfer
-		dup        int                    // duplicate UDP packets (testing only)
+		remote                      net.Addr // remote peer address
+		pushedFrom                  net.Addr // peer pinned by pushedPacket when remote is nil
+		readDeadline, writeDeadline *deadline.Deadline
+		readNotify                  atomic.Pointer[func()] // see SetReadNotify
+		headerSize                  int                    // the header size additional to a KCP frame
+		ackNoDelay                  bool                   // send ACKs immediately for each incoming packet (testing only)
+		writeDelay                  bool                   // delay kcp.flush() for Write() for bulk transfer
+		dup                         int                    // duplicate UDP packets (testing only)
 
 		// notifications
 		die          chan struct{} // notify current session has Closed
@@ -207,6 +207,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chSocketReadError = make(chan struct{})
 	sess.chSocketWriteError = make(chan struct{})
 	sess.remote = remote
+	sess.readDeadline = deadline.New()
+	sess.writeDeadline = deadline.New()
 	sess.conn = conn
 	sess.ownConn = ownConn
 	sess.l = l
@@ -342,27 +344,19 @@ func (s *UDPSession) read(b []byte) (n int, ok bool) {
 
 // Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-	// The deadline timer is armed only when the read has to wait.
-	var timeout *time.Timer
 	for {
 		n, ok := s.read(b)
 		if ok {
 			return n, nil
 		}
 
-		// if it runs here, that means we have to block the call, and wait until the
-		// next data packet arrives.
-		c := armDeadline(&timeout, &s.rd)
 		select {
 		case <-s.chReadEvent:
-			stopTimer(timeout)
-		case <-c:
+		case <-s.readDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketReadError:
-			stopTimer(timeout)
 			return 0, s.socketReadError.Load().(error)
 		case <-s.die:
-			stopTimer(timeout)
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -435,20 +429,16 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	}
 	defer s.releaseWriteGate()
 
-	// The deadline timer is armed only when the write has to wait.
-	var timeout *time.Timer
 	for {
-		// check for connection close and socket error
+		// check for connection close, socket error and deadline
 		select {
+		case <-s.writeDeadline.Done():
+			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
 			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
-		}
-		// Check the deadline after waits before attempting the write again.
-		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() && !time.Now().Before(deadline) {
-			return n, errors.WithStack(errTimeout)
 		}
 
 		n, ok := s.writeBuffers(v)
@@ -456,19 +446,13 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return n, nil
 		}
 
-		// If execution reaches here, the call must wait until the transmit
-		// buffer becomes available.
-		c := armDeadline(&timeout, &s.wd)
 		select {
 		case <-s.chWriteEvent:
-			stopTimer(timeout)
-		case <-c:
+		case <-s.writeDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
-			stopTimer(timeout)
 			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
-			stopTimer(timeout)
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -503,35 +487,16 @@ func (s *UDPSession) acquireWriteGate() error {
 // waitWriteGate handles the contended gate path, including deadline updates
 // signaled through chWriteEvent.
 func (s *UDPSession) waitWriteGate() error {
-	var timeout *time.Timer
-	defer func() { stopTimer(timeout) }()
-
 	for {
 		select {
-		case <-s.chSocketWriteError:
-			return s.socketWriteError.Load().(error)
-		case <-s.die:
-			return errors.WithStack(io.ErrClosedPipe)
-		default:
-		}
-
-		deadline := armDeadline(&timeout, &s.wd)
-		select {
-		case <-s.writeGate:
-			stopTimer(timeout)
-			return nil
-		case <-deadline:
-			stopTimer(timeout)
-			if d, ok := s.wd.Load().(time.Time); ok && !d.IsZero() && !time.Now().Before(d) {
-				return errors.WithStack(errTimeout)
-			}
 		case <-s.chWriteEvent:
-			stopTimer(timeout)
+		case <-s.writeGate:
+			return nil
+		case <-s.writeDeadline.Done():
+			return errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
-			stopTimer(timeout)
 			return s.socketWriteError.Load().(error)
 		case <-s.die:
-			stopTimer(timeout)
 			return errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -600,24 +565,20 @@ func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
 // SetDeadline sets the session's read and write deadlines. A zero time value
 // disables the deadlines.
 func (s *UDPSession) SetDeadline(t time.Time) error {
-	s.rd.Store(t)
-	s.wd.Store(t)
-	s.notifyReadEvent()
-	s.notifyWriteEvent()
+	s.SetReadDeadline(t)
+	s.SetWriteDeadline(t)
 	return nil
 }
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (s *UDPSession) SetReadDeadline(t time.Time) error {
-	s.rd.Store(t)
-	s.notifyReadEvent()
+	s.readDeadline.Set(t)
 	return nil
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
 func (s *UDPSession) SetWriteDeadline(t time.Time) error {
-	s.wd.Store(t)
-	s.notifyWriteEvent()
+	s.writeDeadline.Set(t)
 	return nil
 }
 
@@ -1253,7 +1214,7 @@ type (
 		chSocketReadError   chan struct{}
 		socketReadErrorOnce sync.Once
 
-		rd atomic.Value // read deadline for Accept()
+		readDeadline *deadline.Deadline // read deadline for Accept()
 	}
 )
 
@@ -1458,16 +1419,8 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
-	var timeout <-chan time.Time
-	if tdeadline, ok := l.rd.Load().(time.Time); ok && !tdeadline.IsZero() {
-		timer := time.NewTimer(time.Until(tdeadline))
-		defer timer.Stop()
-
-		timeout = timer.C
-	}
-
 	select {
-	case <-timeout:
+	case <-l.readDeadline.Done():
 		return nil, errors.WithStack(errTimeout)
 	case c := <-l.chAccepts:
 		return c, nil
@@ -1487,7 +1440,7 @@ func (l *Listener) SetDeadline(t time.Time) error {
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (l *Listener) SetReadDeadline(t time.Time) error {
-	l.rd.Store(t)
+	l.readDeadline.Set(t)
 	return nil
 }
 
@@ -1621,6 +1574,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.chSocketReadError = make(chan struct{})
+	l.readDeadline = deadline.New()
 	if pp, ok := conn.(PacketPusher); ok {
 		pp.SetPacketReceiver(l.pushedPacket)
 	} else {
@@ -1689,31 +1643,6 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 		return nil, errors.WithStack(err)
 	}
 	return NewConn2(udpaddr, block, dataShards, parityShards, conn)
-}
-
-// armDeadline starts or resets t for the deadline held in v, just before a
-// blocking wait, and returns its channel. It returns nil without a deadline.
-func armDeadline(t **time.Timer, v *atomic.Value) <-chan time.Time {
-	d, ok := v.Load().(time.Time)
-	if !ok || d.IsZero() {
-		return nil
-	}
-	if *t == nil {
-		*t = time.NewTimer(time.Until(d))
-	} else {
-		(*t).Reset(time.Until(d))
-	}
-	return (*t).C
-}
-
-// stopTimer stops t if it is armed and drains any value left in its channel.
-func stopTimer(t *time.Timer) {
-	if t != nil && !t.Stop() {
-		select {
-		case <-t.C:
-		default:
-		}
-	}
 }
 
 // buffersEmpty reports whether v holds no bytes.
