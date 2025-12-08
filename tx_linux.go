@@ -45,13 +45,8 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for len(txqueue) > 0 {
-		if n, err := s.platform.batchConn.WriteBatch(txqueue, 0); err == nil {
-			for k := range txqueue[:n] {
-				nbytes += len(txqueue[k].Buffers[0])
-			}
-			npkts += n
-			txqueue = txqueue[n:]
-		} else {
+		n, err := s.platform.batchConn.WriteBatch(txqueue, 0)
+		if err != nil {
 			// compatibility issue:
 			// for linux kernel<=2.6.32, support for sendmmsg is not available
 			// an error of type os.SyscallError will be returned
@@ -67,6 +62,12 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 			s.notifyWriteError(errors.WithStack(err))
 			break
 		}
+
+		for k := range txqueue[:n] {
+			nbytes += len(txqueue[k].Buffers[0])
+		}
+		npkts += n
+		txqueue = txqueue[n:]
 	}
 
 	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))

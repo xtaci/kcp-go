@@ -54,24 +54,8 @@ func (s *UDPSession) readLoop() {
 	}
 
 	for {
-		if count, err := s.platform.batchConn.ReadBatch(msgs, 0); err == nil {
-			if s.isClosed() {
-				return
-			}
-			for i := 0; i < count; i++ {
-				msg := &msgs[i]
-				// make sure the packet is from the same source
-				if src == "" { // set source address if nil
-					src = msg.Addr.String()
-				} else if msg.Addr.String() != src {
-					atomic.AddUint64(&DefaultSnmp.InErrs, 1)
-					continue
-				}
-
-				// source and size has validated
-				s.packetInput(msg.Buffers[0][:msg.N])
-			}
-		} else {
+		count, err := s.platform.batchConn.ReadBatch(msgs, 0)
+		if err != nil {
 			// compatibility issue:
 			// for linux kernel<=2.6.32, support for sendmmsg is not available
 			// an error of type os.SyscallError will be returned
@@ -85,6 +69,30 @@ func (s *UDPSession) readLoop() {
 			}
 			s.notifyReadError(errors.WithStack(err))
 			return
+		}
+
+		if s.isClosed() {
+			return
+		}
+
+		for i := range count {
+			msg := &msgs[i]
+
+			// make sure the packet is from the same source
+			switch src {
+			case "":
+				// set source address if not set
+				src = msg.Addr.String()
+			case msg.Addr.String():
+				// source valid
+			default:
+				// source invalid
+				atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+				continue
+			}
+
+			// source and size has validated
+			s.packetInput(msg.Buffers[0][:msg.N])
 		}
 	}
 }
@@ -106,12 +114,8 @@ func (l *Listener) monitor() {
 	}
 
 	for {
-		if count, err := batchConn.ReadBatch(msgs, 0); err == nil {
-			for i := 0; i < count; i++ {
-				msg := &msgs[i]
-				l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
-			}
-		} else {
+		count, err := batchConn.ReadBatch(msgs, 0)
+		if err != nil {
 			// compatibility issue:
 			// for linux kernel<=2.6.32, support for sendmmsg is not available
 			// an error of type os.SyscallError will be returned
@@ -125,6 +129,11 @@ func (l *Listener) monitor() {
 			}
 			l.notifyReadError(errors.WithStack(err))
 			return
+		}
+
+		for i := range count {
+			msg := &msgs[i]
+			l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
 		}
 	}
 }
