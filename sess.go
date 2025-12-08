@@ -56,6 +56,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pion/transport/v3/deadline"
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -120,13 +121,12 @@ type (
 		fecEncoder *fecEncoder
 
 		// settings
-		remote     net.Addr     // remote peer address
-		rd         atomic.Value // read deadline
-		wd         atomic.Value // write deadline
-		headerSize int          // the header size additional to a KCP frame
-		ackNoDelay bool         // send ack immediately for each incoming packet(testing purpose)
-		writeDelay bool         // delay kcp.flush() for Write() for bulk transfer
-		dup        int          // duplicate udp packets(testing purpose)
+		remote                      net.Addr // remote peer address
+		headerSize                  int      // the header size additional to a KCP frame
+		ackNoDelay                  bool     // send ack immediately for each incoming packet(testing purpose)
+		writeDelay                  bool     // delay kcp.flush() for Write() for bulk transfer
+		dup                         int      // duplicate udp packets(testing purpose)
+		readDeadline, writeDeadline *deadline.Deadline
 
 		// notifications
 		die          chan struct{} // notify current session has Closed
@@ -182,6 +182,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chSocketWriteError = make(chan struct{})
 	sess.chPostProcessing = make(chan []byte, devBacklog)
 	sess.remote = remote
+	sess.readDeadline = deadline.New()
+	sess.writeDeadline = deadline.New()
 	sess.conn = conn
 	sess.ownConn = ownConn
 	sess.l = l
@@ -250,16 +252,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 // Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-RESET_TIMER:
-	var timeout *time.Timer
-	// deadline for current reading operation
-	var c <-chan time.Time
-	if trd, ok := s.rd.Load().(time.Time); ok && !trd.IsZero() {
-		timeout = time.NewTimer(time.Until(trd))
-		c = timeout.C
-		defer timeout.Stop()
-	}
-
 	for {
 		s.mu.Lock()
 		// bufptr points to the current position of recvbuf,
@@ -307,11 +299,7 @@ RESET_TIMER:
 		// next data packet arrives.
 		select {
 		case <-s.chReadEvent:
-			if timeout != nil {
-				timeout.Stop()
-				goto RESET_TIMER
-			}
-		case <-c:
+		case <-s.readDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketReadError:
 			return 0, s.socketReadError.Load().(error)
@@ -326,18 +314,11 @@ func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers(
 
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
-RESET_TIMER:
-	var timeout *time.Timer
-	var c <-chan time.Time
-	if twd, ok := s.wd.Load().(time.Time); ok && !twd.IsZero() {
-		timeout = time.NewTimer(time.Until(twd))
-		c = timeout.C
-		defer timeout.Stop()
-	}
-
 	for {
 		// check for connection close and socket error
 		select {
+		case <-s.writeDeadline.Done():
+			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
 			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
@@ -383,11 +364,7 @@ RESET_TIMER:
 		// transmit buffer to become available again.
 		select {
 		case <-s.chWriteEvent:
-			if timeout != nil {
-				timeout.Stop()
-				goto RESET_TIMER
-			}
-		case <-c:
+		case <-s.writeDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
 			return 0, s.socketWriteError.Load().(error)
@@ -445,24 +422,20 @@ func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
 
 // SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
 func (s *UDPSession) SetDeadline(t time.Time) error {
-	s.rd.Store(t)
-	s.wd.Store(t)
-	s.notifyReadEvent()
-	s.notifyWriteEvent()
+	s.SetReadDeadline(t)
+	s.SetWriteDeadline(t)
 	return nil
 }
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (s *UDPSession) SetReadDeadline(t time.Time) error {
-	s.rd.Store(t)
-	s.notifyReadEvent()
+	s.readDeadline.Set(t)
 	return nil
 }
 
 // SetWriteDeadline implements the Conn SetWriteDeadline method.
 func (s *UDPSession) SetWriteDeadline(t time.Time) error {
-	s.wd.Store(t)
-	s.notifyWriteEvent()
+	s.writeDeadline.Set(t)
 	return nil
 }
 
@@ -912,7 +885,7 @@ type (
 		chSocketReadError   chan struct{}
 		socketReadErrorOnce sync.Once
 
-		rd atomic.Value // read deadline for Accept()
+		readDeadline *deadline.Deadline // read deadline for Accept()
 	}
 )
 
@@ -1071,16 +1044,8 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
-	var timeout <-chan time.Time
-	if tdeadline, ok := l.rd.Load().(time.Time); ok && !tdeadline.IsZero() {
-		timer := time.NewTimer(time.Until(tdeadline))
-		defer timer.Stop()
-
-		timeout = timer.C
-	}
-
 	select {
-	case <-timeout:
+	case <-l.readDeadline.Done():
 		return nil, errors.WithStack(errTimeout)
 	case c := <-l.chAccepts:
 		return c, nil
@@ -1100,7 +1065,7 @@ func (l *Listener) SetDeadline(t time.Time) error {
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (l *Listener) SetReadDeadline(t time.Time) error {
-	l.rd.Store(t)
+	l.readDeadline.Set(t)
 	return nil
 }
 
@@ -1197,6 +1162,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.chSocketReadError = make(chan struct{})
+	l.readDeadline = deadline.New()
 	go l.monitor()
 	return l, nil
 }
