@@ -1095,14 +1095,9 @@ func (kcp *KCP) SetMtu(mtu int) int {
 		return -1
 	}
 
-	buffer := make([]byte, mtu)
-	if buffer == nil {
-		return -2
-	}
-
 	kcp.mtu = uint32(mtu)
 	kcp.mss = kcp.mtu - IKCP_OVERHEAD
-	kcp.buffer = buffer
+	kcp.buffer = make([]byte, mtu)
 	return 0
 }
 
