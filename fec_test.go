@@ -38,7 +38,7 @@ func TestFECEncodeConsecutive(t *testing.T) {
 	t.Logf("dataSize:%v, paritySize:%v", dataSize, paritySize)
 	group := 0
 	sent := 0
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if i%dataSize == 0 {
 			group++
 		}
@@ -58,10 +58,15 @@ func TestFECEncodeConsecutive(t *testing.T) {
 				expected := uint32((group-1)*(dataSize+paritySize) + dataSize + idx)
 				if seqid != expected {
 					t.Fatalf("expected parity shard:%v actual seqid %v", expected, seqid)
+					return
 				}
 			}
-		} else if sent%dataSize == 0 {
+			continue
+		}
+
+		if sent%dataSize == 0 {
 			t.Log("no parity:", len(ps))
+			continue
 		}
 	}
 }
@@ -79,7 +84,7 @@ func TestFECDecodeLoss(t *testing.T) {
 	recovered := 0
 	parityLost := 0
 
-	for group := 0; group < 100; group++ {
+	for group := range 100 {
 		losses := make(map[int]bool)
 
 		lost := 0
@@ -96,9 +101,10 @@ func TestFECDecodeLoss(t *testing.T) {
 
 		if len(losses) != parityShards {
 			t.Fatalf("Expected %v losses, got %v", parityShards, len(losses))
+			return
 		}
 
-		for i := 0; i < dataShards+parityShards; i++ {
+		for i := range dataShards + parityShards {
 			sent++
 			if losses[i] {
 				t.Logf("Lost packet %v in group %v", groupSize*group+i, group)
@@ -154,7 +160,7 @@ func BenchmarkFECEncode(b *testing.B) {
 	b.ReportAllocs()
 	b.SetBytes(payLoad)
 	encoder := newFECEncoder(dataSize, paritySize, 0)
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		data := make([]byte, payLoad)
 		encoder.encode(data, 200)
 	}
