@@ -283,7 +283,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	}
 
 	// try to discard shard sets that are too old
-	dec.flushShards()
+	dec.discardShards()
 
 	return
 }
@@ -293,8 +293,8 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 	return seqid / uint32(dec.shardSize)
 }
 
-// flushShards removes shards that are too old from the shardSet
-func (dec *fecDecoder) flushShards() {
+// discardShards removes shards that are too old from the shardSet
+func (dec *fecDecoder) discardShards() {
 	for shardId := range dec.shardSet {
 		// discard shards that are too old
 		if _itimediff(dec.newestShardId, shardId) > maxShardSets {
