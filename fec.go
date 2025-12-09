@@ -111,7 +111,7 @@ type fecDecoder struct {
 
 	// record the latest recovered shard id
 	// the shards smaller than this one will be discarded
-	minShardId uint32
+	newestShardId uint32
 
 	// caches
 	decodeCache [][]byte
@@ -177,7 +177,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				dec.dataShards = autoDS
 				dec.parityShards = autoPS
 				dec.shardSize = autoDS + autoPS
-				dec.shardSet = make(map[uint32]*shardHeap)
+				dec.shardSet = make(map[uint32]*shardHeap) // empty the shard set
 				codec, err := reedsolomon.New(autoDS, autoPS)
 				if err != nil {
 					return nil
@@ -192,12 +192,8 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		return nil
 	}
 
-	// get shard
+	// get shardId and load the shard heap from the shard set
 	shardId := dec.getShardId(in.seqid())
-	if _itimediff(shardId, dec.minShardId) < 0 {
-		return nil
-	}
-
 	shard, ok := dec.shardSet[shardId]
 	if !ok {
 		shard = newShardHeap()
@@ -205,12 +201,12 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		atomic.AddUint64(&DefaultSnmp.FECShardSet, 1)
 	}
 
-	// de-duplicate
+	// ignore duplicate packets
 	if shard.Has(in.seqid()) {
 		return nil
 	}
 
-	// count
+	// count parity shards received
 	if in.flag() == typeParity {
 		atomic.AddUint64(&DefaultSnmp.FECParityShards, 1)
 	}
@@ -220,7 +216,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	copy(pkt, in)
 	shard.Push(pkt)
 
-	// collected enough shards
+	// if a shard heap collected enough shards to start a recovery
 	if shard.Len() >= dec.dataShards {
 		var numDataShard, maxlen int
 
@@ -278,16 +274,15 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 
 			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
 		}
-
 	}
 
-	// update the minimum shard id based on the current shard
-	if _itimediff(shardId, dec.minShardId) > 0 {
-		dec.minShardId = shardId
-		atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.minShardId))
+	// update the newest shard id
+	if _itimediff(shardId, dec.newestShardId) > 0 {
+		dec.newestShardId = shardId
+		atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.newestShardId))
 	}
 
-	// discard shards that are too old
+	// try to discard shard sets that are too old
 	dec.flushShards()
 
 	return
@@ -302,7 +297,7 @@ func (dec *fecDecoder) getShardId(seqid uint32) uint32 {
 func (dec *fecDecoder) flushShards() {
 	for shardId := range dec.shardSet {
 		// discard shards that are too old
-		if _itimediff(dec.minShardId, shardId) > maxShardSets {
+		if _itimediff(dec.newestShardId, shardId) > maxShardSets {
 			//println("flushing shard", shardId, "minShardId", dec.minShardId, _itimediff(dec.minShardId, shardId))
 			delete(dec.shardSet, shardId)
 		}
