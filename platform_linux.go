@@ -51,16 +51,19 @@ type (
 	}
 )
 
+// newBatchConn creates a batchConn based on the IP version of the provided net.PacketConn.
 func newBatchConn(conn net.PacketConn) batchConn {
 	if _, ok := conn.(udpConn); !ok {
 		return nil
 	}
 
+	// Resolve the local UDP address to determine IP version
 	addr, err := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
 	if err != nil {
 		return nil
 	}
 
+	// Determine if the connection is IPv4 or IPv6 based on the local address
 	if addr.IP.To4() != nil {
 		return ipv4.NewPacketConn(conn)
 	}
