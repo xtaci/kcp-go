@@ -812,7 +812,7 @@ func TestSetMTU(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	ok := cli.SetMtu(50)
+	ok := cli.SetMtu(49)
 	if ok {
 		t.Fatal("can not set mtu small than 50")
 	}

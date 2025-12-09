@@ -498,7 +498,7 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	ret := s.kcp.SetMtu(mtu - s.headerSize) // kcp mtu is not including udp header
+	ret := s.kcp.SetMtu(mtu) // kcp mtu is not including udp header
 	return ret == 0
 }
 
