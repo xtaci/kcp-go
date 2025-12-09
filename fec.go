@@ -158,7 +158,7 @@ func newFECDecoder(dataShards, parityShards int) *fecDecoder {
 }
 
 // decode a fec packet
-func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
+func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 	// Sample the packet type for auto-tuning
 	if in.flag() == typeData {
 		dec.autoTune.Sample(true, in.seqid())
@@ -245,79 +245,6 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	copy(pkt, in)
 	shard.Push(pkt)
 
-	// try to recover data if we have enough shards
-	if shard.Len() >= dec.dataShards {
-		var numDataShard, maxlen int
-
-		// prepare the decode cache
-		shards := dec.decodeCache
-		shardsflag := dec.flagCache
-		for k := range dec.decodeCache {
-			shards[k] = nil
-			shardsflag[k] = false
-		}
-
-		// pop all shards from the heap and fill into the decode cache
-		var pkts []fecPacket
-		for shard.Len() > 0 {
-			pkt := shard.Pop().(fecPacket)
-			pkts = append(pkts, pkt)
-			seqid := pkt.seqid()
-			shards[seqid%uint32(dec.shardSize)] = pkt.data()
-			shardsflag[seqid%uint32(dec.shardSize)] = true
-			if pkt.flag() == typeData {
-				numDataShard++
-			}
-			if len(pkt.data()) > maxlen {
-				maxlen = len(pkt.data())
-			}
-		}
-
-		// case 1: all data shards are present
-		if numDataShard == dec.dataShards {
-			atomic.AddUint64(&DefaultSnmp.FECFullShardSet, 1)
-		} else { // case 2: some data shards are missing, try to recover
-			// fill '0' into the tail of each shard to make them equal-sized
-			var newBuffers [][]byte
-			for k := range shards {
-				if shards[k] != nil {
-					dlen := len(shards[k])
-					shards[k] = shards[k][:maxlen]
-					clear(shards[k][dlen:])
-				} else if k < dec.dataShards {
-					// prepare memory for the data recovery
-					shards[k] = defaultBufferPool.Get()[:0]
-					newBuffers = append(newBuffers, shards[k])
-				}
-			}
-
-			// Reed-Solomon Erasure Code Decoding
-			if err := dec.codec.ReconstructData(shards); err == nil {
-				for k := range shards[:dec.dataShards] {
-					if !shardsflag[k] {
-						recovered = append(recovered, shards[k])
-					}
-				}
-			} else {
-				// recovery failed, record the error
-				atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
-				// recycle new buffers if failed
-				// NOTE: if success, these buffers are returned in 'recovered' and will be recycled by the caller
-				for _, buf := range newBuffers {
-					defaultBufferPool.Put(buf)
-				}
-			}
-
-			// record the number of recovered packets
-			atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
-		}
-
-		// recycle the packets
-		for _, pkt := range pkts {
-			defaultBufferPool.Put(pkt)
-		}
-	}
-
 	// update the newest shard id
 	if _itimediff(shardId*uint32(dec.shardSize), dec.newestShardId*uint32(dec.shardSize)) > 0 {
 		dec.newestShardId = shardId
@@ -325,9 +252,86 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 	}
 
 	// try to discard shard sets that are too old
-	dec.discardShards()
+	defer dec.discardShards()
 
-	return
+	// try to recover data if we have enough shards
+	if shard.Len() < dec.dataShards {
+		return nil
+	}
+
+	var numDataShard, maxlen int
+
+	// prepare the decode cache
+	shards := dec.decodeCache
+	shardsflag := dec.flagCache
+	for k := range dec.decodeCache {
+		shards[k] = nil
+		shardsflag[k] = false
+	}
+
+	// pop all shards from the heap and fill into the decode cache
+	var pkts []fecPacket
+	for shard.Len() > 0 {
+		pkt := shard.Pop().(fecPacket)
+		pkts = append(pkts, pkt)
+		seqid := pkt.seqid()
+		shards[seqid%uint32(dec.shardSize)] = pkt.data()
+		shardsflag[seqid%uint32(dec.shardSize)] = true
+		if pkt.flag() == typeData {
+			numDataShard++
+		}
+		if len(pkt.data()) > maxlen {
+			maxlen = len(pkt.data())
+		}
+	}
+	defer defaultBufferPool.PutPkts(pkts)
+
+	// case 1: all data shards are present
+	if numDataShard == dec.dataShards {
+		atomic.AddUint64(&DefaultSnmp.FECFullShardSet, 1)
+		return nil
+	}
+
+	// case 2: some data shards are missing, try to recover
+	// fill '0' into the tail of each shard to make them equal-sized
+	var newBuffers [][]byte
+	for k := range shards {
+		if shards[k] != nil {
+			dlen := len(shards[k])
+			shards[k] = shards[k][:maxlen]
+			clear(shards[k][dlen:])
+			continue
+		}
+
+		if k < dec.dataShards {
+			// prepare memory for the data recovery
+			shards[k] = defaultBufferPool.Get()[:0]
+			newBuffers = append(newBuffers, shards[k])
+			continue
+		}
+	}
+
+	// Reed-Solomon Erasure Code Decoding
+	err := dec.codec.ReconstructData(shards)
+	if err != nil {
+		// recovery failed, record the error
+		atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
+		// recycle new buffers if failed
+		// NOTE: if success, these buffers are returned in 'recovered' and will be recycled by the caller
+		defaultBufferPool.Puts(newBuffers)
+		return nil
+	}
+
+	var recovered [][]byte
+	for k := range shards[:dec.dataShards] {
+		if !shardsflag[k] {
+			recovered = append(recovered, shards[k])
+		}
+	}
+
+	// record the number of recovered packets
+	atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
+	return recovered
 }
 
 // getShardId calculates the shard id based on the sequence id
@@ -405,7 +409,7 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 
 // encode encodes a packet and may output parity shards once enough data shards
 // have been collected. The contents of ps are overwritten on subsequent calls.
-func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
+func (enc *fecEncoder) encode(b []byte, rto uint32) [][]byte {
 	// The header format:
 	// | FEC SEQID(4B) | FEC TYPE(2B) | SIZE (2B) | PAYLOAD(SIZE-2) |
 	// |<-headerOffset                |<-payloadOffset
@@ -425,62 +429,67 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 
 	// Generate Reed-Solomon erasure codes once enough data shards are collected.
 	now := time.Now().UnixMilli()
-	if enc.shardCount == enc.dataShards {
-		// Generate parity shards once enough data shards are collected.
-		// Whether to generate parity depends on the interval between the
-		// latest two data packets.
-		//
-		// If the interval is at least rto, treat the data as non-contiguous and
-		// skip parity generation to avoid unhelpful parity packets.
-		//
-		// Even when parity generation is skipped, advance seqid to preserve
-		// sequence-number progression.
-		// This is important for the receiver to detect lost packets.
-		// See fecEncoder.skipParity(). The RTO is in milliseconds; see
-		// (*UDPSession).rto().
-		//
-		if now-enc.tsLatestPacket < int64(rto) {
-			// Clear the tail of each data shard to make them equal in size.
-			for i := 0; i < enc.dataShards; i++ {
-				shard := enc.shardCache[i]
-				slen := len(shard)
-				clear(shard[slen:enc.maxSize])
-			}
+	// record the time of the latest data packet
+	tsLastPacket := atomic.SwapInt64(&enc.tsLatestPacket, now)
 
-			// construct equal-sized slice with stripped header
-			cache := enc.encodeCache
-			for k := range cache {
-				cache[k] = enc.shardCache[k][enc.payloadOffset:enc.maxSize]
-			}
-
-			// Reed-Solomon Erasure Code Encoding
-			if err := enc.codec.Encode(cache); err == nil {
-				ps = enc.shardCache[enc.dataShards:]
-				for k := range ps {
-					enc.sealParity(ps[k][enc.headerOffset:]) // NOTE(x): seal parity will increase the seqid by 1
-					ps[k] = ps[k][:enc.maxSize]
-				}
-			} else {
-				// encoding failed, record the error but keep the seqid monotonic increasing
-				atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
-				enc.skipParity()
-			}
-		} else {
-			// Non-continuous data detected, skip this parity generation.
-			// Though no parity shard is sent for non-contiguous data, seqid
-			// must still advance.
-			enc.skipParity()
-		}
-
-		// reset shard count and max size
-		enc.shardCount = 0
-		enc.maxSize = 0
+	if enc.shardCount != enc.dataShards {
+		return nil
 	}
 
-	// record the time of the latest data packet
-	enc.tsLatestPacket = now
+	maxSize := enc.maxSize
+	// reset shard count and max size
+	enc.shardCount = 0
+	enc.maxSize = 0
 
-	return
+	// Generate parity shards once enough data shards are collected.
+	// Whether to generate parity depends on the interval between the
+	// latest two data packets.
+	//
+	// If the interval is at least rto, treat the data as non-contiguous and
+	// skip parity generation to avoid unhelpful parity packets.
+	//
+	// Even when parity generation is skipped, advance seqid to preserve
+	// sequence-number progression.
+	// This is important for the receiver to detect lost packets.
+	// See fecEncoder.skipParity(). The RTO is in milliseconds; see
+	// (*UDPSession).rto().
+	//
+	if now-tsLastPacket >= int64(rto) {
+		// Non-continuous data detected, skip this parity generation.
+		// Though no parity shard is sent for non-contiguous data, seqid
+		// must still advance.
+		enc.skipParity()
+		return nil
+	}
+
+	// Clear the tail of each data shard to make them equal in size.
+	for i := 0; i < enc.dataShards; i++ {
+		shard := enc.shardCache[i]
+		slen := len(shard)
+		clear(shard[slen:maxSize])
+	}
+
+	// construct equal-sized slice with stripped header
+	cache := enc.encodeCache
+	for k := range cache {
+		cache[k] = enc.shardCache[k][enc.payloadOffset:maxSize]
+	}
+
+	// Reed-Solomon Erasure Code Encoding
+	err := enc.codec.Encode(cache)
+	if err != nil {
+		// encoding failed, record the error but keep the seqid monotonic increasing
+		atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
+		enc.skipParity()
+		return nil
+	}
+
+	ps := enc.shardCache[enc.dataShards:]
+	for k := range ps {
+		enc.sealParity(ps[k][enc.headerOffset:]) // NOTE(x): seal parity will increase the seqid by 1
+		ps[k] = ps[k][:maxSize]
+	}
+	return ps
 }
 
 // sealData and sealParity write the sequence number and type into the FEC header
