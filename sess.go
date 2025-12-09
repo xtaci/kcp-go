@@ -47,6 +47,7 @@
 package kcp
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
@@ -129,7 +130,7 @@ type (
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
 		recvbuf []byte
-		bufptr  []byte
+		input   bytes.Reader
 
 		// FEC codec
 		fecDecoder *fecDecoder
@@ -285,16 +286,67 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	return sess
 }
 
+// readLocked copies data that is ready into b and reports whether there was
+// any. It must be called with s.mu held.
+func (s *UDPSession) readLocked(b []byte) (int, bool) {
+	// bufptr points to the current position in recvbuf. If the previous read's
+	// buffer was too small, the remaining data is saved in bufptr for the next
+	// read.
+	if s.input.Len() > 0 {
+		n, _ := s.input.Read(b)
+		s.notifyReadIfAvailableLocked()
+		return n, true
+	}
+
+	size := s.kcp.PeekSize() // peek data size from kcp
+	if size <= 0 {
+		return 0, false
+	}
+	// If b is large enough, read directly from KCP into b without an
+	// intermediate buffer.
+	if len(b) >= size {
+		s.kcp.Recv(b)
+		s.notifyReadIfAvailableLocked()
+		return size, true
+	}
+
+	// Otherwise, read into recvbuf first, then copy to b. Grow recvbuf to fit
+	// the packet when necessary.
+	if cap(s.recvbuf) < size {
+		// recvbuf is usually sized to the maximum packet size
+		s.recvbuf = make([]byte, size)
+	}
+
+	// resize the length of recvbuf to match the data size
+	s.recvbuf = s.recvbuf[:size]
+	s.kcp.Recv(s.recvbuf)    // read data to recvbuf first
+	s.input.Reset(s.recvbuf) // pointer update
+
+	n, _ := s.input.Read(b) // copy to b
+	s.notifyReadIfAvailableLocked()
+	return n, true
+}
+
+func (s *UDPSession) read(b []byte) (n int, ok bool) {
+	s.mu.Lock()
+	n, ok = s.readLocked(b)
+	s.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
+	return
+}
+
 // Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	// The deadline timer is armed only when the read has to wait.
 	var timeout *time.Timer
 	for {
-		s.mu.Lock()
-		n, ok := s.readLocked(b)
-		s.mu.Unlock()
+		n, ok := s.read(b)
 		if ok {
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
 			return n, nil
 		}
 
@@ -316,6 +368,53 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	}
 }
 
+func (s *UDPSession) writeBuffersLocked(v [][]byte) (int, bool) {
+	// make sure write do not overflow the max sliding window on both side
+	waitsnd := s.kcp.WaitSnd()
+	if waitsnd >= int(s.kcp.snd_wnd) {
+		return 0, false
+	}
+
+	var n int
+	// Transmit data sequentially, keeping each packet within mss.
+	for _, b := range v {
+		n += len(b)
+		// handle each slice for packet splitting
+		for {
+			if len(b) <= int(s.kcp.mss) {
+				s.kcp.Send(b)
+				break
+			}
+
+			s.kcp.Send(b[:s.kcp.mss])
+			b = b[s.kcp.mss:]
+		}
+	}
+
+	waitsnd = s.kcp.WaitSnd()
+	if waitsnd >= int(s.kcp.snd_wnd) || !s.writeDelay {
+		// put the packets on wire immediately if the inflight window is full
+		// or if write delay is disabled (no merging of outgoing bytes),
+		// so we do not have to wait for the periodic update to uncork.
+		s.kcp.flush(IKCP_FLUSH_FULL)
+	}
+	return n, true
+}
+
+func (s *UDPSession) writeBuffers(v [][]byte) (n int, ok bool) {
+	s.mu.Lock()
+	n, ok = s.writeBuffersLocked(v)
+	s.mu.Unlock()
+
+	if !ok {
+		return
+	}
+
+	atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
+	s.writeWait(n)
+	return
+}
+
 // WriteBuffers writes a vector of byte slices to the underlying connection.
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	// An empty write only reports the conn's state. It used to run a full
@@ -330,7 +429,8 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, nil
 		}
 	}
-	if err := s.acquireWriteGate(); err != nil {
+	err = s.acquireWriteGate()
+	if err != nil {
 		return 0, err
 	}
 	defer s.releaseWriteGate()
@@ -351,40 +451,10 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return n, errors.WithStack(errTimeout)
 		}
 
-		s.mu.Lock()
-
-		// Ensure writes do not exceed the maximum sliding window on either side.
-		waitsnd := s.kcp.WaitSnd()
-		if waitsnd < int(s.kcp.snd_wnd) {
-			// Transmit data sequentially, keeping each packet within mss.
-			for _, b := range v {
-				n += len(b)
-				// handle each slice for packet splitting
-				for {
-					if len(b) <= int(s.kcp.mss) {
-						s.kcp.Send(b)
-						break
-					} else {
-						s.kcp.Send(b[:s.kcp.mss])
-						b = b[s.kcp.mss:]
-					}
-				}
-			}
-
-			waitsnd = s.kcp.WaitSnd()
-			if waitsnd >= int(s.kcp.snd_wnd) || !s.writeDelay {
-				// put the packets on wire immediately if the inflight window is full
-				// or if write delay is disabled (no merging of outgoing bytes),
-				// so we do not have to wait for the periodic update to uncork.
-				s.kcp.flush(IKCP_FLUSH_FULL)
-			}
-			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
-			s.writeWait(n)
+		n, ok := s.writeBuffers(v)
+		if ok {
 			return n, nil
 		}
-
-		s.mu.Unlock()
 
 		// If execution reaches here, the call must wait until the transmit
 		// buffer becomes available.
@@ -1656,49 +1726,8 @@ func buffersEmpty(v [][]byte) bool {
 	return true
 }
 
-// readLocked copies data that is ready into b and reports whether there was
-// any. It must be called with s.mu held.
-func (s *UDPSession) readLocked(b []byte) (int, bool) {
-	// bufptr points to the current position in recvbuf. If the previous read's
-	// buffer was too small, the remaining data is saved in bufptr for the next
-	// read.
-	if len(s.bufptr) > 0 {
-		n := copy(b, s.bufptr)
-		s.bufptr = s.bufptr[n:]
-		s.notifyReadIfAvailableLocked()
-		return n, true
-	}
-
-	size := s.kcp.PeekSize() // peek data size from kcp
-	if size <= 0 {
-		return 0, false
-	}
-	// If b is large enough, read directly from KCP into b without an
-	// intermediate buffer.
-	if len(b) >= size {
-		s.kcp.Recv(b)
-		s.notifyReadIfAvailableLocked()
-		return size, true
-	}
-
-	// Otherwise, read into recvbuf first, then copy to b. Grow recvbuf to fit
-	// the packet when necessary.
-	if cap(s.recvbuf) < size {
-		// recvbuf is usually sized to the maximum packet size
-		s.recvbuf = make([]byte, size)
-	}
-
-	// resize the length of recvbuf to match the data size
-	s.recvbuf = s.recvbuf[:size]
-	s.kcp.Recv(s.recvbuf)    // read data to recvbuf first
-	n := copy(b, s.recvbuf)  // then copy bytes to 'b' as many as possible
-	s.bufptr = s.recvbuf[n:] // pointer update
-	s.notifyReadIfAvailableLocked()
-	return n, true
-}
-
 func (s *UDPSession) notifyReadIfAvailableLocked() {
-	if len(s.bufptr) > 0 || s.kcp.PeekSize() > 0 {
+	if s.input.Len() > 0 || s.kcp.PeekSize() > 0 {
 		s.notifyReadEvent()
 	}
 }
@@ -1707,13 +1736,11 @@ func (s *UDPSession) notifyReadIfAvailableLocked() {
 // ready, and the session's error once it is closed or its socket failed and
 // no data is left.
 func (s *UDPSession) TryRead(b []byte) (int, error) {
-	s.mu.Lock()
-	n, ok := s.readLocked(b)
-	s.mu.Unlock()
+	n, ok := s.read(b)
 	if ok {
-		atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
 		return n, nil
 	}
+
 	select {
 	case <-s.chSocketReadError:
 		return 0, s.socketReadError.Load().(error)

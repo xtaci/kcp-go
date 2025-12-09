@@ -96,8 +96,8 @@ func TestConcurrentReadersNotifiedForBufferedData(t *testing.T) {
 		chReadEvent:       make(chan struct{}, 1),
 		chSocketReadError: make(chan struct{}),
 		kcp:               NewKCP(1, nil),
-		bufptr:            []byte("ab"),
 	}
+	s.input.Reset([]byte("ab"))
 	defer close(s.die)
 
 	type result struct {
