@@ -148,7 +148,7 @@ type (
 		// packets waiting to be sent on wire
 		chPostProcessing chan []byte
 
-		// platform optimized
+		// platform-dependent optimizations
 		platform platform
 
 		// rate limiter (bytes per second)
