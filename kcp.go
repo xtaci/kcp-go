@@ -409,10 +409,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 			for seg := range kcp.snd_queue.ForEachReverse {
 				if len(seg.data) < int(kcp.mss) {
 					capacity := int(kcp.mss) - len(seg.data)
-					extend := capacity
-					if len(buffer) < capacity {
-						extend = len(buffer)
-					}
+					extend := min(len(buffer), capacity)
 
 					// grow slice, the underlying cap is guaranteed to
 					// be larger than kcp.mss
@@ -445,12 +442,7 @@ func (kcp *KCP) Send(buffer []byte) int {
 	}
 
 	for i := 0; i < count; i++ {
-		var size int
-		if len(buffer) > int(kcp.mss) {
-			size = int(kcp.mss)
-		} else {
-			size = len(buffer)
-		}
+		size := min(len(buffer), int(kcp.mss))
 		seg := kcp.newSegment(size)
 		copy(seg.data, buffer[:size])
 		if kcp.stream == 0 { // message mode
@@ -654,13 +646,14 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 		}
 		kcp.shrink_buf()
 
-		if cmd == IKCP_CMD_ACK {
+		switch cmd {
+		case IKCP_CMD_ACK:
 			kcp.debugLog(IKCP_LOG_IN_ACK, "conv", conv, "sn", sn, "una", una, "ts", ts, "rto", kcp.rx_rto)
 			kcp.parse_ack(sn)
 			flushSegments |= kcp.parse_fastack(sn, ts)
 			updateRTT |= 1
 			latest = ts
-		} else if cmd == IKCP_CMD_PUSH {
+		case IKCP_CMD_PUSH:
 			repeat := true
 			if _itimediff(sn, kcp.rcv_nxt+kcp.rcv_wnd) < 0 {
 				kcp.ack_push(sn, ts)
@@ -681,14 +674,14 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
 			}
 			kcp.debugLog(IKCP_LOG_IN_PUSH, "conv", conv, "sn", sn, "una", una, "ts", ts, "packettype", pktType, "repeat", repeat)
-		} else if cmd == IKCP_CMD_WASK {
+		case IKCP_CMD_WASK:
 			// ready to send back IKCP_CMD_WINS in Ikcp_flush
 			// tell remote my window size
 			kcp.probe |= IKCP_ASK_TELL
 			kcp.debugLog(IKCP_LOG_IN_WASK, "conv", conv, "wnd", wnd, "ts", ts)
-		} else if cmd == IKCP_CMD_WINS {
+		case IKCP_CMD_WINS:
 			kcp.debugLog(IKCP_LOG_IN_WINS, "conv", conv, "wnd", wnd, "ts", ts)
-		} else {
+		default:
 			return -3
 		}
 
@@ -981,20 +974,14 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 		// rate halving, https://tools.ietf.org/html/rfc6937
 		if change > 0 {
 			inflight := kcp.snd_nxt - kcp.snd_una
-			kcp.ssthresh = inflight / 2
-			if kcp.ssthresh < IKCP_THRESH_MIN {
-				kcp.ssthresh = IKCP_THRESH_MIN
-			}
+			kcp.ssthresh = max(inflight / 2, IKCP_THRESH_MIN)
 			kcp.cwnd = kcp.ssthresh + resent
 			kcp.incr = kcp.cwnd * kcp.mss
 		}
 
 		// congestion control, https://tools.ietf.org/html/rfc5681
 		if lostSegs > 0 {
-			kcp.ssthresh = cwnd / 2
-			if kcp.ssthresh < IKCP_THRESH_MIN {
-				kcp.ssthresh = IKCP_THRESH_MIN
-			}
+			kcp.ssthresh = max(cwnd / 2, IKCP_THRESH_MIN)
 			kcp.cwnd = 1
 			kcp.incr = kcp.mss
 		}

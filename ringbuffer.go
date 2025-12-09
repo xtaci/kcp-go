@@ -38,9 +38,7 @@ type RingBuffer[T any] struct {
 // NewRingBuffer creates a new Ring with a specified initial capacity.
 // If the provided size is <= 8, it defaults to 8.
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
-	if size <= RINGBUFFER_MIN {
-		size = RINGBUFFER_MIN // Ensure a minimum size
-	}
+	size = max(size, RINGBUFFER_MIN) // Ensure a minimum size
 	return &RingBuffer[T]{
 		head:     0,
 		tail:     0,
