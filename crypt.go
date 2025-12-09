@@ -28,6 +28,7 @@ import (
 	"crypto/des"
 	"crypto/sha1"
 	"crypto/subtle"
+	"sync"
 	"unsafe"
 
 	"github.com/tjfoc/gmsm/sm4"
@@ -65,6 +66,7 @@ type BlockCrypt interface {
 }
 
 type blockCrypt struct {
+	enc, dec       sync.Mutex
 	encbuf, decbuf []byte // 64bit alignment enc/dec buffer
 	block          cipher.Block
 }
@@ -79,10 +81,16 @@ func newBlockCrypt(block cipher.Block) BlockCrypt {
 }
 
 func (c *blockCrypt) Encrypt(dst, src []byte) {
+	c.enc.Lock()
+	defer c.enc.Unlock()
+
 	encrypt(c.block, dst, src, c.encbuf)
 }
 
 func (c *blockCrypt) Decrypt(dst, src []byte) {
+	c.dec.Lock()
+	defer c.dec.Unlock()
+
 	decrypt(c.block, dst, src, c.decbuf)
 }
 
