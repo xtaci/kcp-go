@@ -10,11 +10,13 @@ func TestBufferPoolGetSize(t *testing.T) {
 	// Check length
 	if len(buf) != mtuLimit {
 		t.Fatalf("expected len=%d, got %d", mtuLimit, len(buf))
+		return
 	}
 
 	// Check capacity
 	if cap(buf) != mtuLimit {
 		t.Fatalf("expected cap=%d, got %d", mtuLimit, cap(buf))
+		return
 	}
 }
 
@@ -34,10 +36,12 @@ func TestBufferPoolPutAndReuse(t *testing.T) {
 	// Check if it is reused by comparing pointer address
 	if &buf2[0] != &buf[0] {
 		t.Fatalf("expected buffer reuse, but got a new one")
+		return
 	}
 
 	if buf2[0] != 99 {
 		t.Fatalf("expected reused buffer to keep previous data")
+		return
 	}
 }
 
@@ -54,5 +58,6 @@ func TestBufferPoolPutWrongSizeIgnored(t *testing.T) {
 
 	if cap(buf) != mtuLimit {
 		t.Fatalf("pool accepted wrong-sized buffer; expected cap=%d, got %d", mtuLimit, cap(buf))
+		return
 	}
 }

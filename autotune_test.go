@@ -32,8 +32,8 @@ func TestAutoTune(t *testing.T) {
 	signals := []uint32{0, 0, 0, 0, 0, 0}
 
 	tune := autoTune{}
-	for i := 0; i < len(signals); i++ {
-		if signals[i] == 0 {
+	for i, signal := range signals {
+		if signal == 0 {
 			tune.Sample(false, uint32(i))
 		} else {
 			tune.Sample(true, uint32(i))
@@ -45,8 +45,8 @@ func TestAutoTune(t *testing.T) {
 
 	signals = []uint32{1, 0, 1, 0, 0, 1}
 	tune = autoTune{}
-	for i := 0; i < len(signals); i++ {
-		if signals[i] == 0 {
+	for i, signal := range signals {
+		if signal == 0 {
 			tune.Sample(false, uint32(i))
 		} else {
 			tune.Sample(true, uint32(i))
@@ -57,8 +57,8 @@ func TestAutoTune(t *testing.T) {
 
 	signals = []uint32{1, 0, 0, 0, 0, 1}
 	tune = autoTune{}
-	for i := 0; i < len(signals); i++ {
-		if signals[i] == 0 {
+	for i, signal := range signals {
+		if signal == 0 {
 			tune.Sample(false, uint32(i))
 		} else {
 			tune.Sample(true, uint32(i))
@@ -69,7 +69,7 @@ func TestAutoTune(t *testing.T) {
 
 	// minimal test
 	tune = autoTune{}
-	for i := 0; i < 1024; i++ {
+	for i := range 1024 {
 		if i%maxAutoTuneSamples == 0 {
 			tune.Sample(false, uint32(i))
 		} else {
