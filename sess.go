@@ -54,6 +54,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/pkg/errors"
@@ -157,6 +158,11 @@ type (
 		mu sync.Mutex
 	}
 
+	udpConn interface {
+		SyscallConn() (syscall.RawConn, error)
+		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
+	}
+
 	setReadBuffer interface {
 		SetReadBuffer(bytes int) error
 	}
@@ -189,7 +195,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.recvbuf = make([]byte, mtuLimit)
 
 	// cast to writebatch conn
-	if _, ok := conn.(*net.UDPConn); ok {
+	if _, ok := conn.(udpConn); ok {
 		addr, err := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
 		if err == nil {
 			if addr.IP.To4() != nil {
