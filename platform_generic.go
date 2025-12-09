@@ -20,42 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build linux
+//go:build !linux
 
 package kcp
 
-import (
-	"sync/atomic"
+type platform struct{}
 
-	"github.com/pkg/errors"
-	"golang.org/x/net/ipv4"
-)
-
-// tx is the optimized procedure to transmit packets utilizing the linux sendmmsg system call
-func (s *UDPSession) tx(txqueue []ipv4.Message) {
-	// default version
-	if s.platform.batchConn == nil {
-		s.defaultTx(txqueue)
-		return
-	}
-
-	// x/net version
-	nbytes := 0
-	npkts := 0
-	for len(txqueue) > 0 {
-		n, err := s.platform.batchConn.WriteBatch(txqueue, 0)
-		if err != nil {
-			s.notifyWriteError(errors.WithStack(err))
-			break
-		}
-
-		for k := range txqueue[:n] {
-			nbytes += len(txqueue[k].Buffers[0])
-		}
-		npkts += n
-		txqueue = txqueue[n:]
-	}
-
-	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
-	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
-}
+func (sess *UDPSession) initPlatform() {}

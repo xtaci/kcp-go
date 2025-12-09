@@ -20,16 +20,54 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//go:build linux
+
 package kcp
 
-import "golang.org/x/net/ipv4"
+import (
+	"net"
+	"syscall"
 
-const (
-	batchSize = 256
+	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
-// batchConn defines the interface used in batch IO
-type batchConn interface {
-	WriteBatch(ms []ipv4.Message, flags int) (int, error)
-	ReadBatch(ms []ipv4.Message, flags int) (int, error)
+type (
+	platform struct {
+		batchConn batchConn
+	}
+
+	// udpConn is an interface implemented by net.UDPConn.
+	// It can be used for interface assertions to check if a net.Conn is a UDP connection.
+	udpConn interface {
+		SyscallConn() (syscall.RawConn, error)
+		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
+	}
+
+	// batchConn defines the interface used in batch IO
+	batchConn interface {
+		WriteBatch(ms []ipv4.Message, flags int) (int, error)
+		ReadBatch(ms []ipv4.Message, flags int) (int, error)
+	}
+)
+
+func newBatchConn(conn net.PacketConn) batchConn {
+	if _, ok := conn.(udpConn); !ok {
+		return nil
+	}
+
+	addr, err := net.ResolveUDPAddr("udp", conn.LocalAddr().String())
+	if err != nil {
+		return nil
+	}
+
+	if addr.IP.To4() != nil {
+		return ipv4.NewPacketConn(conn)
+	}
+
+	return ipv6.NewPacketConn(conn)
+}
+
+func (sess *UDPSession) initPlatform() {
+	sess.platform.batchConn = newBatchConn(sess.conn)
 }
