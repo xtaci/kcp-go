@@ -184,18 +184,20 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.recvbuf = make([]byte, mtuLimit)
 	sess.initPlatform()
 
-	// FEC codec initialization
-	sess.fecDecoder = newFECDecoder(dataShards, parityShards)
-	if sess.block != nil {
-		sess.fecEncoder = newFECEncoder(dataShards, parityShards, cryptHeaderSize)
-	} else {
-		sess.fecEncoder = newFECEncoder(dataShards, parityShards, 0)
+	// calculate additional header size introduced by encryption
+	switch block := sess.block.(type) {
+	case nil:
+	case *aeadCrypt:
+		sess.headerSize = block.NonceSize()
+	default:
+		sess.headerSize = cryptHeaderSize
 	}
 
-	// calculate additional header size introduced by FEC and encryption
-	if sess.block != nil {
-		sess.headerSize += cryptHeaderSize
-	}
+	// FEC codec initialization
+	sess.fecDecoder = newFECDecoder(dataShards, parityShards)
+	sess.fecEncoder = newFECEncoder(dataShards, parityShards, sess.headerSize)
+
+	// calculate additional header size introduced by FEC
 	if sess.fecEncoder != nil {
 		sess.headerSize += fecHeaderSizePlus2
 	}
@@ -217,7 +219,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 				// drop and recycle to avoid blocking; KCP will retransmit if needed
 				defaultBufferPool.Put(bts)
 			}
-
 		}
 	})
 
@@ -480,6 +481,9 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 	mtu = min(mtuLimit, mtu)
 
 	mtu -= s.headerSize
+	if aead, ok := s.block.(*aeadCrypt); ok {
+		mtu -= aead.Overhead()
+	}
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -630,22 +634,42 @@ func (s *UDPSession) postProcess() {
 				ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
 			}
 
-			// 2&3. crc32 & encryption
-			if s.block != nil {
+			// 2. Encryption
+			switch block := s.block.(type) {
+			case nil:
+			case *aeadCrypt:
+				nonceSize := block.NonceSize()
+
+				dst := buf[:nonceSize]
+				nonce := buf[:nonceSize]
+				plaintext := buf[nonceSize:]
+
+				fillRand(nonce)
+				buf = block.Seal(dst, nonce, plaintext, nil)
+
+				for k := range ecc {
+					dst := ecc[k][:nonceSize]
+					nonce := ecc[k][:nonceSize]
+					plaintext := ecc[k][nonceSize:]
+
+					fillRand(nonce)
+					ecc[k] = block.Seal(dst, nonce, plaintext, nil)
+				}
+			default:
 				fillRand(buf[:nonceSize])
 				checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
 				binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
-				s.block.Encrypt(buf, buf)
+				block.Encrypt(buf, buf)
 
 				for k := range ecc {
 					fillRand(ecc[k][:nonceSize])
 					checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
 					binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
-					s.block.Encrypt(ecc[k], ecc[k])
+					block.Encrypt(ecc[k], ecc[k])
 				}
 			}
 
-			// 4. TxQueue
+			// 3. TxQueue
 			var msg ipv4.Message
 			msg.Addr = s.remote
 
@@ -778,7 +802,25 @@ func (s *UDPSession) notifyWriteError(err error) {
 // network -> [decryption ->] [crc32 ->] [FEC ->] [KCP input ->] stream -> application
 func (s *UDPSession) packetInput(data []byte) {
 	switch block := s.block.(type) {
-	case BlockCrypt:
+	case nil:
+	case *aeadCrypt:
+		nonceSize := block.NonceSize()
+		if len(data) < nonceSize+block.Overhead() {
+			break
+		}
+
+		nonce := data[:nonceSize]
+		ciphertext := data[nonceSize:]
+
+		plaintext, err := block.Open(ciphertext[:0], nonce, ciphertext, nil)
+		if err != nil {
+			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+			return
+		}
+
+		data = plaintext
+	default:
+		// decryption and crc32 check
 		if len(data) < cryptHeaderSize {
 			return
 		}
@@ -791,6 +833,7 @@ func (s *UDPSession) packetInput(data []byte) {
 			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 			return
 		}
+
 		data = data[crcSize:]
 	}
 
@@ -914,9 +957,26 @@ type (
 
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
-	// decryption and crc32 check
 	switch block := l.block.(type) {
-	case BlockCrypt:
+	case nil:
+	case *aeadCrypt:
+		nonceSize := block.NonceSize()
+		if len(data) < nonceSize+block.Overhead() {
+			break
+		}
+
+		nonce := data[:nonceSize]
+		ciphertext := data[nonceSize:]
+
+		plaintext, err := block.Open(ciphertext[:0], nonce, ciphertext, nil)
+		if err != nil {
+			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+			return
+		}
+
+		data = plaintext
+	default:
+		// decryption and crc32 check
 		if len(data) < cryptHeaderSize {
 			return
 		}
@@ -929,6 +989,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
 			return
 		}
+
 		data = data[crcSize:]
 	}
 

@@ -25,11 +25,15 @@ package kcp
 import (
 	"bytes"
 	"crypto/aes"
+	"crypto/cipher"
 	"crypto/md5"
 	"crypto/rand"
+	"encoding/binary"
 	"hash/crc32"
 	"io"
 	"testing"
+
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 func TestSM4(t *testing.T) {
@@ -282,6 +286,82 @@ func BenchmarkCRC32(b *testing.B) {
 	b.SetBytes(int64(len(content)))
 	for b.Loop() {
 		crc32.ChecksumIEEE(content)
+	}
+}
+
+func BenchmarkCFB_AES_128_CRC32(b *testing.B) {
+	bc, err := NewAESBlockCrypt(pass[:16])
+	if err != nil {
+		b.Fatal(err)
+		return
+	}
+
+	data := make([]byte, 1400, mtuLimit)
+	b.SetBytes(1400)
+
+	for b.Loop() {
+		checksum := crc32.ChecksumIEEE(data[cryptHeaderSize:])
+		binary.LittleEndian.PutUint32(data[nonceSize:cryptHeaderSize], checksum)
+		bc.Encrypt(data, data)
+	}
+}
+
+func BenchmarkAEAD_AES_128_GCM(b *testing.B) {
+	block, err := aes.NewCipher(pass[:16])
+	if err != nil {
+		panic(err)
+		return
+	}
+
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		panic(err)
+		return
+	}
+
+	data := make([]byte, 1400, mtuLimit)
+	b.SetBytes(1400)
+
+	nonce := data[:aead.NonceSize()]
+	plaintext := data[aead.NonceSize():]
+
+	for b.Loop() {
+		aead.Seal(plaintext[:0], nonce, plaintext, nil)
+	}
+}
+
+func BenchmarkCFB_Salsa20_CRC32(b *testing.B) {
+	bc, err := NewSalsa20BlockCrypt(pass[:32])
+	if err != nil {
+		b.Fatal(err)
+		return
+	}
+
+	data := make([]byte, 1400, mtuLimit)
+	b.SetBytes(1400)
+
+	for b.Loop() {
+		checksum := crc32.ChecksumIEEE(data[cryptHeaderSize:])
+		binary.LittleEndian.PutUint32(data[nonceSize:cryptHeaderSize], checksum)
+		bc.Encrypt(data, data)
+	}
+}
+
+func BenchmarkAEAD_Chacha20_Poly1035(b *testing.B) {
+	aead, err := chacha20poly1305.New(pass[:32])
+	if err != nil {
+		panic(err)
+		return
+	}
+
+	data := make([]byte, 1400, mtuLimit)
+	b.SetBytes(1400)
+
+	nonce := data[:aead.NonceSize()]
+	plaintext := data[aead.NonceSize():]
+
+	for b.Loop() {
+		aead.Seal(plaintext[:0], nonce, plaintext, nil)
 	}
 }
 
