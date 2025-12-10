@@ -69,7 +69,7 @@ var _ BlockCrypt = &aeadCrypt{}
 
 // aeadCrypt implements BlockCrypt interface using cipher.AEAD
 type aeadCrypt struct {
-	aesgcm cipher.AEAD
+	aead cipher.AEAD
 }
 
 func (aeadCrypt) Encrypt(_, _ []byte) {
@@ -81,19 +81,19 @@ func (aeadCrypt) Decrypt(_, _ []byte) {
 }
 
 func (a *aeadCrypt) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
-	return a.aesgcm.Seal(dst, nonce, plaintext, additionalData)
+	return a.aead.Seal(dst, nonce, plaintext, additionalData)
 }
 
 func (a *aeadCrypt) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
-	return a.aesgcm.Open(dst, nonce, ciphertext, additionalData)
+	return a.aead.Open(dst, nonce, ciphertext, additionalData)
 }
 
 func (a *aeadCrypt) NonceSize() int {
-	return a.aesgcm.NonceSize()
+	return a.aead.NonceSize()
 }
 
 func (a *aeadCrypt) Overhead() int {
-	return a.aesgcm.Overhead()
+	return a.aead.Overhead()
 }
 
 // NewAEADCrypt creates an AEAD BlockCrypt instance from an existing cipher.AEAD
