@@ -30,6 +30,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	mrand "math/rand"
 	"net"
 	"net/http"
 	_ "net/http/pprof"
@@ -309,24 +310,8 @@ func TestSendRecv(t *testing.T) {
 	}
 	defer cli.Close()
 	cli.SetWriteDelay(true)
-	cli.SetDUP(1)
-	const N = 100
-	buf := make([]byte, 10)
-	for i := range N {
-		msg := fmt.Sprintf("hello%v", i)
-		cli.Write([]byte(msg))
 
-		n, err := cli.Read(buf)
-		if err != nil {
-			panic(err)
-			return
-		}
-
-		if string(buf[:n]) != msg {
-			t.Fail()
-			return
-		}
-	}
+	randomEchoTest(t, cli)
 }
 
 func TestAEADSendRecv(t *testing.T) {
@@ -343,22 +328,61 @@ func TestAEADSendRecv(t *testing.T) {
 	}
 	defer cli.Close()
 	cli.SetWriteDelay(true)
-	const N = 100
-	buf := make([]byte, 10)
-	for i := range N {
-		msg := fmt.Sprintf("hello%v", i)
-		cli.Write([]byte(msg))
 
-		n, err := cli.Read(buf)
-		if err != nil {
-			panic(err)
-			return
-		}
+	randomEchoTest(t, cli)
+}
 
-		if string(buf[:n]) != msg {
-			t.Fail()
-			return
+func randomEchoTest(t *testing.T, cli *UDPSession) {
+	seed := time.Now().UnixNano()
+	writerSrc := mrand.NewSource(seed)
+	readerSrc := mrand.NewSource(seed)
+
+	bytesSent := int64(0)
+	bytesReceived := int64(0)
+
+	const N = 100 * 1024 * 1024
+
+	// Writer goroutine
+	go func() {
+		r := mrand.New(writerSrc)
+		for bytesSent < N {
+			length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			if bytesSent+int64(length) > N {
+				length = int(N - bytesSent)
+			}
+			sndbuf := make([]byte, length)
+			for i := range sndbuf {
+				sndbuf[i] = byte(r.Int())
+			}
+
+			n, err := cli.Write(sndbuf)
+			if err != nil {
+				t.Errorf("Write error: %v", err)
+				return
+			}
+			bytesSent += int64(n)
 		}
+	}()
+
+	// Reader goroutine
+	r := mrand.New(readerSrc)
+	for bytesReceived < N {
+		length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+		if bytesReceived+int64(length) > N {
+			length = int(N - bytesReceived)
+		}
+		rcvbuf := make([]byte, length)
+		n, err := cli.Read(rcvbuf)
+		if err != nil && err != io.EOF {
+			t.Fatalf("Read error: %v", err)
+		}
+		for i := 0; i < n; i++ {
+			expectedByte := byte(r.Int())
+			if rcvbuf[i] != expectedByte {
+				t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), rcvbuf[i], expectedByte)
+			}
+		}
+		bytesReceived += int64(n)
 	}
 }
 
