@@ -801,6 +801,7 @@ func (s *UDPSession) packetInput(data []byte) {
 	s.kcpInput(data)
 }
 
+// kcpInput inputs a decrypted and crc32-checked packet into kcp with FEC handling
 func (s *UDPSession) kcpInput(data []byte) {
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
@@ -809,7 +810,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	fecFlag := binary.LittleEndian.Uint16(data[4:])
 
 	switch fecFlag {
-	case typeData, typeParity:
+	case typeData, typeParity: // packet with FEC
 		if len(data) < fecHeaderSizePlus2 {
 			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			return
@@ -865,7 +866,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if kcpInErrors > 0 {
 			atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 		}
-	default:
+	default: // packet without FEC
 		s.mu.Lock()
 		defer s.mu.Unlock()
 
@@ -913,6 +914,7 @@ type (
 
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
+	// decryption and crc32 check
 	switch block := l.block.(type) {
 	case BlockCrypt:
 		if len(data) < cryptHeaderSize {
@@ -930,17 +932,20 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		data = data[crcSize:]
 	}
 
+	// basic check for minimum packet size
 	if len(data) < IKCP_OVERHEAD {
 		return
 	}
 
+	// look for existing session
 	l.sessionLock.RLock()
-	s, ok := l.sessions[addr.String()]
+	s, exist := l.sessions[addr.String()]
 	l.sessionLock.RUnlock()
 
 	var conv, sn uint32
 	hasConv := false
 
+	// try to get conversation id from the packet
 	// 16bit kcp cmd [81-84] and frg [0-255] will not overlap with FEC type 0x00f1 0x00f2
 	fecFlag := binary.LittleEndian.Uint16(data[4:])
 
@@ -963,29 +968,32 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		sn = binary.LittleEndian.Uint32(data[IKCP_SN_OFFSET:])
 	}
 
-	if ok {
-		// existing connection
-
+	// on an existing connection
+	if exist {
+		// If we have a valid conversation id or we cannot get conversation id from the packet,
+		// just feed the data into the existing session.
 		if !hasConv || conv == s.kcp.conv {
-			// parity data or valid conversation
 			s.kcpInput(data)
 			return
 		}
-
+		// conversation id mismatched, only accept reset packet with sn == 0
 		if sn != 0 {
 			return
 		}
-
-		// should replace current connection
+		// Close will remove the session from listener's session map,
+		// So we can create a new session with the same addr below.
 		s.Close()
 	}
 
+	// The connection does not exist, try to create a new one.
+	// But if we don't have a valid conversation id, nothing we can do here except dropping the packet.
 	if !hasConv {
 		return
 	}
 
+	// Now we have a valid conversation id here without a session object, create a new session.
+	// do not let the new sessions overwhelm accept queue
 	if len(l.chAccepts) >= cap(l.chAccepts) {
-		// do not let the new sessions overwhelm accept queue
 		return
 	}
 
