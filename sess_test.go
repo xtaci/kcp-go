@@ -316,11 +316,11 @@ func TestSendRecv(t *testing.T) {
 
 func TestAEADSendRecv(t *testing.T) {
 	port := nextPort()
-	block1, _ := NewAEADCrypt(pass)
+	block1, _ := NewAESGCMCrypt(pass)
 	l := echoServer(port, block1)
 	defer l.Close()
 
-	block2, _ := NewAEADCrypt(pass)
+	block2, _ := NewAESGCMCrypt(pass)
 	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)

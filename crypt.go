@@ -96,10 +96,18 @@ func (a *aeadCrypt) Overhead() int {
 	return a.aesgcm.Overhead()
 }
 
-// NewAEADCrypt creates an AEAD BlockCrypt instance using AES-GCM
+// NewAEADCrypt creates an AEAD BlockCrypt instance from an existing cipher.AEAD
+func NewAEADCrypt(aead cipher.AEAD) BlockCrypt {
+	if aead == nil {
+		return nil
+	}
+	return &aeadCrypt{aead}
+}
+
+// NewAESGCMCrypt creates an AEAD BlockCrypt instance using AES-GCM
 // key must be either 16, 24, or 32 bytes to select
 // AES-128, AES-192, or AES-256.
-func NewAEADCrypt(key []byte) (BlockCrypt, error) {
+func NewAESGCMCrypt(key []byte) (BlockCrypt, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err

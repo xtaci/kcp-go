@@ -148,7 +148,7 @@ func cryptTest(t *testing.T, bc BlockCrypt) {
 }
 
 func TestAEAD(t *testing.T) {
-	bc, err := NewAEADCrypt(pass[:32])
+	bc, err := NewAESGCMCrypt(pass[:32])
 	if err != nil {
 		t.Fatal(err)
 		return
