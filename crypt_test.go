@@ -147,6 +147,45 @@ func cryptTest(t *testing.T, bc BlockCrypt) {
 	}
 }
 
+func TestAEAD(t *testing.T) {
+	bc, err := NewAEADCrypt(pass[:32])
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+
+	aead := bc.(*aeadCrypt)
+
+	nonceSize := aead.NonceSize()
+
+	size := mtuLimit - cryptHeaderSize - aead.Overhead()
+	data := make([]byte, size)
+	io.ReadFull(rand.Reader, data)
+	packet := make([]byte, mtuLimit)
+
+	// Seal
+	dst := packet[:nonceSize]
+	nonce := packet[:nonceSize]
+	fillRand(nonce)
+
+	packet = aead.Seal(dst, nonce, data, nil)
+
+	// Open
+	dst = packet[:nonceSize]
+	nonce = packet[:nonceSize]
+	ciphertext := packet[nonceSize:]
+
+	decrypted, err := aead.Open(dst, nonce, ciphertext, nil)
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+
+	if !bytes.Equal(data, decrypted[nonceSize:]) {
+		t.Fail()
+	}
+}
+
 func BenchmarkSM4(b *testing.B) {
 	bc, err := NewSM4BlockCrypt(pass[:16])
 	if err != nil {
