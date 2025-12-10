@@ -62,12 +62,11 @@ func nextPort() int {
 	return port % 65536
 }
 
-func dialEcho(port int) (*UDPSession, error) {
+func dialEcho(port int, block BlockCrypt) (*UDPSession, error) {
 	// block, _ := NewNoneBlockCrypt(pass)
 	// block, _ := NewSimpleXORBlockCrypt(pass)
 	// block, _ := NewTEABlockCrypt(pass[:16])
 	// block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
 	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
 	if err != nil {
 		panic(err)
@@ -108,34 +107,6 @@ func dialSink(port int) (*UDPSession, error) {
 	return sess, nil
 }
 
-func dialEchoAEAD(port int) (*UDPSession, error) {
-	// block, _ := NewNoneBlockCrypt(pass)
-	// block, _ := NewSimpleXORBlockCrypt(pass)
-	// block, _ := NewTEABlockCrypt(pass[:16])
-	// block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewAEADCrypt(pass)
-	sess, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 3)
-	if err != nil {
-		panic(err)
-		return nil, err
-	}
-
-	sess.SetStreamMode(true)
-	sess.SetWindowSize(1024, 1024)
-	sess.SetReadBuffer(16 * 1024 * 1024)
-	sess.SetWriteBuffer(16 * 1024 * 1024)
-	sess.SetNoDelay(1, 10, 2, 1)
-	sess.SetMtu(1400)
-	sess.SetMtu(1600)
-	sess.SetMtu(1400)
-	sess.SetACKNoDelay(true)
-	sess.SetACKNoDelay(false)
-	sess.SetDeadline(time.Now().Add(time.Minute))
-	sess.SetRateLimit(200 * 1024 * 1024)
-	sess.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
-	return sess, nil
-}
-
 func dialTinyBufferEcho(port int) (*UDPSession, error) {
 	// block, _ := NewNoneBlockCrypt(pass)
 	// block, _ := NewSimpleXORBlockCrypt(pass)
@@ -151,12 +122,11 @@ func dialTinyBufferEcho(port int) (*UDPSession, error) {
 }
 
 // ////////////////////////
-func listenEcho(port int) (net.Listener, error) {
+func listenEcho(port int, block BlockCrypt) (net.Listener, error) {
 	// block, _ := NewNoneBlockCrypt(pass)
 	// block, _ := NewSimpleXORBlockCrypt(pass)
 	// block, _ := NewTEABlockCrypt(pass[:16])
 	// block, _ := NewAESBlockCrypt(pass)
-	block, _ := NewSalsa20BlockCrypt(pass)
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 1)
 }
 
@@ -173,41 +143,8 @@ func listenSink(port int) (net.Listener, error) {
 	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), nil, 0, 0)
 }
 
-func listenEchoAEAD(port int) (net.Listener, error) {
-	block, _ := NewAEADCrypt(pass)
-	return ListenWithOptions(fmt.Sprintf("127.0.0.1:%v", port), block, 10, 1)
-}
-
-func echoServer(port int) net.Listener {
-	l, err := listenEcho(port)
-	if err != nil {
-		panic(err)
-		return nil
-	}
-
-	go func() {
-		kcplistener := l.(*Listener)
-		kcplistener.SetReadBuffer(4 * 1024 * 1024)
-		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
-		kcplistener.SetDSCP(46)
-		for {
-			s, err := l.Accept()
-			if err != nil {
-				return
-			}
-
-			// coverage test
-			s.(*UDPSession).SetReadBuffer(4 * 1024 * 1024)
-			s.(*UDPSession).SetWriteBuffer(4 * 1024 * 1024)
-			go handleEcho(s.(*UDPSession))
-		}
-	}()
-
-	return l
-}
-
-func echoServerAEAD(port int) net.Listener {
-	l, err := listenEchoAEAD(port)
+func echoServer(port int, block BlockCrypt) net.Listener {
+	l, err := listenEcho(port, block)
 	if err != nil {
 		panic(err)
 		return nil
@@ -333,11 +270,13 @@ func handleTinyBufferEcho(conn *UDPSession) {
 ///////////////////////////
 
 func TestTimeout(t *testing.T) {
-	port := int(atomic.AddUint32(&baseport, 1))
-	l := echoServer(port)
+	port := nextPort()
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -357,11 +296,13 @@ func TestTimeout(t *testing.T) {
 }
 
 func TestSendRecv(t *testing.T) {
-	port := int(atomic.AddUint32(&baseport, 1))
-	l := echoServer(port)
+	port := nextPort()
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -390,10 +331,12 @@ func TestSendRecv(t *testing.T) {
 
 func TestAEADSendRecv(t *testing.T) {
 	port := nextPort()
-	l := echoServerAEAD(port)
+	block1, _ := NewAEADCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEchoAEAD(port)
+	block2, _ := NewAEADCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -421,10 +364,12 @@ func TestAEADSendRecv(t *testing.T) {
 
 func TestSendVector(t *testing.T) {
 	port := nextPort()
-	l := echoServer(port)
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -506,11 +451,13 @@ func TestClose(t *testing.T) {
 	var n int
 	var err error
 
-	port := int(atomic.AddUint32(&baseport, 1))
-	l := echoServer(port)
+	port := nextPort()
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -533,7 +480,8 @@ func TestClose(t *testing.T) {
 	}
 
 	// write, close, read, read
-	cli, err = dialEcho(port)
+	block3, _ := NewSalsa20BlockCrypt(pass)
+	cli, err = dialEcho(port, block3)
 	if err != nil {
 		panic(err)
 	}
@@ -564,7 +512,8 @@ func TestClose(t *testing.T) {
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 	port := nextPort()
-	l := echoServer(port)
+	block, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block)
 	defer l.Close()
 
 	var wg sync.WaitGroup
@@ -576,7 +525,8 @@ func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
 }
 
 func parallel_client(wg *sync.WaitGroup, port int) (err error) {
-	cli, err := dialEcho(port)
+	block, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block)
 	if err != nil {
 		panic(err)
 		return
@@ -606,11 +556,13 @@ func BenchmarkEchoSpeed1M(b *testing.B) {
 
 func speedclient(b *testing.B, nbytes int) {
 	port := nextPort()
-	l := echoServer(port)
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
 	b.ReportAllocs()
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -823,10 +775,12 @@ func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
 // this function test the data correctness with FEC and encryption enabled
 func TestReliability(t *testing.T) {
 	port := nextPort()
-	l := echoServer(port)
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -876,7 +830,8 @@ func TestControl(t *testing.T) {
 		return
 	}
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -984,10 +939,12 @@ func TestSessionReadAfterClosed(t *testing.T) {
 
 func TestSetMTU(t *testing.T) {
 	port := nextPort()
-	l := echoServer(port)
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
@@ -1046,10 +1003,12 @@ func newLoggerWithMilliseconds() *slog.Logger {
 //	go test -run ^TestSetLogger$
 func TestSetLogger(t *testing.T) {
 	port := nextPort()
-	l := echoServer(port)
+	block1, _ := NewSalsa20BlockCrypt(pass)
+	l := echoServer(port, block1)
 	defer l.Close()
 
-	cli, err := dialEcho(port)
+	block2, _ := NewSalsa20BlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 		return
