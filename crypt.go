@@ -86,7 +86,7 @@ func (a *aeadCrypt) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
 	// check the sealed buffer is using the provided dst slice
 	if dst != nil {
 		if &sealedbuf[0] != &dst[:1][0] {
-			panic("AEAD encryption allocated new slice, please increase MTU size")
+			panic("AEAD Seal allocated new slice, please increase MTU size")
 		}
 	}
 
@@ -102,7 +102,7 @@ func (a *aeadCrypt) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte,
 	// check the opened buffer is using the provided dst slice
 	if dst != nil {
 		if &openedbuf[0] != &dst[:1][0] {
-			panic("AEAD encryption allocated new slice, please increase MTU size")
+			panic("AEAD Open allocated new slice, please increase MTU size")
 		}
 	}
 	return openedbuf, err
