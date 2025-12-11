@@ -837,7 +837,9 @@ func (s *UDPSession) packetInput(data []byte) {
 		data = data[crcSize:]
 	}
 
+	// basic check for minimum packet size
 	if len(data) < IKCP_OVERHEAD {
+		atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
 		return
 	}
 
