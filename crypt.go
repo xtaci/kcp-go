@@ -81,31 +81,15 @@ func (aeadCrypt) Decrypt(_, _ []byte) {
 }
 
 func (a *aeadCrypt) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
-	sealedbuf := a.aead.Seal(dst, nonce, plaintext, additionalData)
-
-	// check the sealed buffer is using the provided dst slice
-	if dst != nil {
-		if &sealedbuf[0] != &dst[:1][0] {
-			panic("AEAD Seal allocated new slice, please increase MTU size")
-		}
+	if dst != nil && cap(dst) < len(plaintext)+a.aead.Overhead() {
+		panic("AEAD Seal allocated new slice, please increase MTU size")
 	}
 
-	return sealedbuf
+	return a.aead.Seal(dst, nonce, plaintext, additionalData)
 }
 
 func (a *aeadCrypt) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
-	openedbuf, err := a.aead.Open(dst, nonce, ciphertext, additionalData)
-	if err != nil {
-		return nil, err
-	}
-
-	// check the opened buffer is using the provided dst slice
-	if dst != nil {
-		if &openedbuf[0] != &dst[:1][0] {
-			panic("AEAD Open allocated new slice, please increase MTU size")
-		}
-	}
-	return openedbuf, err
+	return a.aead.Open(dst, nonce, ciphertext, additionalData)
 }
 
 func (a *aeadCrypt) NonceSize() int {
