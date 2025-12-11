@@ -23,14 +23,59 @@
 package kcp
 
 import (
+	"container/heap"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
 func TestAutoTune(t *testing.T) {
+	// Group1
 	signals := []uint32{0, 0, 0, 0, 0, 0}
+	testGroup(t, 1, signals, -1, -1)
 
+	// Group2
+	signals = []uint32{0, 1, 0, 1, 0, 1}
+	testGroup(t, 2, signals, 1, 1)
+
+	// Group3
+	signals = []uint32{1, 0, 1, 0, 0, 1}
+	testGroup(t, 3, signals, 1, 1)
+
+	// Group4
+	signals = []uint32{1, 0, 0, 0, 0, 1}
+	testGroup(t, 4, signals, 4, -1)
+
+	// Group5
+	signals = []uint32{1, 1, 1, 1, 1, 1}
+	testGroup(t, 5, signals, -1, -1)
+
+	// Group6
+	signals = []uint32{1, 1, 0, 1, 1, 0}
+	testGroup(t, 6, signals, 1, 2)
+
+	// Group7
+	signals = []uint32{0, 1, 1, 1, 0, 1}
+	testGroup(t, 7, signals, 1, 3)
+
+	// Group8
+	signals = []uint32{1, 1, 1, 1, 1, 1}
+	testGroup(t, 8, signals, -1, -1)
+
+	// Group9
+	signals = []uint32{0, 1, 1, 1, 1, 0}
+	testGroup(t, 9, signals, -1, 4)
+
+	// Group10
+	signals = []uint32{0, 0, 1, 1, 0, 0}
+	testGroup(t, 10, signals, -1, 2)
+
+	// Group11
+	signals = []uint32{0, 0, 0, 1, 1, 1}
+	testGroup(t, 11, signals, -1, -1)
+}
+
+func testGroup(t *testing.T, gid int, signals []uint32, expectedFalse, expectedTrue int) {
 	tune := autoTune{}
 	for i, signal := range signals {
 		if signal == 0 {
@@ -40,46 +85,49 @@ func TestAutoTune(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, -1, tune.FindPeriod(false))
-	assert.Equal(t, -1, tune.FindPeriod(true))
+	t.Log("Group#", gid, signals, tune.FindPeriod(false), tune.FindPeriod(true))
+	assert.Equal(t, tune.FindPeriod(true), expectedTrue)
+	assert.Equal(t, tune.FindPeriod(false), expectedFalse)
+}
 
-	signals = []uint32{1, 0, 1, 0, 0, 1}
-	tune = autoTune{}
-	for i, signal := range signals {
-		if signal == 0 {
-			tune.Sample(false, uint32(i))
-		} else {
-			tune.Sample(true, uint32(i))
-		}
-	}
-	assert.Equal(t, 1, tune.FindPeriod(false))
-	assert.Equal(t, 1, tune.FindPeriod(true))
-
-	signals = []uint32{1, 0, 0, 0, 0, 1}
-	tune = autoTune{}
-	for i, signal := range signals {
-		if signal == 0 {
-			tune.Sample(false, uint32(i))
-		} else {
-			tune.Sample(true, uint32(i))
-		}
-	}
-	assert.Equal(t, -1, tune.FindPeriod(true))
-	assert.Equal(t, 4, tune.FindPeriod(false))
-
+func TestAutoTuneOverflow(t *testing.T) {
 	// minimal test
-	tune = autoTune{}
+	tune := autoTune{}
 	for i := range 1024 {
 		if i%maxAutoTuneSamples == 0 {
 			tune.Sample(false, uint32(i))
 		} else {
 			tune.Sample(true, uint32(i))
 		}
+		assert.LessOrEqual(t, len(tune.pulses), maxAutoTuneSamples)
 	}
-	assert.NotEqual(t, 0, tune.pulses[0].seq)
-	minSeq := tune.pulses[0].seq
-	t.Log("minimal seq", tune.pulses[0].seq)
 
-	tune.Sample(false, minSeq-1)
-	assert.Equal(t, minSeq, tune.pulses[0].seq)
+	assert.Equal(t, len(tune.pulses), maxAutoTuneSamples)
+}
+
+func TestAutoTunePop(t *testing.T) {
+	signals := []uint32{0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0}
+	tune := autoTune{}
+	for i, signal := range signals {
+		if signal == 0 {
+			tune.Sample(false, uint32(i))
+		} else {
+			tune.Sample(true, uint32(i))
+		}
+	}
+	assert.Equal(t, tune.FindPeriod(false), 2)
+	assert.Equal(t, tune.FindPeriod(true), 2)
+
+	heap.Pop(&tune.pulses)
+
+	assert.Equal(t, tune.FindPeriod(false), 2)
+	assert.Equal(t, tune.FindPeriod(true), 1)
+
+	// after popping more
+	heap.Pop(&tune.pulses)
+	heap.Pop(&tune.pulses)
+	heap.Pop(&tune.pulses)
+
+	assert.Equal(t, tune.FindPeriod(false), 1)
+	assert.Equal(t, tune.FindPeriod(true), 1)
 }
