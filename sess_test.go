@@ -90,7 +90,6 @@ func dialEcho(port int, block BlockCrypt) (*UDPSession, error) {
 	sess.SetMtu(1400)
 	sess.SetACKNoDelay(true)
 	sess.SetACKNoDelay(false)
-	sess.SetDeadline(time.Now().Add(time.Minute))
 	sess.SetRateLimit(200 * 1024 * 1024)
 	sess.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
 	return sess, nil
@@ -387,6 +386,21 @@ func Test1GBEcho(t *testing.T) {
 	randomEchoTest(t, cli, 1*1024*1024*1024)
 }
 
+func Test6GBEcho(t *testing.T) {
+	port := nextPort()
+	l := echoServer(port, nil)
+	defer l.Close()
+
+	cli, err := dialEcho(port, nil)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+	cli.SetWriteDelay(true)
+	randomEchoTest(t, cli, 6*1024*1024*1024)
+}
+
 func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 	seed := time.Now().UnixNano()
 	writerSrc := mrand.NewSource(seed)
@@ -398,7 +412,7 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 	// Writer goroutine
 	go func() {
 		r := mrand.New(writerSrc)
-		lastPrint := 0
+		lastPrint := int64(0)
 		for bytesSent < N {
 			length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 			if bytesSent+int64(length) > N {
@@ -415,16 +429,16 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 				return
 			}
 			bytesSent += int64(n)
-			if percent := int(bytesSent * 100 / N); percent >= lastPrint+10 {
-				lastPrint = percent
-				t.Logf("Sent %d%% (%d/%d bytes)", percent, bytesSent, N)
+			if bytesSent-lastPrint >= 1<<28 { // print every 256MB
+				lastPrint = bytesSent
+				t.Logf("Sent %d%% (%d/%d bytes)", int(bytesSent*100/N), bytesSent, N)
 			}
 		}
 	}()
 
 	// Reader goroutine
 	r := mrand.New(readerSrc)
-	lastPrint := 0
+	lastPrint := int64(0)
 	for bytesReceived < N {
 		length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 		if bytesReceived+int64(length) > N {
@@ -442,9 +456,9 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 			}
 		}
 		bytesReceived += int64(n)
-		if percent := int(bytesReceived * 100 / N); percent >= lastPrint+10 {
-			lastPrint = percent
-			t.Logf("Received %d%% (%d/%d bytes)", percent, bytesReceived, N)
+		if bytesReceived-lastPrint >= 1<<28 { // print every 256MB
+			lastPrint = bytesReceived
+			t.Logf("Received %d%% (%d/%d bytes)", int(bytesReceived*100/N), bytesReceived, N)
 		}
 	}
 }
