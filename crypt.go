@@ -64,11 +64,11 @@ type BlockCrypt interface {
 	Decrypt(dst, src []byte)
 }
 
-var _ BlockCrypt = &aeadCrypt{}
+var _ BlockCrypt = (*aeadCrypt)(nil)
 
 // aeadCrypt implements BlockCrypt interface using cipher.AEAD
 type aeadCrypt struct {
-	aead cipher.AEAD
+	cipher.AEAD
 }
 
 func (aeadCrypt) Encrypt(_, _ []byte) {
@@ -77,26 +77,6 @@ func (aeadCrypt) Encrypt(_, _ []byte) {
 
 func (aeadCrypt) Decrypt(_, _ []byte) {
 	panic("called Decrypt on AEAD crypt")
-}
-
-func (a *aeadCrypt) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
-	if dst == nil || cap(dst)-len(dst) < len(plaintext)+a.aead.Overhead() {
-		panic("AEAD Seal allocated new slice, please increase MTU size")
-	}
-
-	return a.aead.Seal(dst, nonce, plaintext, additionalData)
-}
-
-func (a *aeadCrypt) Open(dst, nonce, ciphertext, additionalData []byte) ([]byte, error) {
-	return a.aead.Open(dst, nonce, ciphertext, additionalData)
-}
-
-func (a *aeadCrypt) NonceSize() int {
-	return a.aead.NonceSize()
-}
-
-func (a *aeadCrypt) Overhead() int {
-	return a.aead.Overhead()
 }
 
 // NewAEADCrypt creates an AEAD BlockCrypt instance from an existing cipher.AEAD
@@ -124,7 +104,7 @@ func NewAESGCMCrypt(key []byte) (BlockCrypt, error) {
 	return &aeadCrypt{aesgcm}, nil
 }
 
-var _ BlockCrypt = &blockCrypt{}
+var _ BlockCrypt = (*blockCrypt)(nil)
 
 // blockCrypt implements BlockCrypt interface using a cipher.Block
 type blockCrypt struct {
