@@ -298,6 +298,24 @@ func TestTimeout(t *testing.T) {
 
 func TestCFBSendRecv(t *testing.T) {
 	port := nextPort()
+	block1, _ := NewTripleDESBlockCrypt(pass)
+	l := echoServer(port, block1)
+	defer l.Close()
+
+	block2, _ := NewTripleDESBlockCrypt(pass)
+	cli, err := dialEcho(port, block2)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+	cli.SetWriteDelay(true)
+
+	randomEchoTest(t, cli)
+}
+
+func TestSalsa20SendRecv(t *testing.T) {
+	port := nextPort()
 	block1, _ := NewSalsa20BlockCrypt(pass)
 	l := echoServer(port, block1)
 	defer l.Close()
