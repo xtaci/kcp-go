@@ -60,7 +60,11 @@ func init() {
 
 func nextPort() int {
 	port := int(atomic.AddUint32(&baseport, 1))
-	return port % 65536
+	port %= 65536
+	if port <= 1024 {
+		port += 1024
+	}
+	return port
 }
 
 func dialEcho(port int, block BlockCrypt) (*UDPSession, error) {
