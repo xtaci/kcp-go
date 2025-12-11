@@ -361,6 +361,7 @@ func randomEchoTest(t *testing.T, cli *UDPSession) {
 	// Writer goroutine
 	go func() {
 		r := mrand.New(writerSrc)
+		lastPrint := 0
 		for bytesSent < N {
 			length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 			if bytesSent+int64(length) > N {
@@ -377,11 +378,16 @@ func randomEchoTest(t *testing.T, cli *UDPSession) {
 				return
 			}
 			bytesSent += int64(n)
+			if percent := int(bytesSent * 100 / N); percent >= lastPrint+10 {
+				lastPrint = percent
+				t.Logf("Sent %d%% (%d/%d bytes)", percent, bytesSent, N)
+			}
 		}
 	}()
 
 	// Reader goroutine
 	r := mrand.New(readerSrc)
+	lastPrint := 0
 	for bytesReceived < N {
 		length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 		if bytesReceived+int64(length) > N {
@@ -399,6 +405,10 @@ func randomEchoTest(t *testing.T, cli *UDPSession) {
 			}
 		}
 		bytesReceived += int64(n)
+		if percent := int(bytesReceived * 100 / N); percent >= lastPrint+10 {
+			lastPrint = percent
+			t.Logf("Received %d%% (%d/%d bytes)", percent, bytesReceived, N)
+		}
 	}
 }
 

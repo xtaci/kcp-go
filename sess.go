@@ -187,6 +187,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	// calculate additional header size introduced by encryption
 	switch block := sess.block.(type) {
 	case nil:
+		sess.headerSize = 0
 	case *aeadCrypt:
 		sess.headerSize = block.NonceSize()
 	default:
@@ -637,7 +638,7 @@ func (s *UDPSession) postProcess() {
 			// 2. Encryption
 			switch block := s.block.(type) {
 			case nil:
-			case *aeadCrypt:
+			case *aeadCrypt: // AEAD mode
 				nonceSize := block.NonceSize()
 
 				dst := buf[:nonceSize]
@@ -655,7 +656,7 @@ func (s *UDPSession) postProcess() {
 					fillRand(nonce)
 					ecc[k] = block.Seal(dst, nonce, plaintext, nil)
 				}
-			default:
+			default: // Cipher Feedback (CFB) mode
 				fillRand(buf[:nonceSize])
 				checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
 				binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
