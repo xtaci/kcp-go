@@ -232,7 +232,7 @@ func handleEcho(conn *UDPSession) {
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
 	conn.SetRateLimit(200 * 1024 * 1024)
-	buf := make([]byte, 65536)
+	buf := make([]byte, 16*1024*1024)
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
@@ -251,7 +251,7 @@ func handleSink(conn *UDPSession) {
 	conn.SetACKNoDelay(false)
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
-	buf := make([]byte, 65536)
+	buf := make([]byte, 16*1024*1024)
 	for {
 		_, err := conn.Read(buf)
 		if err != nil {
@@ -315,7 +315,7 @@ func TestCFBSendRecv(t *testing.T) {
 	defer cli.Close()
 	cli.SetWriteDelay(true)
 
-	randomEchoTest(t, cli)
+	randomEchoTest(t, cli, 100*1024*1024)
 }
 
 func TestSalsa20SendRecv(t *testing.T) {
@@ -333,7 +333,7 @@ func TestSalsa20SendRecv(t *testing.T) {
 	defer cli.Close()
 	cli.SetWriteDelay(true)
 
-	randomEchoTest(t, cli)
+	randomEchoTest(t, cli, 100*1024*1024)
 }
 
 func TestAEADSendRecv(t *testing.T) {
@@ -351,7 +351,7 @@ func TestAEADSendRecv(t *testing.T) {
 	defer cli.Close()
 	cli.SetWriteDelay(true)
 
-	randomEchoTest(t, cli)
+	randomEchoTest(t, cli, 100*1024*1024)
 }
 
 func TestPlainTextSendRecv(t *testing.T) {
@@ -367,18 +367,31 @@ func TestPlainTextSendRecv(t *testing.T) {
 	defer cli.Close()
 	cli.SetWriteDelay(true)
 
-	randomEchoTest(t, cli)
+	randomEchoTest(t, cli, 100*1024*1024)
 }
 
-func randomEchoTest(t *testing.T, cli *UDPSession) {
+func Test1GBEcho(t *testing.T) {
+	port := nextPort()
+	l := echoServer(port, nil)
+	defer l.Close()
+
+	cli, err := dialEcho(port, nil)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+	cli.SetWriteDelay(true)
+	randomEchoTest(t, cli, 1*1024*1024*1024)
+}
+
+func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 	seed := time.Now().UnixNano()
 	writerSrc := mrand.NewSource(seed)
 	readerSrc := mrand.NewSource(seed)
 
 	bytesSent := int64(0)
 	bytesReceived := int64(0)
-
-	const N = 100 * 1024 * 1024
 
 	// Writer goroutine
 	go func() {
