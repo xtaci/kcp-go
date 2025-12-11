@@ -24,6 +24,7 @@ package kcp
 
 import (
 	"bytes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
@@ -1174,4 +1175,70 @@ func TestSetLogger(t *testing.T) {
 			return
 		}
 	}
+}
+
+type largeNonceAEAD struct {
+	cipher.AEAD
+}
+
+func (*largeNonceAEAD) NonceSize() int {
+	return 1400
+}
+
+func (*largeNonceAEAD) Overhead() int {
+	return 0
+}
+
+func TestLargeNonce(t *testing.T) {
+	port := nextPort()
+
+	aead := new(largeNonceAEAD)
+	block := NewAEADCrypt(aead)
+
+	defer func() {
+		if recover() != "Overhead too large" {
+			t.Fatal("expect panic with Overhead too large")
+			return
+		}
+	}()
+
+	cli, err := dialEcho(port, block)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+}
+
+type largeOverheadAEAD struct {
+	cipher.AEAD
+}
+
+func (*largeOverheadAEAD) NonceSize() int {
+	return 0
+}
+
+func (*largeOverheadAEAD) Overhead() int {
+	return 1400
+}
+
+func TestLargeOverhead(t *testing.T) {
+	port := nextPort()
+
+	aead := new(largeOverheadAEAD)
+	block := NewAEADCrypt(aead)
+
+	defer func() {
+		if recover() != "Overhead too large" {
+			t.Fatal("expect panic with Overhead too large")
+			return
+		}
+	}()
+
+	cli, err := dialEcho(port, block)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
 }
