@@ -296,7 +296,7 @@ func TestTimeout(t *testing.T) {
 	}
 }
 
-func TestSendRecv(t *testing.T) {
+func TestCFBSendRecv(t *testing.T) {
 	port := nextPort()
 	block1, _ := NewSalsa20BlockCrypt(pass)
 	l := echoServer(port, block1)
@@ -322,6 +322,22 @@ func TestAEADSendRecv(t *testing.T) {
 
 	block2, _ := NewAESGCMCrypt(pass)
 	cli, err := dialEcho(port, block2)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+	cli.SetWriteDelay(true)
+
+	randomEchoTest(t, cli)
+}
+
+func TestPlainTextSendRecv(t *testing.T) {
+	port := nextPort()
+	l := echoServer(port, nil)
+	defer l.Close()
+
+	cli, err := dialEcho(port, nil)
 	if err != nil {
 		panic(err)
 		return
