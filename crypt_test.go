@@ -147,13 +147,27 @@ func cryptTest(t *testing.T, bc BlockCrypt) {
 	}
 }
 
-func TestAEAD(t *testing.T) {
+func TestAES256GCM(t *testing.T) {
 	bc, err := NewAESGCMCrypt(pass[:32])
 	if err != nil {
 		t.Fatal(err)
 		return
 	}
 
+	testAEAD(t, bc)
+}
+
+func TestAES128GCM(t *testing.T) {
+	bc, err := NewAESGCMCrypt(pass[:16])
+	if err != nil {
+		t.Fatal(err)
+		return
+	}
+
+	testAEAD(t, bc)
+}
+
+func testAEAD(t *testing.T, bc BlockCrypt) {
 	aead := bc.(*aeadCrypt)
 
 	nonceSize := aead.NonceSize()
@@ -161,6 +175,10 @@ func TestAEAD(t *testing.T) {
 	size := mtuLimit - cryptHeaderSize - aead.Overhead()
 	data := make([]byte, size)
 	io.ReadFull(rand.Reader, data)
+
+	// if the size of packet is cannot accommodate the AEAD overhead
+	// Open and Seal will allocate a new slice internally, we need to
+	// ensure that it does not happen for our MTU sized packets.
 	packet := make([]byte, mtuLimit)
 
 	// Seal
@@ -168,14 +186,23 @@ func TestAEAD(t *testing.T) {
 	nonce := packet[:nonceSize]
 	fillRand(nonce)
 
-	packet = aead.Seal(dst, nonce, data, nil)
+	sealedPacket := aead.Seal(dst, nonce, data, nil)
+	if &sealedPacket[0] != &packet[0] {
+		t.Fatal("Seal created a new slice")
+		return
+	}
 
 	// Open
-	dst = packet[:nonceSize]
-	nonce = packet[:nonceSize]
-	ciphertext := packet[nonceSize:]
+	dst = sealedPacket[:nonceSize]
+	nonce = sealedPacket[:nonceSize]
+	ciphertext := sealedPacket[nonceSize:]
 
 	decrypted, err := aead.Open(dst, nonce, ciphertext, nil)
+	if &decrypted[0] != &sealedPacket[0] {
+		t.Fatal("Open created a new slice")
+		return
+	}
+
 	if err != nil {
 		t.Fatal(err)
 		return
