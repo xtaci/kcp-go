@@ -448,23 +448,90 @@ func TestSendVector(t *testing.T) {
 	}
 	defer cli.Close()
 	cli.SetWriteDelay(false)
-	const N = 100
-	buf := make([]byte, 20)
-	v := make([][]byte, 2)
-	for i := range N {
-		v[0] = fmt.Appendf(nil, "hello%v", i)
-		v[1] = fmt.Appendf(nil, "world%v", i)
-		msg := fmt.Sprintf("hello%vworld%v", i, i)
-		cli.WriteBuffers(v)
+	randomEchoVectorTest(t, cli)
+}
 
-		n, err := cli.Read(buf)
-		if err != nil {
-			panic(err)
-			return
+func randomEchoVectorTest(t *testing.T, cli *UDPSession) {
+	seed := time.Now().UnixNano()
+	writerSrc := mrand.NewSource(seed)
+	readerSrc := mrand.NewSource(seed)
+
+	bytesSent := int64(0)
+	bytesReceived := int64(0)
+
+	const N = 100 * 1024 * 1024
+
+	// Writer goroutine
+	go func() {
+		r := mrand.New(writerSrc)
+		lastPrint := 0
+		v := make([][]byte, 2)
+		for bytesSent < N {
+			length1 := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			if bytesSent+int64(length1) > N {
+				length1 = int(N - bytesSent)
+			}
+			sndbuf1 := make([]byte, length1)
+
+			for i := range sndbuf1 {
+				sndbuf1[i] = byte(r.Int())
+			}
+
+			length2 := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			if bytesSent+int64(length2) > N {
+				length2 = int(N - bytesSent)
+			}
+
+			sndbuf2 := make([]byte, length2)
+			for i := range sndbuf2 {
+				sndbuf2[i] = byte(r.Int())
+			}
+
+			v[0] = sndbuf1
+			v[1] = sndbuf2
+
+			n, err := cli.WriteBuffers(v)
+			if err != nil {
+				t.Errorf("Write error: %v", err)
+				return
+			}
+
+			if n != length1+length2 {
+				t.Errorf("Write length mismatch: got %v, want %v", n, length1+length2)
+				return
+			}
+
+			bytesSent += int64(n)
+			if percent := int(bytesSent * 100 / N); percent >= lastPrint+10 {
+				lastPrint = percent
+				t.Logf("Sent %d%% (%d/%d bytes)", percent, bytesSent, N)
+			}
 		}
+	}()
 
-		if string(buf[:n]) != msg {
-			t.Error(string(buf[:n]), msg)
+	// Reader goroutine
+	r := mrand.New(readerSrc)
+	lastPrint := 0
+	for bytesReceived < N {
+		length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+		if bytesReceived+int64(length) > N {
+			length = int(N - bytesReceived)
+		}
+		rcvbuf := make([]byte, length)
+		n, err := cli.Read(rcvbuf)
+		if err != nil && err != io.EOF {
+			t.Fatalf("Read error: %v", err)
+		}
+		for i := 0; i < n; i++ {
+			expectedByte := byte(r.Int())
+			if rcvbuf[i] != expectedByte {
+				t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), rcvbuf[i], expectedByte)
+			}
+		}
+		bytesReceived += int64(n)
+		if percent := int(bytesReceived * 100 / N); percent >= lastPrint+10 {
+			lastPrint = percent
+			t.Logf("Received %d%% (%d/%d bytes)", percent, bytesReceived, N)
 		}
 	}
 }
