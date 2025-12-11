@@ -24,6 +24,8 @@ package kcp
 
 import (
 	"bytes"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha1"
 	"fmt"
@@ -1187,4 +1189,116 @@ func TestSetLogger(t *testing.T) {
 			return
 		}
 	}
+}
+
+type largeNonceAEAD struct {
+	cipher.AEAD
+}
+
+func (*largeNonceAEAD) NonceSize() int {
+	return 1400
+}
+
+func (*largeNonceAEAD) Overhead() int {
+	return 0
+}
+
+func TestLargeNonce(t *testing.T) {
+	port := nextPort()
+
+	aead := new(largeNonceAEAD)
+	block := NewAEADCrypt(aead)
+
+	defer func() {
+		if recover() != "Overhead too large" {
+			t.Fatal("expect panic with Overhead too large")
+			return
+		}
+	}()
+
+	cli, err := dialEcho(port, block)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+}
+
+type largeOverheadAEAD struct {
+	cipher.AEAD
+}
+
+func (*largeOverheadAEAD) NonceSize() int {
+	return 0
+}
+
+func (*largeOverheadAEAD) Overhead() int {
+	return 1400
+}
+
+func TestLargeOverhead(t *testing.T) {
+	port := nextPort()
+
+	aead := new(largeOverheadAEAD)
+	block := NewAEADCrypt(aead)
+
+	defer func() {
+		if recover() != "Overhead too large" {
+			t.Fatal("expect panic with Overhead too large")
+			return
+		}
+	}()
+
+	cli, err := dialEcho(port, block)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+}
+
+type checkAllocatedAEAD struct {
+	cipher.AEAD
+}
+
+func (aead *checkAllocatedAEAD) Seal(dst, nonce, plaintext, additionalData []byte) []byte {
+	if dst == nil || cap(dst)-len(dst) < len(plaintext)+aead.AEAD.Overhead() {
+		panic("AEAD Seal will allocate new slice")
+	}
+
+	ciphertext := aead.AEAD.Seal(dst, nonce, plaintext, additionalData)
+	if &ciphertext[0] != &dst[:1][0] {
+		panic("AEAD Seal allocated new slice")
+	}
+	return ciphertext
+}
+
+func TestSealAllocated(t *testing.T) {
+	aes, err := aes.NewCipher(pass[:16])
+	if err != nil {
+		panic(err)
+		return
+	}
+
+	aesgcm, err := cipher.NewGCM(aes)
+	if err != nil {
+		panic(err)
+		return
+	}
+
+	port := nextPort()
+	block := NewAEADCrypt(&checkAllocatedAEAD{aesgcm})
+
+	l := echoServer(port, block)
+	defer l.Close()
+
+	cli, err := dialEcho(port, block)
+	if err != nil {
+		panic(err)
+		return
+	}
+	defer cli.Close()
+
+	b := make([]byte, 100*1024*1024) // 100 MB
+	cli.Write(b)
 }
