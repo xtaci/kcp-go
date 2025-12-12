@@ -30,6 +30,7 @@ import (
 )
 
 func TestAutoTune(t *testing.T) {
+
 	// Group1
 	signals := []uint32{0, 0, 0, 0, 0, 0}
 	testGroup(t, 1, signals, -1, -1)
@@ -73,6 +74,36 @@ func TestAutoTune(t *testing.T) {
 	// Group11
 	signals = []uint32{0, 0, 0, 1, 1, 1}
 	testGroup(t, 11, signals, -1, -1)
+
+	// Group12
+	signals = []uint32{0, 0, 0, 0, 0, 1}
+	testGroup(t, 12, signals, -1, -1)
+
+	// Group13
+	signals = []uint32{1, 0, 0, 0, 0, 1}
+	testGroup(t, 13, signals, 4, -1)
+
+	// Group14
+	signals = []uint32{1, 0, 0, 0, 0, 0}
+	testGroup(t, 14, signals, -1, -1)
+}
+
+func TestAutoTuneEdge(t *testing.T) {
+	// Edge Case0: Empty signals
+	signals := []uint32{}
+	testGroup(t, 0, signals, -1, -1)
+
+	// Edge Case: 1 signal
+	signals = []uint32{1}
+	testGroup(t, 2, signals, -1, -1)
+
+	// Edge Case: 2 signals
+	signals = []uint32{1, 0}
+	testGroup(t, 3, signals, -1, -1)
+
+	// Edge Case: 3 signals
+	signals = []uint32{1, 0, 1}
+	testGroup(t, 4, signals, 1, -1)
 }
 
 func testGroup(t *testing.T, gid int, signals []uint32, expectedFalse, expectedTrue int) {
