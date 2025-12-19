@@ -174,3 +174,133 @@ func BenchmarkFECEncode(b *testing.B) {
 		encoder.encode(data, 200)
 	}
 }
+
+func TestFECPAWS(t *testing.T) {
+	const dataShards = 10
+	const parityShards = 3
+	const shardSize = dataShards + parityShards
+	const payLoad = 1500
+
+	encoder := newFECEncoder(dataShards, parityShards, 0)
+	decoder := newFECDecoder(dataShards, parityShards)
+
+	// Manually set the next sequence number to be near the PAWS boundary
+	// We want to test the transition from the last group to the first group
+	// paws is a multiple of shardSize.
+	// We set next to paws - shardSize, so we are at the start of the last group.
+	encoder.next = encoder.paws - uint32(shardSize)
+
+	t.Logf("PAWS: %v, Initial Next: %v", encoder.paws, encoder.next)
+
+	var packets []fecPacket
+
+	// 1. Encode the last group before PAWS
+	// This will generate 'dataShards' data packets and 'parityShards' parity packets.
+	// Total 'shardSize' packets.
+	// Their seqids should be [paws-shardSize, ..., paws-1]
+	for i := 0; i < dataShards; i++ {
+		data := make([]byte, payLoad)
+		// We can put some recognizable data
+		// Note: fecEncoder writes header at 0-6, and size at 6-8. Payload starts at 8.
+		binary.LittleEndian.PutUint32(data[8:], uint32(i))
+
+		ps := encoder.encode(data, 200)
+
+		// Copy data packet
+		pkt := make([]byte, len(data))
+		copy(pkt, data)
+		packets = append(packets, fecPacket(pkt))
+
+		// Copy parity packets
+		for _, p := range ps {
+			pCopy := make([]byte, len(p))
+			copy(pCopy, p)
+			packets = append(packets, fecPacket(pCopy))
+		}
+	}
+
+	// Verify seqids of the first group
+	for i, pkt := range packets {
+		seqid := pkt.seqid()
+		expected := encoder.paws - uint32(shardSize) + uint32(i)
+		if seqid != expected {
+			t.Fatalf("Group 1: expected seqid %v, got %v", expected, seqid)
+		}
+	}
+	t.Log("Group 1 generated successfully")
+
+	// 2. Encode the first group after PAWS
+	// Their seqids should be [0, ..., shardSize-1]
+	startIdx := len(packets)
+	for i := 0; i < dataShards; i++ {
+		data := make([]byte, payLoad)
+		binary.LittleEndian.PutUint32(data[8:], uint32(i+100)) // Different data
+
+		ps := encoder.encode(data, 200)
+
+		pkt := make([]byte, len(data))
+		copy(pkt, data)
+		packets = append(packets, fecPacket(pkt))
+
+		for _, p := range ps {
+			pCopy := make([]byte, len(p))
+			copy(pCopy, p)
+			packets = append(packets, fecPacket(pCopy))
+		}
+	}
+
+	// Verify seqids of the second group
+	for i, pkt := range packets[startIdx:] {
+		seqid := pkt.seqid()
+		expected := uint32(i)
+		if seqid != expected {
+			t.Fatalf("Group 2: expected seqid %v, got %v", expected, seqid)
+		}
+	}
+	t.Log("Group 2 generated successfully")
+
+	// 3. Feed to decoder with some loss
+	// We will lose the last data packet of Group 1 and the first data packet of Group 2
+	// to test recovery across the boundary (though recovery is per-group).
+
+	// We drop index 9 (seqid paws-4) and index 13 (seqid 0).
+	// Group 1 indices: 0-12. Data: 0-9. Parity: 10-12.
+	// Group 2 indices: 13-25. Data: 13-22. Parity: 23-25.
+
+	dropped := make(map[int]bool)
+	dropped[9] = true
+	dropped[13] = true
+
+	recoveredCount := 0
+
+	for i, pkt := range packets {
+		if dropped[i] {
+			t.Logf("Dropping packet index %v, seqid %v", i, pkt.seqid())
+			continue
+		}
+
+		recovered := decoder.decode(pkt)
+		if len(recovered) > 0 {
+			t.Logf("Recovered %v packets at step %v (seqid %v)", len(recovered), i, pkt.seqid())
+			recoveredCount += len(recovered)
+			for _, r := range recovered {
+				// Verify recovered data
+				// r[0:2] is size. r[2:] is payload.
+				val := binary.LittleEndian.Uint32(r[2:])
+				if val == 9 {
+					t.Log("Recovered packet 9 correctly")
+				} else if val == 100 {
+					t.Log("Recovered packet 13 (val 100) correctly")
+				} else {
+					t.Errorf("Recovered unexpected data: %v", val)
+				}
+			}
+		}
+	}
+
+	if recoveredCount != 2 {
+		t.Fatalf("Expected 2 recovered packets, got %v", recoveredCount)
+	}
+
+	t.Log("PAWS wrap test passed")
+}
