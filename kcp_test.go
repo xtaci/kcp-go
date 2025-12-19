@@ -154,7 +154,7 @@ func BenchmarkFlush(b *testing.B) {
 	for range kcp.snd_buf.MaxLen() {
 		kcp.snd_buf.Push(segment{xmit: 1, resendts: currentMs() + 10000})
 	}
-	
+
 	b.ReportAllocs()
 	var mu sync.Mutex
 	for b.Loop() {

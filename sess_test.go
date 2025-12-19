@@ -1269,3 +1269,52 @@ func TestSealAllocated(t *testing.T) {
 	b := make([]byte, 100*1024*1024) // 100 MB
 	cli.Write(b)
 }
+
+func TestSessionGetters(t *testing.T) {
+	sess := new(UDPSession)
+	sess.kcp = NewKCP(1, func(buf []byte, size int) {})
+
+	if sess.GetConv() != 1 {
+		t.Error("GetConv failed")
+	}
+	// RTO, SRTT, SRTTVar are dynamic, just check they don't panic
+	sess.GetRTO()
+	sess.GetSRTT()
+	sess.GetSRTTVar()
+}
+
+func TestTimedSchedClose(t *testing.T) {
+	ts := NewTimedSched(1)
+	ts.Close()
+}
+
+func TestListenDial(t *testing.T) {
+	l, err := Listen("127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	t.Logf("Listening on %s", l.Addr().String())
+
+	ch := make(chan struct{})
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			return
+		}
+		t.Log("Accepted connection")
+		conn.Close()
+		close(ch)
+	}()
+
+	conn, err := Dial(l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("Dialed")
+	conn.Write([]byte("hello"))
+	t.Log("Wrote data")
+	time.Sleep(100 * time.Millisecond)
+	conn.Close()
+	<-ch
+}
