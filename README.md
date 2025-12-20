@@ -315,6 +315,16 @@ Other possible attacks on kcp-go include:
 - **[Traffic analysis](https://en.wikipedia.org/wiki/Traffic_analysis):** Data flow on specific websites may exhibit patterns during data exchange. This type of eavesdropping has been mitigated by adopting [smux](https://github.com/xtaci/smux) to mix data streams and introduce noise. While a perfect solution has not yet emerged, theoretically, shuffling/mixing messages on a larger-scale network may mitigate this problem.
 - **[Replay attack](https://en.wikipedia.org/wiki/Replay_attack):** Since asymmetric encryption has not been introduced into kcp-go, capturing packets and replaying them on a different machine is possible. Note that hijacking the session and decrypting the contents is still *impossible*. Upper layers should use an asymmetric encryption system to guarantee the authenticity of each message (to process each message exactly once), such as HTTPS/OpenSSL/LibreSSL. Signing requests with private keys can eliminate this type of attack.
 
+### 5. Packet Clocking
+
+1. **Immediate FastACK**: Send immediately after `fastack` is triggered, without waiting for the fixed `interval`.
+2. **Immediate ACK**: Send immediately after accumulating an ACK for a packet, also without waiting for the `interval`.
+   In high-speed networks, this acts as a higher-frequency "clock signal," potentially boosting unidirectional transmission speed by approximately 6x. For instance, if a batch takes only 1.5ms to process on a high-speed link but still adheres to a fixed 10ms transmission cycle, the actual throughput would be limited to 1/6 of the potential.
+3. **Pacing Mechanism**: Introduced a pacing clock to prevent burst congestion where data piles up in the kernel when `snd_wnd` is large, causing the kernel to drop packets. While difficult to implement in user space, a usable version has been achieved, allowing user-space echo to stabilize above 100MB/s.
+4. **Data Structure Optimization**: Optimized data structures (e.g., `snd_buf` ringbuffer) to ensure good cache coherency. Queues must not be too long; otherwise, traversal costs introduce extra latency. In high-speed networks, the buffer corresponding to BDP should be kept smaller to minimize latency from data structures. Note that the current KCP structure has O(n) complexity for RTO; changing it to O(1) would require significant refactoring.
+
+Ultimately, nothing is more critical in a transmission system than the clock (real-time performance).
+
 ## Connection Termination
 
 Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP. You need a **keepalive/heartbeat mechanism** at the application level. A practical example is to use a **multiplexing** protocol over the session, such as [smux](https://github.com/xtaci/smux) (which has an embedded keepalive mechanism). See [kcptun](https://github.com/xtaci/kcptun) for a reference implementation.

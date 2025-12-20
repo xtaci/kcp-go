@@ -315,6 +315,16 @@ kcp-go 内置了多种块加密算法支持的数据包加密功能，采用 [CF
 - **[流量分析](https://en.wikipedia.org/wiki/Traffic_analysis):** 特定网站上的数据流在数据交换期间可能会表现出模式。通过采用 [smux](https://github.com/xtaci/smux) 混合数据流并引入噪声，这种类型的窃听已得到缓解。虽然尚未出现完美的解决方案，但理论上，在更大规模的网络上混洗/混合消息可以缓解此问题。
 - **[重放攻击](https://en.wikipedia.org/wiki/Replay_attack):** 由于 kcp-go 尚未引入非对称加密，因此捕获数据包并在另一台机器上重放是可能的。请注意，劫持会话并解密内容仍然是 *不可能的*。上层应使用非对称加密系统来保证每条消息的真实性（以确保每条消息仅被处理一次），例如 HTTPS/OpenSSL/LibreSSL。使用私钥对请求进行签名可以消除此类攻击。
 
+### 5. 报文时钟
+
+1. **FastACK 立即发送**：FastACK 触发后立即发送，不再等待固定的 interval。
+2. **ACK 立即发送**：累计到一个 ACK 后立即发送，同样不等待 interval。
+   在高速网络中，这相当于提供更高频率的“时钟信号”，可使单向传输速度提升约 6 倍。例如，高速链路上一个 batch 只需 1.5ms 就能处理完成，如果仍遵循固定 10ms 的发送周期，那么实际吞吐将仅剩 1/6。
+3. **Pacing 机制**：引入 Pacing 时钟，防止在较大的 snd_wnd 下数据瞬间堆积到内核导致突发拥塞和丢包。用户态实现 Pacing 较难，目前勉强实现了一个可用版本，用户态 echo 测试能稳定在 100MB/s 以上。
+4. **数据结构优化**：优化数据结构（如 snd_buf 的 ringbuffer），保证结构具备良好的缓存一致性 (cache coherency)。队列不宜过长，否则遍历开销会引入额外延迟。在高速网络下，应将 BDP 对应的 buffer 设得更小，以此降低数据结构带来的 latency。注意：现有 KCP 结构的 RTO 计算复杂度为 O(n)，若要改为 O(1) 则需要大幅重构。
+
+说到底，传输系统中没有任何东西比时钟（实时性）更重要。
+
 ## 连接终止
 
 KCP 协议 **未定义** 类似 TCP 的 **SYN/FIN/RST** 控制消息。因此，您需要在应用层自行实现 **keepalive/heartbeat (心跳/保活) 机制**。一个实际的例子是在会话之上使用 **多路复用** 协议，例如 [smux](https://github.com/xtaci/smux)（它具有嵌入式的 keepalive 机制）。参考实现请参见 [kcptun](https://github.com/xtaci/kcptun)。
