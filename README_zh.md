@@ -1,4 +1,3 @@
-````markdown
 <img src="assets/kcp-go.png" alt="kcp-go" height="100px" />
 
 
@@ -144,5 +143,3 @@ KCP 中没有定义像 TCP 的 SYN/FIN/RST 控制消息，应用层需要实现�
 2. https://github.com/xtaci/libkcp -- 面向 iOS/Android 的 FEC 增强 KCP 库（C++）
 3. https://github.com/skywind3000/kcp -- KCP 协议实现（C 版）
 4. https://github.com/klauspost/reedsolomon -- Go 版 Reed-Solomon 实现
-
-````
