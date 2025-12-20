@@ -50,6 +50,58 @@
 
 <img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
 
+## 关键设计考量
+
+### 1. 切片 (Slice) vs. 容器/链表 (Container/List)
+
+`kcp.flush()` 每 20 毫秒循环遍历发送队列以进行重传检查。
+
+通过基准测试对比了顺序遍历 *切片* 与 *容器/链表* 的性能，代码在 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go)：
+
+```
+BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
+BenchmarkLoopList-4    	100000000	        54.6 ns/op
+```
+
+相比切片，链表结构会导致 **严重的缓存未命中 (cache misses)**，而切片则具有更好的 **局部性 (locality)**。对于 5,000 个连接，窗口大小为 32，间隔为 20 毫秒，使用切片每次 `kcp.flush()` 消耗 6 微秒 (0.03% CPU)，而使用链表则消耗 8.7 毫秒 (43.5% CPU)。
+
+### 2. 计时精度 vs. 系统调用 clock_gettime
+
+计时精度对于 **RTT 估算** 至关重要。计时不准会导致 KCP 发生不必要的重传，但调用 `time.Now()` 需要 42 个周期（在 4 GHz CPU 上为 10.5 ns，在我的 MacBook Pro 2.7 GHz 上为 15.6 ns）。
+
+`time.Now()` 的基准测试在 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go)：
+
+```
+BenchmarkNow-4         	100000000	        15.6 ns/op
+```
+
+kcp-go 优化了时间获取策略：每次 `kcp.output()` 调用返回时更新当前时间。在单次 `kcp.flush()` 操作中，仅查询一次系统时间。对于 5,000 个连接，这消耗 5000 × 15.6 ns = 78 μs（当没有数据包需要发送时的固定成本）。对于 10 MB/s 的数据传输（MTU 为 1400），`kcp.output()` 每秒大约被调用 7,500 次，`time.Now()` 每秒消耗 117 μs。
+
+### 3. 内存管理
+
+内存分配主要依赖全局缓冲池 `xmit.Buf`。kcp-go 需要分配内存时，会从池中获取固定容量（1500字节，即 mtuLimit）的缓冲区。RX、TX 及 FEC 队列均复用该池中的缓冲区，使用完毕后归还，避免了不必要的内存清零开销。该机制维持了切片对象的高水位线，既保证传输中的对象不被 GC 回收，又能在空闲时将内存归还给运行时环境。
+
+### 4. 信息安全
+
+kcp-go 内置了多种块加密算法支持的数据包加密功能，采用 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)) 运行。每个数据包的加密过程都始于加密一个源自 [系统熵](https://en.wikipedia.org/wiki//dev/random) 的 [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce)，确保即使明文相同，生成的密文也绝不重复。
+
+加密后的数据包完全匿名，涵盖头部（FEC, KCP）、校验和及载荷。请注意，如果禁用底层加密，即便上层应用了加密，传输过程仍是不安全的。因为协议头部是 ***明文*** 的，易受篡改攻击（如修改 *滑动窗口大小*、*RTT*、*FEC 参数* 和 *校验和*）。建议使用 `AES-128` 进行最小程度的加密，因为现代 CPU 具有 [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) 指令，性能优于 `salsa20`（见上表）。
+
+针对 kcp-go 的其他可能攻击包括：
+
+- **[流量分析](https://en.wikipedia.org/wiki/Traffic_analysis):** 特定网站上的数据流在数据交换期间可能会表现出模式。通过采用 [smux](https://github.com/xtaci/smux) 混合数据流并引入噪声，这种类型的窃听已得到缓解。虽然尚未出现完美的解决方案，但理论上，在更大规模的网络上混洗/混合消息可以缓解此问题。
+- **[重放攻击](https://en.wikipedia.org/wiki/Replay_attack):** 由于 kcp-go 尚未引入非对称加密，因此捕获数据包并在另一台机器上重放是可能的。请注意，劫持会话并解密内容仍然是 *不可能的*。上层应使用非对称加密系统来保证每条消息的真实性（以确保每条消息仅被处理一次），例如 HTTPS/OpenSSL/LibreSSL。使用私钥对请求进行签名可以消除此类攻击。
+
+### 5. 报文时钟
+
+1. **FastACK 立即发送**：FastACK 触发后立即发送，不再等待固定的 interval。
+2. **ACK 立即发送**：累计到一个 ACK 后立即发送，同样不等待 interval。
+   在高速网络中，这相当于提供更高频率的“时钟信号”，可使单向传输速度提升约 6 倍。例如，高速链路上一个 batch 只需 1.5ms 就能处理完成，如果仍遵循固定 10ms 的发送周期，那么实际吞吐将仅剩 1/6。
+3. **Pacing 机制**：引入 Pacing 时钟，防止在较大的 snd_wnd 下数据瞬间堆积到内核导致突发拥塞和丢包。用户态实现 Pacing 较难，目前勉强实现了一个可用版本，用户态 echo 测试能稳定在 100MB/s 以上。
+4. **数据结构优化**：优化数据结构（如 snd_buf 的 ringbuffer），保证结构具备良好的缓存一致性 (cache coherency)。队列不宜过长，否则遍历开销会引入额外延迟。在高速网络下，应将 BDP 对应的 buffer 设得更小，以此降低数据结构带来的 latency。注意：现有 KCP 结构的 RTO 计算复杂度为 O(n)，若要改为 O(1) 则需要大幅重构。
+
+说到底，传输系统中没有任何东西比时钟（实时性）更重要。
+
 ## 协议规范
 
 <img src="assets/frame.png" alt="Frame Format" height="109px" />
@@ -273,57 +325,7 @@ ok      github.com/xtaci/kcp-go/v5      64.151s
 ## 典型火焰图
 ![Flame Graph in kcptun](assets/flame.png)
 
-## 关键设计考量
 
-### 1. 切片 (Slice) vs. 容器/链表 (Container/List)
-
-`kcp.flush()` 每 20 毫秒循环遍历发送队列以进行重传检查。
-
-通过基准测试对比了顺序遍历 *切片* 与 *容器/链表* 的性能，代码在 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go)：
-
-```
-BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
-BenchmarkLoopList-4    	100000000	        54.6 ns/op
-```
-
-相比切片，链表结构会导致 **严重的缓存未命中 (cache misses)**，而切片则具有更好的 **局部性 (locality)**。对于 5,000 个连接，窗口大小为 32，间隔为 20 毫秒，使用切片每次 `kcp.flush()` 消耗 6 微秒 (0.03% CPU)，而使用链表则消耗 8.7 毫秒 (43.5% CPU)。
-
-### 2. 计时精度 vs. 系统调用 clock_gettime
-
-计时精度对于 **RTT 估算** 至关重要。计时不准会导致 KCP 发生不必要的重传，但调用 `time.Now()` 需要 42 个周期（在 4 GHz CPU 上为 10.5 ns，在我的 MacBook Pro 2.7 GHz 上为 15.6 ns）。
-
-`time.Now()` 的基准测试在 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go)：
-
-```
-BenchmarkNow-4         	100000000	        15.6 ns/op
-```
-
-kcp-go 优化了时间获取策略：每次 `kcp.output()` 调用返回时更新当前时间。在单次 `kcp.flush()` 操作中，仅查询一次系统时间。对于 5,000 个连接，这消耗 5000 × 15.6 ns = 78 μs（当没有数据包需要发送时的固定成本）。对于 10 MB/s 的数据传输（MTU 为 1400），`kcp.output()` 每秒大约被调用 7,500 次，`time.Now()` 每秒消耗 117 μs。
-
-### 3. 内存管理
-
-内存分配主要依赖全局缓冲池 `xmit.Buf`。kcp-go 需要分配内存时，会从池中获取固定容量（1500字节，即 mtuLimit）的缓冲区。RX、TX 及 FEC 队列均复用该池中的缓冲区，使用完毕后归还，避免了不必要的内存清零开销。该机制维持了切片对象的高水位线，既保证传输中的对象不被 GC 回收，又能在空闲时将内存归还给运行时环境。
-
-### 4. 信息安全
-
-kcp-go 内置了多种块加密算法支持的数据包加密功能，采用 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)) 运行。每个数据包的加密过程都始于加密一个源自 [系统熵](https://en.wikipedia.org/wiki//dev/random) 的 [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce)，确保即使明文相同，生成的密文也绝不重复。
-
-加密后的数据包完全匿名，涵盖头部（FEC, KCP）、校验和及载荷。请注意，如果禁用底层加密，即便上层应用了加密，传输过程仍是不安全的。因为协议头部是 ***明文*** 的，易受篡改攻击（如修改 *滑动窗口大小*、*RTT*、*FEC 参数* 和 *校验和*）。建议使用 `AES-128` 进行最小程度的加密，因为现代 CPU 具有 [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) 指令，性能优于 `salsa20`（见上表）。
-
-针对 kcp-go 的其他可能攻击包括：
-
-- **[流量分析](https://en.wikipedia.org/wiki/Traffic_analysis):** 特定网站上的数据流在数据交换期间可能会表现出模式。通过采用 [smux](https://github.com/xtaci/smux) 混合数据流并引入噪声，这种类型的窃听已得到缓解。虽然尚未出现完美的解决方案，但理论上，在更大规模的网络上混洗/混合消息可以缓解此问题。
-- **[重放攻击](https://en.wikipedia.org/wiki/Replay_attack):** 由于 kcp-go 尚未引入非对称加密，因此捕获数据包并在另一台机器上重放是可能的。请注意，劫持会话并解密内容仍然是 *不可能的*。上层应使用非对称加密系统来保证每条消息的真实性（以确保每条消息仅被处理一次），例如 HTTPS/OpenSSL/LibreSSL。使用私钥对请求进行签名可以消除此类攻击。
-
-### 5. 报文时钟
-
-1. **FastACK 立即发送**：FastACK 触发后立即发送，不再等待固定的 interval。
-2. **ACK 立即发送**：累计到一个 ACK 后立即发送，同样不等待 interval。
-   在高速网络中，这相当于提供更高频率的“时钟信号”，可使单向传输速度提升约 6 倍。例如，高速链路上一个 batch 只需 1.5ms 就能处理完成，如果仍遵循固定 10ms 的发送周期，那么实际吞吐将仅剩 1/6。
-3. **Pacing 机制**：引入 Pacing 时钟，防止在较大的 snd_wnd 下数据瞬间堆积到内核导致突发拥塞和丢包。用户态实现 Pacing 较难，目前勉强实现了一个可用版本，用户态 echo 测试能稳定在 100MB/s 以上。
-4. **数据结构优化**：优化数据结构（如 snd_buf 的 ringbuffer），保证结构具备良好的缓存一致性 (cache coherency)。队列不宜过长，否则遍历开销会引入额外延迟。在高速网络下，应将 BDP 对应的 buffer 设得更小，以此降低数据结构带来的 latency。注意：现有 KCP 结构的 RTO 计算复杂度为 O(n)，若要改为 O(1) 则需要大幅重构。
-
-说到底，传输系统中没有任何东西比时钟（实时性）更重要。
 
 ## 连接终止
 

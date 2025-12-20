@@ -50,6 +50,58 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 
 <img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
 
+## Key Design Considerations
+
+### 1. Slice vs. Container/List
+
+`kcp.flush()` loops through the send queue for retransmission checking every 20 ms.
+
+I wrote a benchmark comparing sequential loops through a *slice* and a *container/list* [here](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go):
+
+```
+BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
+BenchmarkLoopList-4    	100000000	        54.6 ns/op
+```
+
+The list structure introduces **heavy cache misses** compared to the slice, which offers better **locality**. For 5,000 connections with a 32-window size and a 20 ms interval, using a slice costs 6 μs (0.03% CPU) per `kcp.flush()`, whereas using a list costs 8.7 ms (43.5% CPU).
+
+### 2. Timing Accuracy vs. Syscall clock_gettime
+
+Timing is **critical** for the **RTT estimator**. Inaccurate timing leads to false retransmissions in KCP, but calling `time.Now()` costs 42 cycles (10.5 ns on a 4 GHz CPU, 15.6 ns on my MacBook Pro 2.7 GHz).
+
+The benchmark for `time.Now()` is [here](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go):
+
+```
+BenchmarkNow-4         	100000000	        15.6 ns/op
+```
+
+In kcp-go, after each `kcp.output()` function call, the current clock time is updated upon return. For a single `kcp.flush()` operation, the current time is queried from the system once. For 5,000 connections, this costs 5000 × 15.6 ns = 78 μs (a fixed cost when no packets need to be sent). For 10 MB/s data transfer with a 1400 MTU, `kcp.output()` is called approximately 7,500 times, costing 117 μs for `time.Now()` per second.
+
+### 3. Memory Management
+
+Primary memory allocation is performed from a global buffer pool, `xmit.Buf`. In kcp-go, when bytes need to be allocated, they are obtained from this pool, which returns a fixed-capacity 1500 bytes (mtuLimit). The rx queue, tx queue, and FEC queue all receive bytes from this pool and return them after use to prevent unnecessary zeroing of bytes. The pool mechanism maintains a high watermark for slice objects, allowing these in-flight objects to survive periodic garbage collection while also being able to return memory to the runtime when idle.
+
+### 4. Information Security
+
+kcp-go ships with built-in packet encryption powered by various block encryption algorithms and operates in [Cipher Feedback Mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)). For each packet to be sent, the encryption process begins by encrypting a [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce) from the [system entropy](https://en.wikipedia.org/wiki//dev/random), ensuring that encryption of the same plaintext never produces the same ciphertext.
+
+The contents of packets are completely anonymous with encryption, including the headers (FEC, KCP), checksums, and payload. Note that regardless of which encryption method you choose at the upper layer, if you disable encryption, the transmission will be insecure because the header is ***plaintext*** and susceptible to tampering, such as jamming the *sliding window size*, *round-trip time*, *FEC properties*, and *checksums*. `AES-128` is recommended for minimal encryption, as modern CPUs feature [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) instructions and perform better than `salsa20` (see the table above).
+
+Other possible attacks on kcp-go include:
+
+- **[Traffic analysis](https://en.wikipedia.org/wiki/Traffic_analysis):** Data flow on specific websites may exhibit patterns during data exchange. This type of eavesdropping has been mitigated by adopting [smux](https://github.com/xtaci/smux) to mix data streams and introduce noise. While a perfect solution has not yet emerged, theoretically, shuffling/mixing messages on a larger-scale network may mitigate this problem.
+- **[Replay attack](https://en.wikipedia.org/wiki/Replay_attack):** Since asymmetric encryption has not been introduced into kcp-go, capturing packets and replaying them on a different machine is possible. Note that hijacking the session and decrypting the contents is still *impossible*. Upper layers should use an asymmetric encryption system to guarantee the authenticity of each message (to process each message exactly once), such as HTTPS/OpenSSL/LibreSSL. Signing requests with private keys can eliminate this type of attack.
+
+### 5. Packet Clocking
+
+1. **Immediate FastACK**: Send immediately after `fastack` is triggered, without waiting for the fixed `interval`.
+2. **Immediate ACK**: Send immediately after accumulating an ACK for a packet, also without waiting for the `interval`.
+   In high-speed networks, this acts as a higher-frequency "clock signal," potentially boosting unidirectional transmission speed by approximately 6x. For instance, if a batch takes only 1.5ms to process on a high-speed link but still adheres to a fixed 10ms transmission cycle, the actual throughput would be limited to 1/6 of the potential.
+3. **Pacing Mechanism**: Introduced a pacing clock to prevent burst congestion where data piles up in the kernel when `snd_wnd` is large, causing the kernel to drop packets. While difficult to implement in user space, a usable version has been achieved, allowing user-space echo to stabilize above 100MB/s.
+4. **Data Structure Optimization**: Optimized data structures (e.g., `snd_buf` ringbuffer) to ensure good cache coherency. Queues must not be too long; otherwise, traversal costs introduce extra latency. In high-speed networks, the buffer corresponding to BDP should be kept smaller to minimize latency from data structures. Note that the current KCP structure has O(n) complexity for RTO; changing it to O(1) would require significant refactoring.
+
+Ultimately, nothing is more critical in a transmission system than the clock (real-time performance).
+
 ## Specification
 
 <img src="assets/frame.png" alt="Frame Format" height="109px" />
@@ -273,57 +325,7 @@ ok      github.com/xtaci/kcp-go/v5      64.151s
 ## Typical Flame Graph
 ![Flame Graph in kcptun](assets/flame.png)
 
-## Key Design Considerations
 
-### 1. Slice vs. Container/List
-
-`kcp.flush()` loops through the send queue for retransmission checking every 20 ms.
-
-I wrote a benchmark comparing sequential loops through a *slice* and a *container/list* [here](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go):
-
-```
-BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
-BenchmarkLoopList-4    	100000000	        54.6 ns/op
-```
-
-The list structure introduces **heavy cache misses** compared to the slice, which offers better **locality**. For 5,000 connections with a 32-window size and a 20 ms interval, using a slice costs 6 μs (0.03% CPU) per `kcp.flush()`, whereas using a list costs 8.7 ms (43.5% CPU).
-
-### 2. Timing Accuracy vs. Syscall clock_gettime
-
-Timing is **critical** for the **RTT estimator**. Inaccurate timing leads to false retransmissions in KCP, but calling `time.Now()` costs 42 cycles (10.5 ns on a 4 GHz CPU, 15.6 ns on my MacBook Pro 2.7 GHz).
-
-The benchmark for `time.Now()` is [here](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go):
-
-```
-BenchmarkNow-4         	100000000	        15.6 ns/op
-```
-
-In kcp-go, after each `kcp.output()` function call, the current clock time is updated upon return. For a single `kcp.flush()` operation, the current time is queried from the system once. For 5,000 connections, this costs 5000 × 15.6 ns = 78 μs (a fixed cost when no packets need to be sent). For 10 MB/s data transfer with a 1400 MTU, `kcp.output()` is called approximately 7,500 times, costing 117 μs for `time.Now()` per second.
-
-### 3. Memory Management
-
-Primary memory allocation is performed from a global buffer pool, `xmit.Buf`. In kcp-go, when bytes need to be allocated, they are obtained from this pool, which returns a fixed-capacity 1500 bytes (mtuLimit). The rx queue, tx queue, and FEC queue all receive bytes from this pool and return them after use to prevent unnecessary zeroing of bytes. The pool mechanism maintains a high watermark for slice objects, allowing these in-flight objects to survive periodic garbage collection while also being able to return memory to the runtime when idle.
-
-### 4. Information Security
-
-kcp-go ships with built-in packet encryption powered by various block encryption algorithms and operates in [Cipher Feedback Mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)). For each packet to be sent, the encryption process begins by encrypting a [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce) from the [system entropy](https://en.wikipedia.org/wiki//dev/random), ensuring that encryption of the same plaintext never produces the same ciphertext.
-
-The contents of packets are completely anonymous with encryption, including the headers (FEC, KCP), checksums, and payload. Note that regardless of which encryption method you choose at the upper layer, if you disable encryption, the transmission will be insecure because the header is ***plaintext*** and susceptible to tampering, such as jamming the *sliding window size*, *round-trip time*, *FEC properties*, and *checksums*. `AES-128` is recommended for minimal encryption, as modern CPUs feature [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) instructions and perform better than `salsa20` (see the table above).
-
-Other possible attacks on kcp-go include:
-
-- **[Traffic analysis](https://en.wikipedia.org/wiki/Traffic_analysis):** Data flow on specific websites may exhibit patterns during data exchange. This type of eavesdropping has been mitigated by adopting [smux](https://github.com/xtaci/smux) to mix data streams and introduce noise. While a perfect solution has not yet emerged, theoretically, shuffling/mixing messages on a larger-scale network may mitigate this problem.
-- **[Replay attack](https://en.wikipedia.org/wiki/Replay_attack):** Since asymmetric encryption has not been introduced into kcp-go, capturing packets and replaying them on a different machine is possible. Note that hijacking the session and decrypting the contents is still *impossible*. Upper layers should use an asymmetric encryption system to guarantee the authenticity of each message (to process each message exactly once), such as HTTPS/OpenSSL/LibreSSL. Signing requests with private keys can eliminate this type of attack.
-
-### 5. Packet Clocking
-
-1. **Immediate FastACK**: Send immediately after `fastack` is triggered, without waiting for the fixed `interval`.
-2. **Immediate ACK**: Send immediately after accumulating an ACK for a packet, also without waiting for the `interval`.
-   In high-speed networks, this acts as a higher-frequency "clock signal," potentially boosting unidirectional transmission speed by approximately 6x. For instance, if a batch takes only 1.5ms to process on a high-speed link but still adheres to a fixed 10ms transmission cycle, the actual throughput would be limited to 1/6 of the potential.
-3. **Pacing Mechanism**: Introduced a pacing clock to prevent burst congestion where data piles up in the kernel when `snd_wnd` is large, causing the kernel to drop packets. While difficult to implement in user space, a usable version has been achieved, allowing user-space echo to stabilize above 100MB/s.
-4. **Data Structure Optimization**: Optimized data structures (e.g., `snd_buf` ringbuffer) to ensure good cache coherency. Queues must not be too long; otherwise, traversal costs introduce extra latency. In high-speed networks, the buffer corresponding to BDP should be kept smaller to minimize latency from data structures. Note that the current KCP structure has O(n) complexity for RTO; changing it to O(1) would require significant refactoring.
-
-Ultimately, nothing is more critical in a transmission system than the clock (real-time performance).
 
 ## Connection Termination
 
