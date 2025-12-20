@@ -18,6 +18,8 @@
 [13]: https://sourcegraph.com/github.com/xtaci/kcp-go/-/badge.svg
 [14]: https://sourcegraph.com/github.com/xtaci/kcp-go?badge
 
+[English](README.md) | [中文](README_zh.md)
+
 ## 简介
 
 **kcp-go** 是一个用于 [Go 语言](https://golang.org/) 的 **可靠 UDP (Reliable-UDP)** 库。
