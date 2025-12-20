@@ -304,3 +304,114 @@ func TestFECPAWS(t *testing.T) {
 
 	t.Log("PAWS wrap test passed")
 }
+
+func TestFECRTOAndSkipParity(t *testing.T) {
+	const dataShards = 3
+	const parityShards = 2
+	const rto = 50 // 50ms RTO
+
+	enc := newFECEncoder(dataShards, parityShards, 0)
+
+	// Helper to extract seqid from packet
+	getSeq := func(b []byte) uint32 {
+		return binary.LittleEndian.Uint32(b)
+	}
+
+	// --- Scenario 1: Normal case (Time < RTO) ---
+	// Send 3 packets quickly
+	t.Log("--- Scenario 1: Normal case (Time < RTO) ---")
+
+	// Packet 0
+	p0 := make([]byte, 100)
+	ps := enc.encode(p0, rto)
+	if len(ps) != 0 {
+		t.Fatalf("Expected no parity shards yet")
+	}
+	if seq := getSeq(p0); seq != 0 {
+		t.Fatalf("Expected seq 0, got %d", seq)
+	}
+
+	// Packet 1
+	p1 := make([]byte, 100)
+	ps = enc.encode(p1, rto)
+	if len(ps) != 0 {
+		t.Fatalf("Expected no parity shards yet")
+	}
+	if seq := getSeq(p1); seq != 1 {
+		t.Fatalf("Expected seq 1, got %d", seq)
+	}
+
+	// Packet 2 (Trigger parity generation)
+	p2 := make([]byte, 100)
+	ps = enc.encode(p2, rto)
+	if len(ps) != parityShards {
+		t.Fatalf("Expected %d parity shards, got %d", parityShards, len(ps))
+	}
+	if seq := getSeq(p2); seq != 2 {
+		t.Fatalf("Expected seq 2, got %d", seq)
+	}
+
+	// Check parity seqids
+	if seq := getSeq(ps[0]); seq != 3 {
+		t.Fatalf("Expected parity[0] seq 3, got %d", seq)
+	}
+	if seq := getSeq(ps[1]); seq != 4 {
+		t.Fatalf("Expected parity[1] seq 4, got %d", seq)
+	}
+
+	// --- Scenario 2: Timeout case (Time > RTO) ---
+	// Send 2 packets quickly, then sleep, then send 3rd
+	t.Log("--- Scenario 2: Timeout case (Time > RTO) ---")
+
+	// Packet 3 (Next data seq should be 5)
+	p3 := make([]byte, 100)
+	ps = enc.encode(p3, rto)
+	if len(ps) != 0 {
+		t.Fatalf("Expected no parity shards yet")
+	}
+	if seq := getSeq(p3); seq != 5 {
+		t.Fatalf("Expected seq 5, got %d", seq)
+	}
+
+	// Packet 4
+	p4 := make([]byte, 100)
+	ps = enc.encode(p4, rto)
+	if len(ps) != 0 {
+		t.Fatalf("Expected no parity shards yet")
+	}
+	if seq := getSeq(p4); seq != 6 {
+		t.Fatalf("Expected seq 6, got %d", seq)
+	}
+
+	// Sleep longer than RTO
+	time.Sleep(time.Duration(rto+20) * time.Millisecond)
+
+	// Packet 5 (Trigger parity check -> should skip)
+	p5 := make([]byte, 100)
+	ps = enc.encode(p5, rto)
+
+	// Expect NO parity shards because of timeout
+	if len(ps) != 0 {
+		t.Fatalf("Expected 0 parity shards due to timeout, got %d", len(ps))
+	}
+	if seq := getSeq(p5); seq != 7 {
+		t.Fatalf("Expected seq 7, got %d", seq)
+	}
+
+	// Even though parity was skipped, the sequence ID should have advanced by parityShards (2)
+	// So next data packet should be 7 + 1 (current) + 2 (skipped parity) = 10?
+	// Wait, let's trace:
+	// p5 gets seq 7.
+	// encode() calls skipParity() -> enc.next += parityShards.
+	// enc.next was 8 (after p5). 8 + 2 = 10.
+	// So next packet should have seq 10.
+
+	// --- Verify Sequence ID Growth after Skip ---
+	t.Log("--- Verify Sequence ID Growth after Skip ---")
+
+	p6 := make([]byte, 100)
+	ps = enc.encode(p6, rto)
+	if seq := getSeq(p6); seq != 10 {
+		t.Fatalf("Expected seq 10 after skipped parity, got %d", seq)
+	}
+}
