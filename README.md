@@ -18,7 +18,7 @@
 [13]: https://sourcegraph.com/github.com/xtaci/kcp-go/-/badge.svg
 [14]: https://sourcegraph.com/github.com/xtaci/kcp-go?badge
  
-中文（简体）阅读版： [README_zh.md](README_zh.md)
+[English](README.md) | [中文](README_zh.md)
 
 ## Introduction
 
