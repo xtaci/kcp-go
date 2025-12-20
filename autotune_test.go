@@ -117,8 +117,8 @@ func testGroup(t *testing.T, gid int, signals []uint32, expectedFalse, expectedT
 	}
 
 	t.Log("Group#", gid, signals, tune.FindPeriod(false), tune.FindPeriod(true))
-	assert.Equal(t, tune.FindPeriod(true), expectedTrue)
-	assert.Equal(t, tune.FindPeriod(false), expectedFalse)
+	assert.Equal(t, expectedTrue, tune.FindPeriod(true))
+	assert.Equal(t, expectedFalse, tune.FindPeriod(false))
 }
 
 func TestAutoTuneOverflow(t *testing.T) {
@@ -133,7 +133,7 @@ func TestAutoTuneOverflow(t *testing.T) {
 		assert.LessOrEqual(t, len(tune.pulses), maxAutoTuneSamples)
 	}
 
-	assert.Equal(t, len(tune.pulses), maxAutoTuneSamples)
+	assert.Equal(t, maxAutoTuneSamples, len(tune.pulses))
 }
 
 func TestAutoTunePop(t *testing.T) {
@@ -146,19 +146,19 @@ func TestAutoTunePop(t *testing.T) {
 			tune.Sample(true, uint32(i))
 		}
 	}
-	assert.Equal(t, tune.FindPeriod(false), 2)
-	assert.Equal(t, tune.FindPeriod(true), 2)
+	assert.Equal(t, 2, tune.FindPeriod(false))
+	assert.Equal(t, 2, tune.FindPeriod(true))
 
 	heap.Pop(&tune.pulses)
 
-	assert.Equal(t, tune.FindPeriod(false), 2)
-	assert.Equal(t, tune.FindPeriod(true), 1)
+	assert.Equal(t, 2, tune.FindPeriod(false))
+	assert.Equal(t, 1, tune.FindPeriod(true))
 
 	// after popping more
 	heap.Pop(&tune.pulses)
 	heap.Pop(&tune.pulses)
 	heap.Pop(&tune.pulses)
 
-	assert.Equal(t, tune.FindPeriod(false), 1)
-	assert.Equal(t, tune.FindPeriod(true), 1)
+	assert.Equal(t, 1, tune.FindPeriod(false))
+	assert.Equal(t, 1, tune.FindPeriod(true))
 }
