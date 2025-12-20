@@ -43,6 +43,11 @@ This library provides **smooth, resilient, ordered, error-checked, and anonymous
 
 For complete documentation, see the associated [Godoc](https://godoc.org/github.com/xtaci/kcp-go).
 
+
+### Layer-Model of KCP-GO
+
+<img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
+
 ## Specification
 
 <img src="assets/frame.png" alt="Frame Format" height="109px" />
@@ -93,19 +98,6 @@ KCP Header
 | data     []byte  |
 +------------------+
 ```
-
-### Layer-Model of KCP-GO
-
-<img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
-
-### Looking for a C++ client?
-1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
-
-## Examples
-
-1. [simple examples](https://github.com/xtaci/kcp-go/tree/master/examples)
-2. [kcptun client](https://github.com/xtaci/kcptun/blob/master/client/main.go)
-3. [kcptun server](https://github.com/xtaci/kcptun/blob/master/server/main.go)
 
 ## Performance
 ```
@@ -356,6 +348,15 @@ Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP. You nee
 3. https://github.com/smallnest/rpcx -- An RPC service framework based on net/rpc, similar to Alibaba Dubbo and Weibo Motan.
 4. https://github.com/gonet2/agent -- A gateway for games with stream multiplexing.
 5. https://github.com/syncthing/syncthing -- Open Source Continuous File Synchronization.
+
+### Looking for a C++ client?
+1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
+
+## Examples
+
+1. [simple examples](https://github.com/xtaci/kcp-go/tree/master/examples)
+2. [kcptun client](https://github.com/xtaci/kcptun/blob/master/client/main.go)
+3. [kcptun server](https://github.com/xtaci/kcptun/blob/master/server/main.go)
 
 ## Links
 
