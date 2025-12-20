@@ -95,25 +95,8 @@ KCP Header
 ```
 
 ### Layer-Model of KCP-GO
-```
-+-----------------+
-| SESSION         |
-+-----------------+
-| KCP(ARQ)        |
-+-----------------+
-| FEC(OPTIONAL)   |
-+-----------------+
-| CRYPTO(OPTIONAL)|
-+-----------------+
-| UDP(PACKET)     |
-+-----------------+
-| IP              |
-+-----------------+
-| LINK            |
-+-----------------+
-| PHY             |
-+-----------------+
-```
+
+<img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
 
 ### Looking for a C++ client?
 1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
