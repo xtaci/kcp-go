@@ -95,7 +95,7 @@ Other possible attacks on kcp-go include:
 ### 5. Packet Clocking
 
 1. **Immediate FastACK**: Send immediately after `fastack` is triggered, without waiting for the fixed `interval`.
-2. **Immediate ACK**: Send immediately after accumulating an ACK for a packet, also without waiting for the `interval`.
+2. **Immediate ACK**: Send immediately after accumulating ACKs that fill a full MTU packet, also without waiting for the `interval`.
    In high-speed networks, this acts as a higher-frequency "clock signal," potentially boosting unidirectional transmission speed by approximately 6x. For instance, if a batch takes only 1.5ms to process on a high-speed link but still adheres to a fixed 10ms transmission cycle, the actual throughput would be limited to 1/6 of the potential.
 3. **Pacing Mechanism**: Introduced a pacing clock to prevent burst congestion where data piles up in the kernel when `snd_wnd` is large, causing the kernel to drop packets. While difficult to implement in user space, a usable version has been achieved, allowing user-space echo to stabilize above 100MB/s.
 4. **Data Structure Optimization**: Optimized data structures (e.g., `snd_buf` ringbuffer) to ensure good cache coherency. Queues must not be too long; otherwise, traversal costs introduce extra latency. In high-speed networks, the buffer corresponding to BDP should be kept smaller to minimize latency from data structures. Note that the current KCP structure has O(n) complexity for RTO; changing it to O(1) would require significant refactoring.
