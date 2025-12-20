@@ -61,3 +61,19 @@ func TestBufferPoolPutWrongSizeIgnored(t *testing.T) {
 		return
 	}
 }
+
+func TestBufferPoolPutReturnsError(t *testing.T) {
+	bp := newBufferPool(mtuLimit)
+
+	// 1. Correct size
+	buf := make([]byte, mtuLimit)
+	if err := bp.Put(buf); err != nil {
+		t.Fatalf("expected nil error for correct size, got %v", err)
+	}
+
+	// 2. Incorrect size
+	wrongBuf := make([]byte, mtuLimit+1)
+	if err := bp.Put(wrongBuf); err == nil {
+		t.Fatalf("expected error for wrong size, got nil")
+	}
+}
