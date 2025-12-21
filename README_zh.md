@@ -92,12 +92,14 @@ kcp-go 通过缓存“当前时间”降低调用频次：`kcp.output()` 每次�
 
 kcp-go 内置多种块加密算法，并统一运行在 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)) 下。每个数据包都会先对取自 [系统熵](https://en.wikipedia.org/wiki//dev/random) 的 [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce) 进行加密，再进入正文加密流程，即便明文相同也不会生成重复密文。
 
-密文覆盖了所有报文字段（FEC/KCP 头、校验和、载荷），从而实现真正的匿名传输。务必注意：一旦关闭底层加密，即使上层还有 TLS/HTTPS，加密头部仍会裸露，攻击者可以通过篡改 *滑动窗口*、*RTT*、*FEC 参数* 或 *校验和* 来破坏会话。推荐至少启用 `AES-128`——借助现代 CPU 的 [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) 指令，它的性能甚至优于 `salsa20`（详见基准表）。
+密文覆盖了所有报文字段（FEC/KCP 头、校验和、载荷），从而实现真正的匿名传输。务必注意：一旦关闭底层加密，即使上层还有 TLS/HTTPS加密，头部仍会裸露，攻击者可以通过篡改 *滑动窗口*、*RTT*、*FEC 参数* 或 *校验和* 来破坏会话。推荐至少启用 `AES-128`加密——借助现代 CPU 的 [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) 指令，它的性能甚至优于 `salsa20`（详见基准表）。
 
 kcp-go 仍需警惕的攻击面包括：
 
 - **[流量分析](https://en.wikipedia.org/wiki/Traffic_analysis)：** 数据流模式可能暴露访问行为。通过 [smux](https://github.com/xtaci/smux) 做多路复用并注入噪声，可在一定程度上打散特征；理论上，跨更大范围的网络混洗能够进一步缓解。
 - **[重放攻击](https://en.wikipedia.org/wiki/Replay_attack)：** 协议尚未内建非对称认证，攻击者可捕获报文并在其他主机重放。虽然无法借此解密内容或劫持会话，但仍建议在上层使用带签名的非对称体系（如 HTTPS/OpenSSL/LibreSSL）保证“只处理一次”。
+
+总之，kcp-go 的加密设计目标在于**防止篡改**，而非抵御**主动攻击**。对于高安全性诉求的场景，务必在应用层叠加成熟的加密与认证机制。
 
 ### 5. 报文时钟
 
