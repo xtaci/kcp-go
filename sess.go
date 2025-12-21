@@ -152,6 +152,9 @@ type (
 		rateLimiter atomic.Value
 
 		mu sync.Mutex
+
+		// datagramHandler is an optional callback for handling received unreliable datagram packets (typeDatagram).
+		datagramHandler atomic.Pointer[func([]byte)]
 	}
 
 	setReadBuffer interface {
@@ -210,6 +213,13 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 			bts := defaultBufferPool.Get()[:size+sess.headerSize]
 			// copy the data to a new buffer, and reserve header space
 			copy(bts[sess.headerSize:], buf)
+
+			// Clear the header to ensure the flag at offset (s.headerSize - fecHeaderSizePlus2 + 4) is initialized.
+			// This prevents residual data from the buffer pool from causing the subsequent check
+			// `buf[s.headerSize-fecHeaderSizePlus2+4] != typeDatagram` to misclassify the packet type.
+			if sess.datagramHandler.Load() != nil {
+				clear(bts[:sess.headerSize])
+			}
 
 			// delivery to post processing (non-blocking to avoid deadlock under lock)
 			select {
@@ -636,7 +646,17 @@ func (s *UDPSession) postProcess() {
 			var ecc [][]byte
 
 			// 1. FEC encoding
-			if s.fecEncoder != nil {
+			//
+			// Skip FEC encoding for datagram packets.
+			//
+			// The FEC encoder expects the FEC header to be present at a fixed offset.
+			// However, datagram packets intentionally bypass FEC and use a different
+			// header layout.
+			//
+			// The expression (s.headerSize - fecHeaderSizePlus2 + 4) resolves to the
+			// byte offset of the FEC "type" field when FEC is enabled.
+			if s.fecEncoder != nil &&
+				(s.datagramHandler.Load() == nil || buf[s.headerSize-fecHeaderSizePlus2+4] != typeDatagram) {
 				ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
 			}
 
@@ -774,6 +794,89 @@ func (s *UDPSession) GetSRTTVar() int32 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.kcp.rx_rttvar
+}
+
+// SetDatagramHandler registers a handler for receiving unreliable datagram packets.
+//
+// The handler is invoked synchronously from the KCP input processing path.
+// It MUST return quickly and MUST NOT perform any blocking operations.
+// Blocking inside the handler will stall processing of all other KCP packets.
+//
+// If handler is nil, the datagram handler is unregistered.
+func (s *UDPSession) SetDatagramHandler(handler func([]byte)) {
+	if handler == nil {
+		s.datagramHandler.Store(nil)
+		return
+	}
+	s.datagramHandler.Store(&handler)
+}
+
+// // GetMaxDatagramSize returns the maximum payload size of a datagram packet.
+func (s *UDPSession) GetMaxDatagramSize() int {
+	size := int(s.kcp.mtu) - datagramHeaderSize
+	if s.fecEncoder != nil {
+		// Reclaim the unused FEC header space for datagram
+		size += fecHeaderSizePlus2
+	}
+	return size
+}
+
+// SendDatagram sends an unreliable datagram packet.
+//
+// Datagram packets are:
+//   - Unreliable: they are NOT retransmitted if lost.
+//   - Unordered: delivery order is not guaranteed.
+//   - Unacknowledged: no ACKs are generated.
+//   - Not protected by FEC.
+//
+// The datagram payload MUST fit into a single UDP packet.
+// If the payload exceeds the maximum size, an error is returned.
+//
+// If the internal send queue is full, the datagram is dropped silently.
+func (s *UDPSession) SendDatagram(data []byte) error {
+	if s.datagramHandler.Load() == nil {
+		return errors.New("datagram handler not set")
+	}
+	if len(data) > s.GetMaxDatagramSize() {
+		return errors.New("datagram frame too large")
+	}
+
+	// Determine the effective header size.
+	//
+	// s.headerSize always includes space reserved for FEC.
+	// Since datagrams do not use FEC, we subtract the FEC header space
+	// when FEC is enabled.
+	headerSize := s.headerSize
+	if s.fecEncoder != nil {
+		headerSize -= fecHeaderSizePlus2
+	}
+
+	// Allocate a buffer with the following layout:
+	//
+	// | reserved header (no FEC) | conv (4B) | typeDatagram (2B) | payload |
+	buf := defaultBufferPool.Get()[:headerSize+datagramHeaderSize+len(data)]
+
+	// Encode the datagram header.
+	//
+	// | conv (4 bytes) | typeDatagram (2 bytes) |
+	binary.LittleEndian.PutUint32(buf[headerSize:], s.kcp.conv)
+	binary.LittleEndian.PutUint16(buf[headerSize+4:], typeDatagram)
+
+	// Copy the datagram payload right after the datagram header.
+	copy(buf[headerSize+datagramHeaderSize:], data)
+
+	// Delivery to post processing
+	select {
+	case s.chPostProcessing <- buf:
+		return nil
+	case <-s.die:
+		defaultBufferPool.Put(buf)
+		return errors.WithStack(io.ErrClosedPipe)
+	default:
+		// Drop silently to avoid blocking.
+		defaultBufferPool.Put(buf)
+		return nil
+	}
 }
 
 func (s *UDPSession) notifyReadEvent() {
@@ -917,6 +1020,15 @@ func (s *UDPSession) kcpInput(data []byte) {
 		if kcpInErrors > 0 {
 			atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 		}
+	case typeDatagram:
+		// If a datagram handler is registered, invoke it synchronously.
+		// The handler is responsible for ensuring non-blocking behavior.
+		if h := s.datagramHandler.Load(); h != nil {
+			(*h)(data[datagramHeaderSize:])
+			break
+		}
+		// If no handler is registered, fall through to the default KCP path.
+		fallthrough
 	default: // packet without FEC
 		s.mu.Lock()
 		defer s.mu.Unlock()
@@ -1030,6 +1142,15 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		sn = binary.LittleEndian.Uint32(data[fecHeaderSizePlus2+IKCP_SN_OFFSET:])
 	case typeParity:
 		// parity packet of FEC, conversation id inside
+	case typeDatagram:
+		// Datagram packets always carry the conversation ID in the first 4 bytes.
+		if s.datagramHandler.Load() != nil {
+			hasConv = true
+			conv = binary.LittleEndian.Uint32(data)
+			break
+		}
+		// If no handler is registered, fall through to the default KCP path.
+		fallthrough
 	default:
 		// packet without FEC
 		hasConv = true

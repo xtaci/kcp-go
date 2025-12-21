@@ -54,6 +54,16 @@ const (
 	typeData           = 0xf1
 	typeParity         = 0xf2
 	maxShardSets       = 3
+
+	// typeDatagram indicates a unreliable datagram packet.
+	//
+	// This value follows the FEC extension space and is intentionally chosen
+	// to avoid any overlap with KCP command [81-84] and fragment fields [0-255].
+	// Datagram packets are NOT protected by FEC and are delivered unreliably.
+	typeDatagram = 0xf3
+
+	// Total header size for a datagram packet: conv (4B) + type (2B)
+	datagramHeaderSize = 6
 )
 
 // fecPacket is a decoded FEC packet
