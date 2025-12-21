@@ -102,6 +102,14 @@ Other possible attacks on kcp-go include:
 
 Ultimately, nothing is more critical in a transmission system than the clock (real-time performance).
 
+### 6. FEC Design Characteristics
+
+- Reed-Solomon based encoder/decoder lives in the `postProcess`/`packetInput` path, so parity shards are generated and consumed without extra goroutines or lock contention.
+- Data/parity ratios are configurable per session, letting operators trade ~20–30% bandwidth overhead for lower tail latency on lossy or long-haul links.
+- Parity shards are produced from buffer-pool-backed slices, which avoids repeated allocations and keeps GC pressure flat even during multi-Gbps transfers.
+- Decoding favors single-pass recovery: as soon as enough shards arrive, the original packets are reconstructed and pushed into `KCP.Input`, minimizing reordering and retransmission storms.
+- When combined with encryption, FEC headers stay protected, preventing traffic shapers from inferring recovery patterns or downgrading throughput.
+
 ## Specification
 
 <img src="assets/frame.png" alt="Frame Format" height="109px" />
