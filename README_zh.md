@@ -22,24 +22,24 @@
 
 ## 简介
 
-**kcp-go** 是一个用于 [Go 语言](https://golang.org/) 的 **可靠 UDP (Reliable-UDP)** 库。
+**kcp-go** 是面向 [Go 语言](https://golang.org/) 的 **可靠 UDP (Reliable-UDP)** 库，专注在不可靠网络之上提供低时延、稳健的流式传输能力。
 
-该库在 **UDP** 之上提供 **平滑、弹性、有序、错误检查和匿名** 的流式传输。经过开源项目 [kcptun](https://github.com/xtaci/kcptun) 的实战检验，从低端 MIPS 路由器到高端服务器，数以百万计的设备在各种应用中部署了由 kcp-go 驱动的程序，包括 **在线游戏、直播、文件同步和网络加速**。
+它在 **UDP** 之上构建出具备 **平滑性、弹性、有序性、错误检测与匿名性** 的数据通道。凭借开源项目 [kcptun](https://github.com/xtaci/kcptun) 的大规模部署验证，从低端 MIPS 路由器到高性能服务器，已有数以百万计的设备在 **在线游戏、直播、文件同步、网络加速** 等场景中运行 kcp-go。
 
 [最新发布](https://github.com/xtaci/kcp-go/releases)
 
 ## 特性
 
-1. 专为 **对延迟敏感** 的场景优化。
-2. 采用 **缓存友好** 和 **内存优化** 设计，核心性能极高。
-3. 单台商用服务器轻松支撑 **>5K 并发连接**。
-4. 完全兼容 [net.Conn](https://golang.org/pkg/net/#Conn) 和 [net.Listener](https://golang.org/pkg/net/#Listener)，可直接替代 [net.TCPConn](https://golang.org/pkg/net/#TCPConn) 使用。
-5. 支持使用 [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction) 的 [FEC (前向纠错)](https://en.wikipedia.org/wiki/Forward_error_correction)。
-6. 支持数据包级加密，包括 [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard)、[TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm)、[3DES](https://en.wikipedia.org/wiki/Triple_DES)、[Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher))、[Cast5](https://en.wikipedia.org/wiki/CAST-128)、[Salsa20](https://en.wikipedia.org/wiki/Salsa20) 等，采用 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB))，确保数据包完全匿名。
-7. 支持 [AEAD](https://en.wikipedia.org/wiki/Authenticated_encryption) 数据包加密。
-8. 服务端应用仅创建 **固定数量的 goroutine**，极大降低了 **上下文切换** 开销。
-9. 兼容 [skywind3000](https://github.com/skywind3000) 的 C 版本，并进行了多项改进。
-10. 针对特定平台的优化：Linux 上的 [sendmmsg](http://man7.org/linux/man-pages/man2/sendmmsg.2.html) 和 [recvmmsg](http://man7.org/linux/man-pages/man2/recvmmsg.2.html)。
+1. 面向 **低时延诉求** 的场景深度优化。
+2. 采用 **缓存友好**、**内存友好** 的核心设计，性能余量充足。
+3. 单台商用服务器即可轻松支撑 **5,000+ 并发连接**。
+4. 完全兼容 [net.Conn](https://golang.org/pkg/net/#Conn) 与 [net.Listener](https://golang.org/pkg/net/#Listener)，可直接替代 [net.TCPConn](https://golang.org/pkg/net/#TCPConn) 使用。
+5. 内建基于 [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction) 的 [FEC (前向纠错)](https://en.wikipedia.org/wiki/Forward_error_correction)。
+6. 提供数据包级加密，包括 [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard)、[TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm)、[3DES](https://en.wikipedia.org/wiki/Triple_DES)、[Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher))、[Cast5](https://en.wikipedia.org/wiki/CAST-128)、[Salsa20](https://en.wikipedia.org/wiki/Salsa20) 等，统一运行在 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB))，保障报文匿名性。
+7. 支持 [AEAD](https://en.wikipedia.org/wiki/Authenticated_encryption) 数据包加密方案。
+8. 服务端仅需维持 **固定数量的 goroutine**，显著降低 **上下文切换** 开销。
+9. 与 [skywind3000](https://github.com/skywind3000) C 版本协议兼容，并在此基础上扩展多项能力。
+10. 针对平台特性提供优化：在 Linux 上使用 [sendmmsg](http://man7.org/linux/man-pages/man2/sendmmsg.2.html) 与 [recvmmsg](http://man7.org/linux/man-pages/man2/recvmmsg.2.html)。
 
 ## 文档
 
@@ -52,57 +52,65 @@
 
 ## 关键设计考量
 
+下面几条原则支撑了 kcp-go 的性能与可靠性取舍：
+
 ### 1. 切片 (Slice) vs. 容器/链表 (Container/List)
 
-`kcp.flush()` 每 20 毫秒循环遍历发送队列以进行重传检查。
+`kcp.flush()` 每隔 20 毫秒都会扫描发送队列，确认是否需要触发重传。
 
-通过基准测试对比了顺序遍历 *切片* 与 *容器/链表* 的性能，代码在 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go)：
+我们对顺序遍历 *slice* 与 *链表* 的成本做了基准测试（代码见 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go)）：
 
 ```
 BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
 BenchmarkLoopList-4    	100000000	        54.6 ns/op
 ```
 
-相比切片，链表结构会导致 **严重的缓存未命中 (cache misses)**，而切片则具有更好的 **局部性 (locality)**。对于 5,000 个连接，窗口大小为 32，间隔为 20 毫秒，使用切片每次 `kcp.flush()` 消耗 6 微秒 (0.03% CPU)，而使用链表则消耗 8.7 毫秒 (43.5% CPU)。
+链表节点分散在内存中，极易出现 **cache miss**；slice 则具备更好的 **局部性 (locality)**。以 5,000 条连接、窗口 32、间隔 20 毫秒为例：
+
+- 使用 slice，每次 `kcp.flush()` 仅消耗 6 微秒（约 0.03% CPU）。
+- 换成链表，耗时立刻攀升至 8.7 毫秒（约 43.5% CPU）。
+
+因此，发送缓冲区必须使用 slice，而非链表。
 
 ### 2. 计时精度 vs. 系统调用 clock_gettime
 
-计时精度对于 **RTT 估算** 至关重要。计时不准会导致 KCP 发生不必要的重传，但调用 `time.Now()` 需要 42 个周期（在 4 GHz CPU 上为 10.5 ns，在我的 MacBook Pro 2.7 GHz 上为 15.6 ns）。
+RTT 估算离不开精准计时；误差一大，KCP 就会发生无谓的重传。然而调用 `time.Now()` 本身要消耗约 42 个 CPU 周期（4 GHz CPU 上约 10.5 ns，在 2.7 GHz MacBook Pro 上约 15.6 ns）。
 
-`time.Now()` 的基准测试在 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go)：
+`time.Now()` 的基准测试详见 [这里](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go)：
 
 ```
 BenchmarkNow-4         	100000000	        15.6 ns/op
 ```
 
-kcp-go 优化了时间获取策略：每次 `kcp.output()` 调用返回时更新当前时间。在单次 `kcp.flush()` 操作中，仅查询一次系统时间。对于 5,000 个连接，这消耗 5000 × 15.6 ns = 78 μs（当没有数据包需要发送时的固定成本）。对于 10 MB/s 的数据传输（MTU 为 1400），`kcp.output()` 每秒大约被调用 7,500 次，`time.Now()` 每秒消耗 117 μs。
+kcp-go 通过缓存“当前时间”降低调用频次：`kcp.output()` 每次返回前更新一次时间戳，单次 `kcp.flush()` 内只读取一次系统时间。以 5,000 条连接为例，固定成本约为 5000 × 15.6 ns = 78 μs。若吞吐达到 10 MB/s（MTU 1400），`kcp.output()` 每秒被调用约 7,500 次，`time.Now()` 的额外开销仅 117 μs。
 
 ### 3. 内存管理
 
-内存分配主要依赖全局缓冲池 `xmit.Buf`。kcp-go 需要分配内存时，会从池中获取固定容量（1500字节，即 mtuLimit）的缓冲区。RX、TX 及 FEC 队列均复用该池中的缓冲区，使用完毕后归还，避免了不必要的内存清零开销。该机制维持了切片对象的高水位线，既保证传输中的对象不被 GC 回收，又能在空闲时将内存归还给运行时环境。
+核心分配来自全局缓冲池 `xmit.Buf`。当需要新的缓冲区时，直接从池中取出固定容量（1500 字节，即 mtuLimit）的切片；RX、TX 以及 FEC 队列都共用这一池子，用完立即归还，避免重复清零。这样既能维持活跃对象的高水位线，确保传输过程不会频繁触发 GC，又能在空闲期把内存退回运行时。
 
 ### 4. 信息安全
 
-kcp-go 内置了多种块加密算法支持的数据包加密功能，采用 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)) 运行。每个数据包的加密过程都始于加密一个源自 [系统熵](https://en.wikipedia.org/wiki//dev/random) 的 [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce)，确保即使明文相同，生成的密文也绝不重复。
+kcp-go 内置多种块加密算法，并统一运行在 [CFB 模式](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)) 下。每个数据包都会先对取自 [系统熵](https://en.wikipedia.org/wiki//dev/random) 的 [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce) 进行加密，再进入正文加密流程，即便明文相同也不会生成重复密文。
 
-加密后的数据包完全匿名，涵盖头部（FEC, KCP）、校验和及载荷。请注意，如果禁用底层加密，即便上层应用了加密，传输过程仍是不安全的。因为协议头部是 ***明文*** 的，易受篡改攻击（如修改 *滑动窗口大小*、*RTT*、*FEC 参数* 和 *校验和*）。建议使用 `AES-128` 进行最小程度的加密，因为现代 CPU 具有 [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) 指令，性能优于 `salsa20`（见上表）。
+密文覆盖了所有报文字段（FEC/KCP 头、校验和、载荷），从而实现真正的匿名传输。务必注意：一旦关闭底层加密，即使上层还有 TLS/HTTPS，加密头部仍会裸露，攻击者可以通过篡改 *滑动窗口*、*RTT*、*FEC 参数* 或 *校验和* 来破坏会话。推荐至少启用 `AES-128`——借助现代 CPU 的 [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) 指令，它的性能甚至优于 `salsa20`（详见基准表）。
 
-针对 kcp-go 的其他可能攻击包括：
+kcp-go 仍需警惕的攻击面包括：
 
-- **[流量分析](https://en.wikipedia.org/wiki/Traffic_analysis):** 特定网站上的数据流在数据交换期间可能会表现出模式。通过采用 [smux](https://github.com/xtaci/smux) 混合数据流并引入噪声，这种类型的窃听已得到缓解。虽然尚未出现完美的解决方案，但理论上，在更大规模的网络上混洗/混合消息可以缓解此问题。
-- **[重放攻击](https://en.wikipedia.org/wiki/Replay_attack):** 由于 kcp-go 尚未引入非对称加密，因此捕获数据包并在另一台机器上重放是可能的。请注意，劫持会话并解密内容仍然是 *不可能的*。上层应使用非对称加密系统来保证每条消息的真实性（以确保每条消息仅被处理一次），例如 HTTPS/OpenSSL/LibreSSL。使用私钥对请求进行签名可以消除此类攻击。
+- **[流量分析](https://en.wikipedia.org/wiki/Traffic_analysis)：** 数据流模式可能暴露访问行为。通过 [smux](https://github.com/xtaci/smux) 做多路复用并注入噪声，可在一定程度上打散特征；理论上，跨更大范围的网络混洗能够进一步缓解。
+- **[重放攻击](https://en.wikipedia.org/wiki/Replay_attack)：** 协议尚未内建非对称认证，攻击者可捕获报文并在其他主机重放。虽然无法借此解密内容或劫持会话，但仍建议在上层使用带签名的非对称体系（如 HTTPS/OpenSSL/LibreSSL）保证“只处理一次”。
 
 ### 5. 报文时钟
 
-1. **FastACK 立即发送**：FastACK 触发后立即发送，不再等待固定的 interval。
-2. **ACK 立即发送**：累计到能填满一个 MTU 的 ACK 包后立即发送，同样不等待 interval。
-   在高速网络中，这相当于提供更高频率的“时钟信号”，可使单向传输速度提升约 6 倍。例如，高速链路上一个 batch 只需 1.5ms 就能处理完成，如果仍遵循固定 10ms 的发送周期，那么实际吞吐将仅剩 1/6。
-3. **Pacing 机制**：引入 Pacing 时钟，防止在较大的 snd_wnd 下数据瞬间堆积到内核导致突发拥塞和丢包。用户态实现 Pacing 较难，目前勉强实现了一个可用版本，用户态 echo 测试能稳定在 100MB/s 以上。
-4. **数据结构优化**：优化数据结构（如 snd_buf 的 ringbuffer），保证结构具备良好的缓存一致性 (cache coherency)。队列不宜过长，否则遍历开销会引入额外延迟。在高速网络下，应将 BDP 对应的 buffer 设得更小，以此降低数据结构带来的 latency。注意：现有 KCP 结构的 RTO 计算复杂度为 O(n)，若要改为 O(1) 则需要大幅重构。
+1. **FastACK 即刻释放**：只要触发 FastACK，就立刻发出去，而不是等待固定 interval。
+2. **ACK 集齐即发**：累计到一个 MTU 的 ACK 包立刻发送，在高速链路上相当于提供更高频率的“时钟信号”。实测单向吞吐可提升约 6 倍——如果一个 batch 1.5 ms 就能处理完，却仍然以 10 ms 的周期发送，吞吐只剩 1/6。
+3. **Pacing 时钟**：为避免大 `snd_wnd` 下瞬时把大量数据塞进内核、引爆拥塞，用户态实现了 Pacing。虽然实现难度高，但 echo 测试已能稳定在 100 MB/s 以上。
+4. **数据结构保持短小**：例如 `snd_buf` 使用 ringbuffer 来保持 cache coherency，队列越短，遍历成本越低。高速网络中应根据 BDP 适当减小 buffer，避免结构本身成为延迟源。需注意：当前 KCP 的 RTO 计算为 O(n)，若想降到 O(1) 必须重构。
 
-说到底，传输系统中没有任何东西比时钟（实时性）更重要。
+归根结底，传输系统里没有什么比“时钟”更重要。
 
 ## 协议规范
+
+下图展示了完整帧格式，便于与 Wireshark 等工具对照：
 
 <img src="assets/frame.png" alt="Frame Format" height="109px" />
 
@@ -144,6 +152,8 @@ KCP Header
 ```
 
 ## 性能
+
+以下为不同平台的基准测试，包含加密、FEC、echo 等典型场景，方便横向对比：
 ```
 2025/11/26 11:12:51 beginning tests, encryption:salsa20, fec:10/3
 goos: linux
@@ -323,27 +333,31 @@ ok      github.com/xtaci/kcp-go/v5      64.151s
 
 
 ## 典型火焰图
+
+下图为 kcptun 运行时采集的典型 CPU 火焰图，可用来定位热点函数和锁竞争：
 ![Flame Graph in kcptun](assets/flame.png)
 
 
 
 ## 连接终止
 
-KCP 协议 **未定义** 类似 TCP 的 **SYN/FIN/RST** 控制消息。因此，您需要在应用层自行实现 **keepalive/heartbeat (心跳/保活) 机制**。一个实际的例子是在会话之上使用 **多路复用** 协议，例如 [smux](https://github.com/xtaci/smux)（它具有嵌入式的 keepalive 机制）。参考实现请参见 [kcptun](https://github.com/xtaci/kcptun)。
+KCP 协议 **没有** 类似 TCP 的 **SYN/FIN/RST** 控制报文，因此 keepalive/heartbeat 必须由应用层负责。实战中可以在会话之上叠加 **多路复用** 协议，例如 [smux](https://github.com/xtaci/smux)（内置 keepalive），具体做法可参考 [kcptun](https://github.com/xtaci/kcptun)。
 
 ## 常见问题 (FAQ)
 
+以下围绕部署、FEC 与安全性列出最常见的疑问：
+
 **Q: 我的服务器正在处理 >5K 连接，CPU 利用率非常高。**
 
-**A:** 建议将 kcp-go 部署在独立的 `agent` 或 `gate` 服务器上。这不仅能降低 CPU 负载，还能提高 RTT 测量（计时）的 **精度**，从而优化重传机制。使用 `SetNoDelay` 增加更新 `interval`，例如 `conn.SetNoDelay(1, 40, 1, 1)`，将显着降低系统负载，但可能会降低性能。
+**A:** 建议把 kcp-go 前移到独立的 `agent`/`gate` 节点。这样一来既能分担 CPU，又能提升 RTT 采样精度，从而优化重传。还可以通过 `SetNoDelay` 拉长 update `interval`（如 `conn.SetNoDelay(1, 40, 1, 1)`）来进一步降载，但要权衡可能的性能回落。
 
 **Q: 我应该何时启用 FEC？**
 
-**A:** 对于长距离传输，前向纠错（FEC）至关重要，因为丢包会导致严重的延迟惩罚。在现代世界复杂的数据包路由网络中，基于往返时间的丢包检查并不总是有效的。长距离传输中 RTT 样本的显著偏差通常会导致典型 RTT 估算器中的 RTO 值较大，从而减慢传输速度。
+**A:** 远距离链路上，丢包一旦出现就会造成巨额时延，FEC 可以在无需等待重传的情况下补齐数据。现实网络的路由路径非常多变，单靠 RTT 做丢包检测往往失灵；RTT 样本的离散会迫使 RTO 拉长，进而拖慢整体吞吐。因此跨洲/跨境等长链路强烈建议开启 FEC。
 
 **Q: 我应该启用加密吗？**
 
-**A:** 是的，为了协议的安全性，即使上层已经有加密。
+**A:** 必须启用。即便业务层已经有 TLS/HTTPS，KCP 报文头部仍会裸露，只有开启底层加密才能防止篡改与流量分析。
 
 ## 谁在使用？
 
