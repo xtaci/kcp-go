@@ -48,7 +48,7 @@
 
 ### KCP-GO 分层模型
 
-<img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
+<img src="assets/layermodel.jpg" alt="layer-model" />
 
 ## 关键设计考量
 
