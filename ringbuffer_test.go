@@ -28,7 +28,7 @@ func TestRingSize(t *testing.T) {
 	for {
 		use := rand.Int() % (left + 1)
 		left -= use
-		for j := 0; j < use; j++ {
+		for range use {
 			if _, ok := r.Pop(); !ok {
 				t.Errorf("Expected to pop value, but got none")
 			}
@@ -163,7 +163,7 @@ func TestRingBufferGrow(t *testing.T) {
 
 	// Push enough elements to trigger multiple grows
 	pushCount := 100
-	for i := 0; i < pushCount; i++ {
+	for i := range pushCount {
 		r.Push(i)
 
 		// Check if capacity is among expected
@@ -206,7 +206,7 @@ func TestRingBufferGrow(t *testing.T) {
 
 func TestRingForEach(t *testing.T) {
 	r := NewRingBuffer[int](10)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		r.Push(i)
 	}
 

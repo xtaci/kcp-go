@@ -146,7 +146,7 @@ func BenchmarkFECDecode(b *testing.B) {
 	decoder := newFECDecoder(dataSize, paritySize)
 	b.ReportAllocs()
 	b.SetBytes(payLoad)
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		if rand.Int()%(dataSize+paritySize) == 0 { // random loss
 			continue
 		}
@@ -198,7 +198,7 @@ func TestFECPAWS(t *testing.T) {
 	// This will generate 'dataShards' data packets and 'parityShards' parity packets.
 	// Total 'shardSize' packets.
 	// Their seqids should be [paws-shardSize, ..., paws-1]
-	for i := 0; i < dataShards; i++ {
+	for i := range dataShards {
 		data := make([]byte, payLoad)
 		// We can put some recognizable data
 		// Note: fecEncoder writes header at 0-6, and size at 6-8. Payload starts at 8.
@@ -232,7 +232,7 @@ func TestFECPAWS(t *testing.T) {
 	// 2. Encode the first group after PAWS
 	// Their seqids should be [0, ..., shardSize-1]
 	startIdx := len(packets)
-	for i := 0; i < dataShards; i++ {
+	for i := range dataShards {
 		data := make([]byte, payLoad)
 		binary.LittleEndian.PutUint32(data[8:], uint32(i+100)) // Different data
 

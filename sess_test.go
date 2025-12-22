@@ -436,7 +436,7 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 		if err != nil && err != io.EOF {
 			t.Fatalf("Read error: %v", err)
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			expectedByte := byte(r.Int())
 			if rcvbuf[i] != expectedByte {
 				t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), rcvbuf[i], expectedByte)
@@ -537,7 +537,7 @@ func randomEchoVectorTest(t *testing.T, cli *UDPSession) {
 		if err != nil && err != io.EOF {
 			t.Fatalf("Read error: %v", err)
 		}
-		for i := 0; i < n; i++ {
+		for i := range n {
 			expectedByte := byte(r.Int())
 			if rcvbuf[i] != expectedByte {
 				t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), rcvbuf[i], expectedByte)
