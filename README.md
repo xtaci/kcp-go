@@ -48,7 +48,7 @@ For complete documentation, see the associated [Godoc](https://godoc.org/github.
 
 ### Layer-Model of KCP-GO
 
-<img src="assets/layermodel.jpg" alt="layer-model" height="300px" />
+<img src="assets/layermodel.jpg" alt="layer-model" />
 
 ## Key Design Considerations
 
