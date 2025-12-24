@@ -101,6 +101,12 @@ func (timeoutError) Error() string   { return "timeout" }
 func (timeoutError) Timeout() bool   { return true }
 func (timeoutError) Temporary() bool { return true }
 
+// sendRequest defines a write request before encoding and transmission
+type sendRequest struct {
+	buffer []byte
+	oob    bool
+}
+
 type (
 	// UDPSession defines a KCP session implemented by UDP
 	UDPSession struct {
@@ -143,7 +149,7 @@ type (
 		socketWriteErrorOnce sync.Once
 
 		// packets waiting to be sent on wire
-		chPostProcessing chan []byte
+		chPostProcessing chan sendRequest
 
 		// platform-dependent optimizations
 		platform platform
@@ -175,7 +181,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chSocketReadError = make(chan struct{})
 	sess.chSocketWriteError = make(chan struct{})
-	sess.chPostProcessing = make(chan []byte, devBacklog)
+	sess.chPostProcessing = make(chan sendRequest, devBacklog)
 	sess.remote = remote
 	sess.conn = conn
 	sess.ownConn = ownConn
@@ -213,7 +219,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 			// delivery to post processing (non-blocking to avoid deadlock under lock)
 			select {
-			case sess.chPostProcessing <- bts:
+			case sess.chPostProcessing <- sendRequest{bts, false}:
 			case <-sess.die:
 				return
 			default:
@@ -632,12 +638,19 @@ func (s *UDPSession) postProcess() {
 	bytesToSend := 0
 	for {
 		select {
-		case buf := <-s.chPostProcessing: // dequeue from post processing
+		case req := <-s.chPostProcessing: // dequeue from post processing
+			buf := req.buffer
+			oob := req.oob // currently not used
+
 			var ecc [][]byte
 
 			// 1. FEC encoding
 			if s.fecEncoder != nil {
-				ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
+				if !oob {
+					ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
+				} else {
+					s.fecEncoder.encodeOOB(buf)
+				}
 			}
 
 			// 2. Encryption
