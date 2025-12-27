@@ -480,6 +480,7 @@ func (enc *fecEncoder) sealParity(data []byte) {
 	enc.next = (enc.next + 1) % enc.paws
 }
 
+// encodeOOB encodes an out-of-band packet
 func (enc *fecEncoder) encodeOOB(b []byte) {
 	enc.sealOOB(b[enc.headerOffset:])
 	binary.LittleEndian.PutUint16(b[enc.payloadOffset:], uint16(len(b[enc.payloadOffset:])))
@@ -487,7 +488,7 @@ func (enc *fecEncoder) encodeOOB(b []byte) {
 
 // sealOOB seals an out-of-band packet
 func (enc *fecEncoder) sealOOB(data []byte) {
-	binary.LittleEndian.PutUint32(data, enc.next)
+	binary.LittleEndian.PutUint32(data, uint32(0xffffffff)) // use max uint32 as OOB seqid
 	binary.LittleEndian.PutUint16(data[4:], typeOOB)
 }
 

@@ -75,6 +75,9 @@ const (
 	// maximum packet size
 	mtuLimit = 1500
 
+	// conv field size
+	convSize = 4
+
 	// accept backlog
 	acceptBacklog = 128
 
@@ -106,6 +109,9 @@ type sendRequest struct {
 	buffer []byte
 	oob    bool
 }
+
+// OOB callback function
+type OOBCallBackType func([]byte)
 
 type (
 	// UDPSession defines a KCP session implemented by UDP
@@ -163,7 +169,7 @@ type (
 		//
 		// OOB data bypasses the KCP reliable data path and is delivered unreliably.
 		// The callback is invoked synchronously from the KCP input processing path.
-		callbackForOOB atomic.Pointer[func([]byte)]
+		callbackForOOB atomic.Value
 	}
 
 	setReadBuffer interface {
@@ -646,7 +652,7 @@ func (s *UDPSession) postProcess() {
 		select {
 		case req := <-s.chPostProcessing: // dequeue from post processing
 			buf := req.buffer
-			oob := req.oob // currently not used
+			oob := req.oob
 
 			var ecc [][]byte
 
@@ -795,7 +801,7 @@ func (s *UDPSession) GetSRTTVar() int32 {
 	return s.kcp.rx_rttvar
 }
 
-// SetCallbackForOOB registers a callback for receiving out-of-band (OOB) data.
+// SetOOBHandler registers a callback for receiving out-of-band (OOB) data.
 //
 // OOB data is delivered unreliably and bypasses the KCP reliable data path.
 // The callback is invoked synchronously from the KCP input processing path.
@@ -807,30 +813,30 @@ func (s *UDPSession) GetSRTTVar() int32 {
 //
 // OOB support requires FEC to be enabled, as the OOB packet format
 // reuses the FEC header layout for demultiplexing.
-func (s *UDPSession) SetCallbackForOOB(callback func([]byte)) error {
+func (s *UDPSession) SetOOBHandler(callback OOBCallBackType) error {
 	if s.fecEncoder == nil {
 		return errors.New("OOB requires FEC to be enabled")
 	}
 	if callback == nil {
-		s.callbackForOOB.Store(nil)
+		s.callbackForOOB.Store(OOBCallBackType(func([]byte) {}))
 		return nil
 	}
-	s.callbackForOOB.Store(&callback)
+	s.callbackForOOB.Store(callback)
 	return nil
 }
 
-// GetMaxSizeForOOB returns the maximum payload size for an OOB packet.
+// GetOOBMaxSize returns the maximum payload size for an OOB packet.
 //
 // The returned value is the maximum number of bytes that can be carried as
 // OOB data in a single packet, based on the current MTU and protocol layout.
 //
 // If FEC is not enabled, OOB is unsupported and this function returns 0.
-func (s *UDPSession) GetMaxSizeForOOB() int {
+func (s *UDPSession) GetOOBMaxSize() int {
 	if s.fecEncoder == nil {
 		return 0
 	}
 	// Packet layout: | conv (4B) | OOB payload |
-	return int(s.kcp.mtu) - 4
+	return int(s.kcp.mtu) - convSize
 }
 
 // SendOOB sends an out-of-band (OOB) data packet.
@@ -850,12 +856,13 @@ func (s *UDPSession) SendOOB(data []byte) error {
 	if s.fecEncoder == nil {
 		return errors.New("OOB requires FEC to be enabled")
 	}
-	if s.callbackForOOB.Load() == nil {
-		return errors.New("OOB callback not set")
-	}
+
+	// lock the session during OOB packet construction
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	// Packet layout: | conv (4B) | OOB payload |
-	size := 4 + len(data)
+	size := convSize + len(data)
 	if size > int(s.kcp.mtu) {
 		return errors.New("OOB payload too large")
 	}
@@ -863,12 +870,11 @@ func (s *UDPSession) SendOOB(data []byte) error {
 	// Allocate buffer with reserved header space.
 	// s.headerSize includes the space needed by the FEC encoder.
 	buf := defaultBufferPool.Get()[:size+s.headerSize]
-
 	// Encode conversation ID.
 	binary.LittleEndian.PutUint32(buf[s.headerSize:], s.kcp.conv)
 
 	// Copy OOB payload immediately after the conversation ID.
-	copy(buf[s.headerSize+4:], data)
+	copy(buf[s.headerSize+convSize:], data)
 
 	// Enqueue the packet for post-processing.
 	// Performs OOB framing, encryption, and transmission, bypassing FEC and KCP.
@@ -956,7 +962,7 @@ func (s *UDPSession) packetInput(data []byte) {
 
 	// basic check for minimum packet size
 	// NOTE: OOB allows sending small packets and even empty packets.
-	if len(data) < min(IKCP_OVERHEAD, fecHeaderSizePlus2+4) {
+	if len(data) < min(IKCP_OVERHEAD, fecHeaderSizePlus2+convSize) {
 		atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
 		return
 	}
@@ -992,15 +998,18 @@ func (s *UDPSession) kcpInput(data []byte) {
 			s.fecDecoder = newFECDecoder(1, 1)
 		}
 
-		// FEC decoding
-		recovers := s.fecDecoder.decode(f)
+		// KCP input for data packets
+		// only data packets are fed into kcp directly
+		// parity packets are only used for recovery
 		if f.flag() == typeData {
 			if ret := s.kcp.Input(data[fecHeaderSizePlus2:], IKCP_PACKET_REGULAR, s.ackNoDelay); ret != 0 {
 				kcpInErrors++
 			}
 		}
 
+		// FEC decoding
 		// If there're some packets recovered from FEC, feed them into kcp
+		recovers := s.fecDecoder.decode(f)
 		for _, r := range recovers {
 			if len(r) >= 2 { // must be larger than 2bytes
 				sz := binary.LittleEndian.Uint16(r)
@@ -1030,11 +1039,13 @@ func (s *UDPSession) kcpInput(data []byte) {
 			atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
 		}
 	case typeOOB:
+		// Count received OOB packet
+		atomic.AddUint64(&DefaultSnmp.OOBPackets, 1)
 		// If an OOB callback is registered, invoke it synchronously.
 		// The callback is responsible for ensuring non-blocking behavior.
 		if callback := s.callbackForOOB.Load(); callback != nil {
 			// Data layout: | FEC header (fecHeaderSizePlus2) | conv (4B) | OOB payload |
-			(*callback)(data[fecHeaderSizePlus2+4:])
+			callback.(OOBCallBackType)(data[fecHeaderSizePlus2+convSize:])
 		}
 	default: // packet without FEC
 		s.mu.Lock()
@@ -1122,7 +1133,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 
 	// basic check for minimum packet size
 	// NOTE: OOB allows sending small packets and even empty packets.
-	if len(data) < min(IKCP_OVERHEAD, fecHeaderSizePlus2+4) {
+	if len(data) < min(IKCP_OVERHEAD, fecHeaderSizePlus2+convSize) {
 		return
 	}
 

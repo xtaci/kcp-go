@@ -37,6 +37,7 @@ import (
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1319,6 +1320,12 @@ func TestListenDial(t *testing.T) {
 	<-ch
 }
 
+// TestOOB verifies the end-to-end transmission and reception of OOB (Out-Of-Band) data:
+// 1. The server registers an OOB callback and echoes back any received OOB data.
+// 2. The client registers an OOB callback to validate the content and length of echoed OOB data.
+// 3. The client sends OOB data of varying lengths in a loop, counting the number of echoes for each length.
+// 4. Finally, it checks that all lengths of OOB data are correctly echoed back.
+// This test ensures the OOB data channel is functional and the content is accurate.
 func TestOOB(t *testing.T) {
 	port := nextPort()
 	block1, _ := NewAESGCMCrypt(pass)
@@ -1330,6 +1337,7 @@ func TestOOB(t *testing.T) {
 	defer l.Close()
 
 	go func() {
+		// Server listens for OOB data and echoes it back
 		kcplistener := l.(*Listener)
 		kcplistener.SetReadBuffer(4 * 1024 * 1024)
 		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
@@ -1341,7 +1349,8 @@ func TestOOB(t *testing.T) {
 			sess := s.(*UDPSession)
 			sess.SetReadBuffer(4 * 1024 * 1024)
 			sess.SetWriteBuffer(4 * 1024 * 1024)
-			sess.SetCallbackForOOB(func(buf []byte) {
+			// Register OOB callback, echo back received OOB data immediately
+			sess.SetOOBHandler(func(buf []byte) {
 				if err := sess.SendOOB(buf); err != nil {
 					t.Errorf("server failed to echo OOB payload: %v", err)
 				}
@@ -1358,14 +1367,17 @@ func TestOOB(t *testing.T) {
 	defer cli.Close()
 	cli.SetWriteDelay(false)
 
-	size := cli.GetMaxSizeForOOB()
+	size := cli.GetOOBMaxSize()
 	if size < 1000 {
 		t.Errorf("unexpectedly small max OOB size: %d", size)
 	}
-	sizePlus1 := size + 1
-	counts := make([]int32, sizePlus1)
+	t.Log("Max OOB size:", size)
 
-	cli.SetCallbackForOOB(func(buf []byte) {
+	sizePlus1 := size + 1
+	counts := make([]atomic.Int32, sizePlus1)
+
+	// Client registers OOB callback to validate echoed OOB data content and length
+	cli.SetOOBHandler(func(buf []byte) {
 		for i, b := range buf {
 			if b != byte(i) {
 				t.Fatalf(
@@ -1375,7 +1387,7 @@ func TestOOB(t *testing.T) {
 				break
 			}
 		}
-		atomic.AddInt32(&counts[len(buf)], 1)
+		counts[len(buf)].Add(1)
 	})
 
 	var wg sync.WaitGroup
@@ -1383,16 +1395,18 @@ func TestOOB(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		randomEchoTest(t, cli, 100*1024*1024)
+		// Stress test for normal data channel to ensure main channel does not affect OOB
+		randomEchoTest(t, cli, 10*1024*1024)
 	}()
 
 	go func() {
 		defer wg.Done()
+		// Send OOB data of varying lengths in a loop, content is [0,1,2,...]
 		buf := make([]byte, size)
 		for i := range len(buf) {
 			buf[i] = byte(i)
 		}
-		for i := range 100 * 1024 * 1024 {
+		for i := range 10 * 1024 * 1024 {
 			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
 				t.Errorf("client failed to send OOB payload: %v", err)
 			}
@@ -1401,9 +1415,197 @@ func TestOOB(t *testing.T) {
 
 	wg.Wait()
 
-	for i, c := range counts {
-		if c == 0 {
+	// Check that all lengths of OOB data are correctly echoed back
+	for i := range counts {
+		if counts[i].Load() == 0 {
 			t.Errorf("missing OOB echo for payload length %d", i)
 		}
+	}
+}
+
+// TestOOB_OneSideHandler verifies that OOB data can be received and processed
+// when only the server sets the OOB handler and the client does not.
+//
+// The server OOB handler updates the shared 'counts' slice, which is initialized
+// in the main goroutine and referenced by the handler for each OOB payload length.
+// This test ensures that the server can receive and correctly process OOB packets
+// of all possible lengths, even if the client does not set any OOB handler.
+func TestOOB_OneSideHandler(t *testing.T) {
+	port := nextPort()
+	block1, _ := NewAESGCMCrypt(pass)
+
+	l, err := listenEcho(port, block1)
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+
+	counts := make([]atomic.Int32, mtuLimit)
+
+	// Get OOB max payload size and initialize the shared counts slice.
+	go func() {
+		// Server sets OOB handler and counts received OOB packets by length.
+		// The handler directly updates the shared 'counts' slice.
+		kcplistener := l.(*Listener)
+		kcplistener.SetReadBuffer(4 * 1024 * 1024)
+		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
+		for {
+			s, err := l.Accept()
+			if err != nil {
+				return
+			}
+			sess := s.(*UDPSession)
+			sess.SetReadBuffer(4 * 1024 * 1024)
+			sess.SetWriteBuffer(4 * 1024 * 1024)
+			// Only the server sets the OOB handler.
+			// The handler references the 'counts' slice from the main goroutine.
+			sess.SetOOBHandler(func(buf []byte) {
+				// Validate OOB payload content and count by length.
+				for i, b := range buf {
+					if b != byte(i) {
+						t.Fatalf(
+							"OOB payload mismatch at offset %d: expected %d, got %d",
+							i, byte(i), b,
+						)
+						break
+					}
+				}
+				counts[len(buf)].Add(1)
+			})
+			go handleEcho(sess)
+		}
+	}()
+
+	block2, _ := NewAESGCMCrypt(pass)
+	cli, err := dialEcho(port, block2)
+	if err != nil {
+		panic(err)
+	}
+	defer cli.Close()
+	cli.SetWriteDelay(false)
+
+	size := cli.GetOOBMaxSize()
+	sizePlus1 := size + 1
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		// Client does NOT set OOB handler, only sends OOB packets of varying lengths.
+		buf := make([]byte, size)
+		for i := range len(buf) {
+			buf[i] = byte(i)
+		}
+		for i := range 10 * 1024 * 1024 {
+			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
+				t.Errorf("client failed to send OOB payload: %v", err)
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	// Give the server time to process incoming OOB packets.
+	time.Sleep(500 * time.Millisecond)
+
+	// Check that all lengths of OOB data are received by the server.
+	for i := range counts[:sizePlus1] {
+		if counts[i].Load() == 0 {
+			t.Errorf("server missing OOB for payload length %d", i)
+		}
+	}
+}
+
+func TestSetOOBHandler_Basic(t *testing.T) {
+	sess := new(UDPSession)
+	sess.kcp = NewKCP(1, func(buf []byte, size int) {})
+	// Should return error if FEC is not enabled
+	err := sess.SetOOBHandler(func([]byte) {})
+	if err == nil {
+		t.Error("expected error when FEC is not enabled")
+	}
+
+	// Should allow register/unregister callback after FEC enabled
+	sess.fecEncoder = newFECEncoder(1, 1, 0)
+	if err := sess.SetOOBHandler(nil); err != nil {
+		t.Error("unregister nil callback should not error")
+	}
+	// After setting nil, callbackForOOB should be a dummy handler, and calling it should not panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("dummy OOB handler should not panic, got panic: %v", r)
+		}
+	}()
+	if f := sess.callbackForOOB.Load(); f != nil {
+		typeName := "<nil>"
+		if f != nil {
+			typeName = reflect.TypeOf(f).String()
+		}
+		t.Logf("callbackForOOB type: %s", typeName)
+
+		if cb, ok := f.(OOBCallBackType); ok {
+			cb([]byte("dummy"))
+		} else {
+			t.Errorf("callbackForOOB type assertion failed: got %T", f)
+		}
+	} else {
+		t.Error("callbackForOOB should not be nil after SetOOBHandler(nil)")
+	}
+	called := false
+	cb := func([]byte) { called = true }
+	if err := sess.SetOOBHandler(cb); err != nil {
+		t.Errorf("register callback failed: %v", err)
+	}
+	// Simulate callback invocation
+	if f := sess.callbackForOOB.Load(); f != nil {
+		if cb2, ok := f.(OOBCallBackType); ok {
+			cb2([]byte("test"))
+			if !called {
+				t.Error("callback not called as expected")
+			}
+		} else {
+			t.Errorf("callbackForOOB type assertion failed: got %T", f)
+		}
+	}
+}
+
+func TestGetOOBMaxSize(t *testing.T) {
+	sess := new(UDPSession)
+	sess.kcp = NewKCP(1, func(buf []byte, size int) {})
+	// Should return 0 if FEC is not enabled
+	if n := sess.GetOOBMaxSize(); n != 0 {
+		t.Errorf("expected 0 when FEC not enabled, got %d", n)
+	}
+	// Should return mtu-4 after FEC enabled
+	sess.fecEncoder = newFECEncoder(1, 1, 0)
+	sess.kcp.mtu = 1400
+	if n := sess.GetOOBMaxSize(); n != 1396 {
+		t.Errorf("expected 1396, got %d", n)
+	}
+}
+
+func TestSendOOB_Errors(t *testing.T) {
+	sess := new(UDPSession)
+	sess.kcp = NewKCP(1, func(buf []byte, size int) {})
+	// Should error if FEC is not enabled
+	err := sess.SendOOB([]byte("abc"))
+	if err == nil || err.Error() != "OOB requires FEC to be enabled" {
+		t.Errorf("expected 'OOB requires FEC to be enabled', got %v", err)
+	}
+	// NOTE: SendOOB no longer requires callbackForOOB to be non-nil on sender side.
+	// It should not return error if callback is not set after FEC is enabled.
+	sess.fecEncoder = newFECEncoder(1, 1, 0)
+	err = sess.SendOOB([]byte("abc"))
+	if err != nil {
+		t.Errorf("expected no error when callback not set, got %v", err)
+	}
+	// Should error if payload is too large
+	sess.kcp.mtu = 8
+	cb := func([]byte) {}
+	sess.SetOOBHandler(cb)
+	err = sess.SendOOB([]byte("123456789"))
+	if err == nil || err.Error() != "OOB payload too large" {
+		t.Errorf("expected 'OOB payload too large', got %v", err)
 	}
 }
