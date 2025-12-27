@@ -1318,3 +1318,92 @@ func TestListenDial(t *testing.T) {
 	conn.Close()
 	<-ch
 }
+
+func TestOOB(t *testing.T) {
+	port := nextPort()
+	block1, _ := NewAESGCMCrypt(pass)
+
+	l, err := listenEcho(port, block1)
+	if err != nil {
+		panic(err)
+	}
+	defer l.Close()
+
+	go func() {
+		kcplistener := l.(*Listener)
+		kcplistener.SetReadBuffer(4 * 1024 * 1024)
+		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
+		for {
+			s, err := l.Accept()
+			if err != nil {
+				return
+			}
+			sess := s.(*UDPSession)
+			sess.SetReadBuffer(4 * 1024 * 1024)
+			sess.SetWriteBuffer(4 * 1024 * 1024)
+			sess.SetCallbackForOOB(func(buf []byte) {
+				if err := sess.SendOOB(buf); err != nil {
+					t.Errorf("server failed to echo OOB payload: %v", err)
+				}
+			})
+			go handleEcho(sess)
+		}
+	}()
+
+	block2, _ := NewAESGCMCrypt(pass)
+	cli, err := dialEcho(port, block2)
+	if err != nil {
+		panic(err)
+	}
+	defer cli.Close()
+	cli.SetWriteDelay(false)
+
+	size := cli.GetMaxSizeForOOB()
+	if size < 1000 {
+		t.Errorf("unexpectedly small max OOB size: %d", size)
+	}
+	sizePlus1 := size + 1
+	counts := make([]int32, sizePlus1)
+
+	cli.SetCallbackForOOB(func(buf []byte) {
+		for i, b := range buf {
+			if b != byte(i) {
+				t.Fatalf(
+					"OOB echo payload mismatch at offset %d: expected %d, got %d",
+					i, byte(i), b,
+				)
+				break
+			}
+		}
+		atomic.AddInt32(&counts[len(buf)], 1)
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		randomEchoTest(t, cli, 100*1024*1024)
+	}()
+
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, size)
+		for i := range len(buf) {
+			buf[i] = byte(i)
+		}
+		for i := range 100 * 1024 * 1024 {
+			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
+				t.Errorf("client failed to send OOB payload: %v", err)
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	for i, c := range counts {
+		if c == 0 {
+			t.Errorf("missing OOB echo for payload length %d", i)
+		}
+	}
+}
