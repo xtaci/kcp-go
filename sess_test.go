@@ -1441,6 +1441,7 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	defer l.Close()
 
 	counts := make([]atomic.Int32, mtuLimit)
+	errCh := make(chan error, 1)
 
 	// Get OOB max payload size and initialize the shared counts slice.
 	go func() {
@@ -1463,11 +1464,10 @@ func TestOOB_OneSideHandler(t *testing.T) {
 				// Validate OOB payload content and count by length.
 				for i, b := range buf {
 					if b != byte(i) {
-						t.Fatalf(
-							"OOB payload mismatch at offset %d: expected %d, got %d",
-							i, byte(i), b,
-						)
-						break
+						select {
+						case errCh <- fmt.Errorf("OOB payload mismatch at offset %d: expected %d, got %d", i, byte(i), b):
+						default:
+						}
 					}
 				}
 				counts[len(buf)].Add(1)
@@ -1509,6 +1509,12 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	// Give the server time to process incoming OOB packets.
 	time.Sleep(500 * time.Millisecond)
 
+	select {
+	case err := <-errCh:
+		t.Fatalf("%v", err)
+	default:
+	}
+
 	// Check that all lengths of OOB data are received by the server.
 	for i := range counts[:sizePlus1] {
 		if counts[i].Load() == 0 {
@@ -1538,10 +1544,7 @@ func TestSetOOBHandler_Basic(t *testing.T) {
 		}
 	}()
 	if f := sess.callbackForOOB.Load(); f != nil {
-		typeName := "<nil>"
-		if f != nil {
-			typeName = reflect.TypeOf(f).String()
-		}
+		typeName := reflect.TypeOf(f).String()
 		t.Logf("callbackForOOB type: %s", typeName)
 
 		if cb, ok := f.(OOBCallBackType); ok {
