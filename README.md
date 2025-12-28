@@ -59,7 +59,7 @@ This library provides **smooth, resilient, ordered, error-checked, and anonymous
 
 ## Documentation
 
-For complete documentation, see the associated [Godoc](https://godoc.org/github.com/xtaci/kcp-go).
+For complete documentation, see the associated [Godoc](https://pkg.go.dev/github.com/xtaci/kcp-go/v5).
 
 
 ### Layer-Model of KCP-GO

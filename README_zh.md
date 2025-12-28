@@ -59,7 +59,7 @@
 
 ## 文档
 
-有关完整文档，请参阅关联的 [Godoc](https://godoc.org/github.com/xtaci/kcp-go)。
+有关完整文档，请参阅关联的 [Godoc](https://pkg.go.dev/github.com/xtaci/kcp-go/v5)。
 
 
 ### KCP-GO 分层模型
