@@ -4,7 +4,7 @@
 [![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Go Report Card][5]][6] [![Coverage Status][7]][8] [![Sourcegraph][13]][14]
 
 [1]: https://godoc.org/github.com/xtaci/kcp-go?status.svg
-[2]: https://pkg.go.dev/github.com/xtaci/kcp-go
+[2]: https://pkg.go.dev/github.com/xtaci/kcp-go/v5
 [3]: https://img.shields.io/github/created-at/xtaci/kcp-go
 [4]: https://img.shields.io/github/created-at/xtaci/kcp-go
 [5]: https://goreportcard.com/badge/github.com/xtaci/kcp-go
