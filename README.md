@@ -20,6 +20,22 @@
  
 [English](README.md) | [中文](README_zh.md)
 
+## Table of Contents
+
+- [Introduction](#introduction)
+- [Features](#features)
+- [Documentation](#documentation)
+- [Layer-Model of KCP-GO](#layer-model-of-kcp-go)
+- [Key Design Considerations](#key-design-considerations)
+- [Specification](#specification)
+- [Performance](#performance)
+- [Typical Flame Graph](#typical-flame-graph)
+- [Connection Termination](#connection-termination)
+- [FAQ](#faq)
+- [Who is using this?](#who-is-using-this)
+- [Examples](#examples)
+- [Links](#links)
+
 ## Introduction
 
 **kcp-go** is a **Reliable-UDP** library for [golang](https://golang.org/).
