@@ -20,6 +20,7 @@
  
 [English](README.md) | [中文](README_zh.md)
 
+
 ## Table of Contents
 
 - [Introduction](#introduction)
@@ -27,6 +28,12 @@
 - [Documentation](#documentation)
 - [Layer-Model of KCP-GO](#layer-model-of-kcp-go)
 - [Key Design Considerations](#key-design-considerations)
+  - [1. Slice vs. Container/List](#1-slice-vs-containerlist)
+  - [2. Timing Accuracy vs. Syscall clock_gettime](#2-timing-accuracy-vs-syscall-clock_gettime)
+  - [3. Memory Management](#3-memory-management)
+  - [4. Information Security](#4-information-security)
+  - [5. Packet Clocking](#5-packet-clocking)
+  - [6. FEC Design Characteristics](#6-fec-design-characteristics)
 - [Specification](#specification)
 - [Performance](#performance)
 - [Typical Flame Graph](#typical-flame-graph)
