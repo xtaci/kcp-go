@@ -79,7 +79,7 @@ For complete documentation, see the associated [Godoc](https://pkg.go.dev/github
 
 `kcp.flush()` loops through the send queue for retransmission checking every 20 ms.
 
-I wrote a benchmark comparing sequential loops through a *slice* and a *container/list* [here](https://github.com/xtaci/notes/blob/master/golang/benchmark2/cachemiss_test.go):
+I wrote a benchmark comparing sequential loops through a *slice* and a *container/list* [here](https://gist.github.com/xtaci/ac2f13f0108494d874b25551134e4c9c):
 
 ```
 BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
@@ -92,7 +92,7 @@ The list structure introduces **heavy cache misses** compared to the slice, whic
 
 Timing is **critical** for the **RTT estimator**. Inaccurate timing leads to false retransmissions in KCP, but calling `time.Now()` costs 42 cycles (10.5 ns on a 4 GHz CPU, 15.6 ns on my MacBook Pro 2.7 GHz).
 
-The benchmark for `time.Now()` is [here](https://github.com/xtaci/notes/blob/master/golang/benchmark2/syscall_test.go):
+The benchmark for `time.Now()` is [here](https://gist.github.com/xtaci/f01503b9167f9b520b8896682b67e14d):
 
 ```
 BenchmarkNow-4         	100000000	        15.6 ns/op
