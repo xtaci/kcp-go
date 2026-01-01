@@ -24,6 +24,7 @@ package kcp
 
 import (
 	"encoding/binary"
+	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -137,6 +138,97 @@ func TestFECDecodeLoss(t *testing.T) {
 	}
 	t.Log("Total recovered packets:", totalRecovered)
 	t.Log("Total parity lost:", totalParityLost)
+}
+
+func TestFECDecodeVariablePacketSizes(t *testing.T) {
+	const (
+		dataShards   = 8
+		parityShards = 3
+		groups       = 32
+		rto          = math.MaxInt32
+		minPayload   = 8
+		maxPayload   = 900
+	)
+
+	encoder := newFECEncoder(dataShards, parityShards, 0)
+	decoder := newFECDecoder(dataShards, parityShards)
+	if encoder == nil || decoder == nil {
+		t.Fatalf("failed to create FEC encoder/decoder")
+	}
+
+	rnd := rand.New(rand.NewSource(42))
+	var totalLost, totalRecovered int
+
+	feed := func(raw []byte) {
+		t.Helper()
+		packet := append([]byte(nil), raw...)
+		recovered := decoder.decode(fecPacket(packet))
+		for _, r := range recovered {
+			if len(r) < 2 {
+				t.Fatalf("recovered shard too small: %d", len(r))
+			}
+			sz := binary.LittleEndian.Uint16(r)
+			if int(sz) > len(r) {
+				t.Fatalf("invalid size %d for buffer len %d", sz, len(r))
+			}
+			payload := r[2:sz]
+			if len(payload) < minPayload {
+				t.Fatalf("payload shorter than expected: %d", len(payload))
+			}
+			if int(sz) != len(payload)+2 {
+				t.Fatalf("size field mismatch: got %d expect %d", sz, len(payload)+2)
+			}
+
+			groupID := binary.LittleEndian.Uint32(payload)
+			shardIdx := binary.LittleEndian.Uint32(payload[4:])
+			for i := 8; i < len(payload); i++ {
+				expected := byte((int(groupID) + int(shardIdx) + i) & 0xff)
+				if payload[i] != expected {
+					t.Fatalf("content mismatch: group %d shard %d offset %d got %d expect %d",
+						groupID, shardIdx, i-8, payload[i], expected)
+				}
+			}
+			defaultBufferPool.Put(r)
+			totalRecovered++
+		}
+	}
+
+	for group := 0; group < groups; group++ {
+		losses := map[int]struct{}{
+			group % dataShards:       {},
+			(group + 3) % dataShards: {},
+		}
+
+		for shard := 0; shard < dataShards; shard++ {
+			payloadLen := minPayload + rnd.Intn(maxPayload-minPayload+1)
+			buf := make([]byte, fecHeaderSizePlus2+payloadLen)
+			payload := buf[fecHeaderSizePlus2:]
+			binary.LittleEndian.PutUint32(payload, uint32(group))
+			binary.LittleEndian.PutUint32(payload[4:], uint32(shard))
+			for i := 8; i < len(payload); i++ {
+				payload[i] = byte((group + shard + i) & 0xff)
+			}
+
+			ps := encoder.encode(buf, uint32(rto))
+			t.Log("Encoded group", group, "shard", shard, "payloadLen", payloadLen, "parityShards", len(ps))
+			if _, drop := losses[shard]; drop {
+				totalLost++
+			} else {
+				feed(buf)
+			}
+
+			if len(ps) > 0 {
+				for _, p := range ps {
+					parity := append([]byte(nil), p...)
+					feed(parity)
+				}
+			}
+		}
+	}
+
+	if totalRecovered != totalLost {
+		t.Fatalf("expected %d recoveries, got %d", totalLost, totalRecovered)
+	}
 }
 
 func BenchmarkFECDecode(b *testing.B) {
