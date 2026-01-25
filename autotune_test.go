@@ -23,7 +23,6 @@
 package kcp
 
 import (
-	"container/heap"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -130,10 +129,10 @@ func TestAutoTuneOverflow(t *testing.T) {
 		} else {
 			tune.Sample(true, uint32(i))
 		}
-		assert.LessOrEqual(t, len(tune.pulses), maxAutoTuneSamples)
+		assert.LessOrEqual(t, tune.count, maxAutoTuneSamples)
 	}
 
-	assert.Equal(t, maxAutoTuneSamples, len(tune.pulses))
+	assert.Equal(t, maxAutoTuneSamples, tune.count)
 }
 
 func TestAutoTunePop(t *testing.T) {
@@ -149,15 +148,20 @@ func TestAutoTunePop(t *testing.T) {
 	assert.Equal(t, 2, tune.FindPeriod(false))
 	assert.Equal(t, 2, tune.FindPeriod(true))
 
-	heap.Pop(&tune.pulses)
+	// Simulate pop by advancing head (removes oldest element)
+	tune.head = (tune.head + 1) % maxAutoTuneSamples
+	tune.count--
 
 	assert.Equal(t, 2, tune.FindPeriod(false))
 	assert.Equal(t, 1, tune.FindPeriod(true))
 
 	// after popping more
-	heap.Pop(&tune.pulses)
-	heap.Pop(&tune.pulses)
-	heap.Pop(&tune.pulses)
+	tune.head = (tune.head + 1) % maxAutoTuneSamples
+	tune.count--
+	tune.head = (tune.head + 1) % maxAutoTuneSamples
+	tune.count--
+	tune.head = (tune.head + 1) % maxAutoTuneSamples
+	tune.count--
 
 	assert.Equal(t, 1, tune.FindPeriod(false))
 	assert.Equal(t, 1, tune.FindPeriod(true))
