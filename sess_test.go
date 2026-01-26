@@ -400,18 +400,21 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 	// Writer goroutine
 	go func() {
 		r := mrand.New(writerSrc)
+		lenRand := mrand.New(mrand.NewSource(seed + 1))
 		lastPrint := int64(0)
+		sndbuf := make([]byte, 1<<20)
 		for bytesSent < N {
-			length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			length := lenRand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 			if bytesSent+int64(length) > N {
 				length = int(N - bytesSent)
 			}
-			sndbuf := make([]byte, length)
-			for i := range sndbuf {
-				sndbuf[i] = byte(r.Int())
+			payload := sndbuf[:length]
+			if _, err := r.Read(payload); err != nil {
+				t.Errorf("Random fill error: %v", err)
+				return
 			}
 
-			n, err := cli.Write(sndbuf)
+			n, err := cli.Write(payload)
 			if err != nil {
 				t.Errorf("Write error: %v", err)
 				return
@@ -426,22 +429,31 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 
 	// Reader goroutine
 	r := mrand.New(readerSrc)
+	lenRand := mrand.New(mrand.NewSource(seed + 2))
 	lastPrint := int64(0)
+	rcvbuf := make([]byte, 1<<20)
+	expbuf := make([]byte, 1<<20)
 	for bytesReceived < N {
-		length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+		length := lenRand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 		if bytesReceived+int64(length) > N {
 			length = int(N - bytesReceived)
 		}
-		rcvbuf := make([]byte, length)
-		n, err := cli.Read(rcvbuf)
+		buf := rcvbuf[:length]
+		n, err := cli.Read(buf)
 		if err != nil && err != io.EOF {
 			t.Fatalf("Read error: %v", err)
 		}
-		for i := range n {
-			expectedByte := byte(r.Int())
-			if rcvbuf[i] != expectedByte {
-				t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), rcvbuf[i], expectedByte)
+		expected := expbuf[:n]
+		if _, err := r.Read(expected); err != nil {
+			t.Fatalf("Random fill error: %v", err)
+		}
+		if !bytes.Equal(buf[:n], expected) {
+			for i := 0; i < n; i++ {
+				if buf[i] != expected[i] {
+					t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), buf[i], expected[i])
+				}
 			}
+			t.Fatalf("Data mismatch at byte %d", bytesReceived)
 		}
 		bytesReceived += int64(n)
 		if bytesReceived-lastPrint >= 1<<28 { // print every 256MB
