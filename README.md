@@ -380,6 +380,7 @@ Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP. You nee
 3. https://github.com/smallnest/rpcx -- An RPC service framework based on net/rpc, similar to Alibaba Dubbo and Weibo Motan.
 4. https://github.com/gonet2/agent -- A gateway for games with stream multiplexing.
 5. https://github.com/syncthing/syncthing -- Open Source Continuous File Synchronization.
+6. https://github.com/hanselime/paqet -- A bidirectional packet-level proxy built using raw sockets and KCP.
 
 ### Looking for a C++ client?
 1. https://github.com/xtaci/libkcp -- FEC enhanced KCP session library for iOS/Android in C++
