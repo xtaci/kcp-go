@@ -53,8 +53,8 @@ func (r *RingBuffer[T]) Len() int {
 	if r.head <= r.tail {
 		return r.tail - r.head
 	}
-
-	return len(r.elements[r.head:]) + len(r.elements[:r.tail])
+	// Wrapped case: elements from head to end + elements from start to tail
+	return len(r.elements) - r.head + r.tail
 }
 
 // Push adds an element to the tail of the ring.
@@ -93,8 +93,9 @@ func (r *RingBuffer[T]) Peek() (*T, bool) {
 // Discard discards the first N elements from the ring buffer.
 // Returns the number of elements that are actually discarded (<= n).
 func (r *RingBuffer[T]) Discard(n int) int {
-	n = min(n, r.Len())
-	if n == r.Len() {
+	currentLen := r.Len()
+	n = min(n, currentLen)
+	if n == currentLen {
 		r.Clear()
 		return n
 	}
@@ -166,18 +167,27 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 
 // Clear resets the ring to an empty state and reinitializes the buffer.
 func (r *RingBuffer[T]) Clear() {
+	var zero T
+	// Only clear elements that contain data to avoid retaining references
+	if r.head <= r.tail {
+		for i := r.head; i < r.tail; i++ {
+			r.elements[i] = zero
+		}
+	} else {
+		for i := r.head; i < len(r.elements); i++ {
+			r.elements[i] = zero
+		}
+		for i := 0; i < r.tail; i++ {
+			r.elements[i] = zero
+		}
+	}
 	r.head = 0
 	r.tail = 0
-
-	var zero T
-	for i := range r.elements {
-		r.elements[i] = zero // Clear each slot to avoid retaining references
-	}
 }
 
 // IsEmpty returns true if the ring has no elements.
 func (r *RingBuffer[T]) IsEmpty() bool {
-	return r.Len() == 0
+	return r.head == r.tail
 }
 
 // MaxLen returns the maximum capacity of the ring buffer.

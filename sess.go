@@ -489,15 +489,15 @@ func (s *UDPSession) SetWriteDeadline(t time.Time) error {
 // SetWriteDelay delays write for bulk transfer until the next update interval
 func (s *UDPSession) SetWriteDelay(delay bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.writeDelay = delay
+	s.mu.Unlock()
 }
 
 // SetWindowSize set maximum window size
 func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.kcp.WndSize(sndwnd, rcvwnd)
+	s.mu.Unlock()
 }
 
 // SetMtu sets the maximum transmission unit(not including UDP header)
@@ -518,19 +518,19 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 // Deprecated: toggles the stream mode on/off
 func (s *UDPSession) SetStreamMode(enable bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if enable {
 		s.kcp.stream = 1
 	} else {
 		s.kcp.stream = 0
 	}
+	s.mu.Unlock()
 }
 
 // SetACKNoDelay changes ack flush option, set true to flush ack immediately,
 func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.ackNoDelay = nodelay
+	s.mu.Unlock()
 }
 
 // (deprecated)
@@ -538,16 +538,16 @@ func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 // SetDUP duplicates udp packets for kcp output.
 func (s *UDPSession) SetDUP(dup int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.dup = dup
+	s.mu.Unlock()
 }
 
 // SetNoDelay calls nodelay() of kcp
 // https://github.com/skywind3000/kcp/blob/master/README.en.md#protocol-configuration
 func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.kcp.NoDelay(nodelay, interval, resend, nc)
+	s.mu.Unlock()
 }
 
 // SetDSCP sets the 6bit DSCP field in IPv4 header, or 8bit Traffic Class in IPv6 header.
