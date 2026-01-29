@@ -27,6 +27,9 @@ import (
 	"sync"
 )
 
+// pre-allocated error to avoid repeated allocations
+var errBufferSizeMismatch = errors.New("buffer size mismatch")
+
 // A system-wide packet buffer shared among sending, receiving and FEC
 // to mitigate high-frequency memory allocation of packets.
 var defaultBufferPool = newBufferPool(mtuLimit)
@@ -55,8 +58,8 @@ func (bp *bufferPool) Get() []byte {
 func (bp *bufferPool) Put(buf []byte) error {
 	// Only put back buffers of the correct size.
 	if cap(buf) != mtuLimit {
-		return errors.New("buffer size mismatch")
+		return errBufferSizeMismatch
 	}
-	bp.xmitBuf.Put(buf)
+	bp.xmitBuf.Put(buf[:cap(buf)]) // reset slice length to full capacity
 	return nil
 }

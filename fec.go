@@ -93,7 +93,8 @@ func (h *shardHeap) Push(x any) {
 func (h *shardHeap) Pop() any {
 	n := len(h.elements)
 	x := h.elements[n-1]
-	h.elements = h.elements[0 : n-1]
+	h.elements[n-1] = nil // clear to avoid memory leak
+	h.elements = h.elements[:n-1]
 	delete(h.marks, x.seqid())
 	return x
 }

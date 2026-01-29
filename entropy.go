@@ -119,11 +119,11 @@ func (r *rngAES) Read(p []byte) (int, error) {
 	}
 
 	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	r.updateSeed()
 	r.block.Encrypt(r.seed[:], r.seed[:])
-	return copy(p, r.seed[:]), nil
+	n := copy(p, r.seed[:])
+	r.mutex.Unlock()
+	return n, nil
 }
 
 // rngChacha8 is a ChaCha8-based random number generator.
@@ -164,9 +164,8 @@ func (r *rngChacha8) Read(p []byte) (int, error) {
 	}
 
 	r.mutex.Lock()
-	defer r.mutex.Unlock()
-
 	r.updateSeed()
 	n, err := r.rand.Read(p)
+	r.mutex.Unlock()
 	return n, err
 }

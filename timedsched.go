@@ -48,8 +48,8 @@ func (h *timedFuncHeap) Pop() any {
 	old := *h
 	n := len(old)
 	x := old[n-1]
-	old[n-1].execute = nil // avoid memory leak
-	*h = old[0 : n-1]
+	old[n-1] = timedFunc{} // clear to avoid memory leak (both execute and ts)
+	*h = old[:n-1]
 	return x
 }
 
@@ -129,22 +129,14 @@ func (ts *TimedSched) prepend() {
 		select {
 		case <-ts.chPrependNotify:
 			ts.prependLock.Lock()
-			// keep cap to reuse slice
-			if cap(tasks) < cap(ts.prependTasks) {
-				tasks = make([]timedFunc, 0, cap(ts.prependTasks))
-			}
-			tasks = tasks[:len(ts.prependTasks)]
-			copy(tasks, ts.prependTasks)
-			for k := range ts.prependTasks {
-				ts.prependTasks[k].execute = nil // avoid memory leak
-			}
-			ts.prependTasks = ts.prependTasks[:0]
+			// swap slices to minimize time under lock
+			tasks, ts.prependTasks = ts.prependTasks, tasks[:0]
 			ts.prependLock.Unlock()
 
 			for k := range tasks {
 				select {
 				case ts.chTask <- tasks[k]:
-					tasks[k].execute = nil // avoid memory leak
+					tasks[k] = timedFunc{} // clear to avoid memory leak
 				case <-ts.die:
 					return
 				}

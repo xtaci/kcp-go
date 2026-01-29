@@ -37,10 +37,11 @@ type pulse struct {
 // autoTune object to detect pulses in a signal
 // Uses a fixed-size ring buffer instead of heap to avoid allocations
 type autoTune struct {
-	pulses [maxAutoTuneSamples]pulse // fixed-size array to avoid heap allocations
-	head   int                       // oldest element index
-	tail   int                       // next write position
-	count  int                       // number of elements
+	pulses    [maxAutoTuneSamples]pulse // fixed-size array to avoid heap allocations
+	sortCache [maxAutoTuneSamples]pulse // reusable cache for sorting to avoid allocations
+	head      int                       // oldest element index
+	tail      int                       // next write position
+	count     int                       // number of elements
 }
 
 // Sample adds a signal sample to the pulse buffer using a ring buffer
@@ -78,12 +79,15 @@ func (tune *autoTune) FindPeriod(bit bool) int {
 		return -1
 	}
 
-	// Copy elements from ring buffer for sorting and analysis.
-	sorted := make([]pulse, tune.count)
+	// Copy elements from ring buffer to sortCache for sorting and analysis.
+	// Using fixed-size array to avoid heap allocation.
 	for i := 0; i < tune.count; i++ {
 		idx := (tune.head + i) % maxAutoTuneSamples
-		sorted[i] = tune.pulses[idx]
+		tune.sortCache[i] = tune.pulses[idx]
 	}
+
+	// Create a slice view over the cache for sorting
+	sorted := tune.sortCache[:tune.count]
 
 	// Sort the copied data by sequence number (seq) to ensure linear order for period calculation.
 	sort.Slice(sorted, func(i, j int) bool {
