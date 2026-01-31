@@ -173,6 +173,9 @@ func NewSalsa20BlockCrypt(key []byte) (BlockCrypt, error) {
 
 //go:nosplit
 func (c *salsa20BlockCrypt) Encrypt(dst, src []byte) {
+	if len(src) < 8 {
+		return
+	}
 	salsa20.XORKeyStream(dst[8:], src[8:], src[:8], &c.key)
 	if &dst[0] != &src[0] {
 		copy(dst[:8], src[:8])
@@ -181,6 +184,9 @@ func (c *salsa20BlockCrypt) Encrypt(dst, src []byte) {
 
 //go:nosplit
 func (c *salsa20BlockCrypt) Decrypt(dst, src []byte) {
+	if len(src) < 8 {
+		return
+	}
 	salsa20.XORKeyStream(dst[8:], src[8:], src[:8], &c.key)
 	if &dst[0] != &src[0] {
 		copy(dst[:8], src[:8])
@@ -270,8 +276,18 @@ func NewSimpleXORBlockCrypt(key []byte) (BlockCrypt, error) {
 	return c, nil
 }
 
-func (c *simpleXORBlockCrypt) Encrypt(dst, src []byte) { subtle.XORBytes(dst, src, c.xortbl) }
-func (c *simpleXORBlockCrypt) Decrypt(dst, src []byte) { subtle.XORBytes(dst, src, c.xortbl) }
+func (c *simpleXORBlockCrypt) Encrypt(dst, src []byte) {
+	if len(src) == 0 {
+		return
+	}
+	subtle.XORBytes(dst, src, c.xortbl)
+}
+func (c *simpleXORBlockCrypt) Decrypt(dst, src []byte) {
+	if len(src) == 0 {
+		return
+	}
+	subtle.XORBytes(dst, src, c.xortbl)
+}
 
 type noneBlockCrypt struct{}
 
@@ -282,6 +298,9 @@ func NewNoneBlockCrypt(key []byte) (BlockCrypt, error) {
 
 //go:nosplit
 func (c *noneBlockCrypt) Encrypt(dst, src []byte) {
+	if len(src) == 0 {
+		return
+	}
 	if &dst[0] != &src[0] {
 		copy(dst, src)
 	}
@@ -289,6 +308,9 @@ func (c *noneBlockCrypt) Encrypt(dst, src []byte) {
 
 //go:nosplit
 func (c *noneBlockCrypt) Decrypt(dst, src []byte) {
+	if len(src) == 0 {
+		return
+	}
 	if &dst[0] != &src[0] {
 		copy(dst, src)
 	}

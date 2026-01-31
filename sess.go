@@ -730,10 +730,9 @@ func (s *UDPSession) postProcess() {
 			// transmit when chPostProcessing is empty or we've reached max batch size
 			if len(s.chPostProcessing) == 0 || len(txqueue) >= maxBatchSize {
 				if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
-					err := limiter.WaitN(ctx, bytesToSend)
-					if err != nil {
-						panic(err)
-					}
+					// WaitN only returns error if the limiter is misconfigured
+					// or context is cancelled. In either case, we continue sending.
+					_ = limiter.WaitN(ctx, bytesToSend)
 				}
 				s.tx(txqueue)
 				s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)

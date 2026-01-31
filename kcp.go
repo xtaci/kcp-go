@@ -221,6 +221,7 @@ func (h *segmentHeap) Push(x any) {
 func (h *segmentHeap) Pop() any {
 	n := len(h.segments)
 	x := h.segments[n-1]
+	h.segments[n-1] = segment{} // clear reference to avoid memory leak
 	h.segments = h.segments[0 : n-1]
 	delete(h.marks, x.sn)
 	return x
