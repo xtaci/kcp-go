@@ -180,16 +180,16 @@ type segment struct {
 
 // encode a segment into buffer
 func (seg *segment) encode(ptr []byte) []byte {
-	ptr = ikcp_encode32u(ptr, seg.conv)
-	ptr = ikcp_encode8u(ptr, seg.cmd)
-	ptr = ikcp_encode8u(ptr, seg.frg)
-	ptr = ikcp_encode16u(ptr, seg.wnd)
-	ptr = ikcp_encode32u(ptr, seg.ts)
-	ptr = ikcp_encode32u(ptr, seg.sn)
-	ptr = ikcp_encode32u(ptr, seg.una)
-	ptr = ikcp_encode32u(ptr, uint32(len(seg.data)))
+	binary.LittleEndian.PutUint32(ptr, seg.conv)
+	ptr[4] = seg.cmd
+	ptr[5] = seg.frg
+	binary.LittleEndian.PutUint16(ptr[6:], seg.wnd)
+	binary.LittleEndian.PutUint32(ptr[8:], seg.ts)
+	binary.LittleEndian.PutUint32(ptr[12:], seg.sn)
+	binary.LittleEndian.PutUint32(ptr[16:], seg.una)
+	binary.LittleEndian.PutUint32(ptr[20:], uint32(len(seg.data)))
 	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
-	return ptr
+	return ptr[IKCP_OVERHEAD:]
 }
 
 // segmentHeap is a min-heap of segments, used for receiving segments in order
@@ -617,18 +617,19 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 			break
 		}
 
-		data = ikcp_decode32u(data, &conv)
+		conv = binary.LittleEndian.Uint32(data)
 		if conv != kcp.conv {
 			return -1
 		}
 
-		data = ikcp_decode8u(data, &cmd)
-		data = ikcp_decode8u(data, &frg)
-		data = ikcp_decode16u(data, &wnd)
-		data = ikcp_decode32u(data, &ts)
-		data = ikcp_decode32u(data, &sn)
-		data = ikcp_decode32u(data, &una)
-		data = ikcp_decode32u(data, &length)
+		cmd = data[4]
+		frg = data[5]
+		wnd = binary.LittleEndian.Uint16(data[6:])
+		ts = binary.LittleEndian.Uint32(data[8:])
+		sn = binary.LittleEndian.Uint32(data[12:])
+		una = binary.LittleEndian.Uint32(data[16:])
+		length = binary.LittleEndian.Uint32(data[20:])
+		data = data[IKCP_OVERHEAD:]
 
 		kcp.debugLog(IKCP_LOG_INPUT, "conv", conv, "cmd", cmd, "frg", frg, "wnd", wnd, "ts", ts, "sn", sn, "una", una, "len", length, "datalen", len(data))
 
