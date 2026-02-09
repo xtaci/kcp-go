@@ -24,7 +24,6 @@ package kcp
 
 import (
 	"container/heap"
-	"encoding/binary"
 	"sync/atomic"
 	"time"
 )
@@ -103,40 +102,26 @@ type output_callback func(buf []byte, size int)
 // logoutput_callback is a prototype which logging kcp trace output
 type logoutput_callback func(msg string, args ...any)
 
-/* encode 8 bits unsigned int */
-func ikcp_encode8u(p []byte, c byte) []byte {
-	p[0] = c
-	return p[1:]
-}
-
-/* decode 8 bits unsigned int */
-func ikcp_decode8u(p []byte, c *byte) []byte {
-	*c = p[0]
-	return p[1:]
-}
-
-/* encode 16 bits unsigned int (lsb) */
-func ikcp_encode16u(p []byte, w uint16) []byte {
-	binary.LittleEndian.PutUint16(p, w)
-	return p[2:]
-}
-
-/* decode 16 bits unsigned int (lsb) */
-func ikcp_decode16u(p []byte, w *uint16) []byte {
-	*w = binary.LittleEndian.Uint16(p)
-	return p[2:]
-}
-
-/* encode 32 bits unsigned int (lsb) */
-func ikcp_encode32u(p []byte, l uint32) []byte {
-	binary.LittleEndian.PutUint32(p, l)
-	return p[4:]
-}
-
-/* decode 32 bits unsigned int (lsb) */
-func ikcp_decode32u(p []byte, l *uint32) []byte {
-	*l = binary.LittleEndian.Uint32(p)
-	return p[4:]
+// segmentHeader is the wire format of a KCP segment header (24 bytes).
+// The struct layout exactly matches the KCP protocol wire format with no padding.
+//
+//	offset 0:  conv   (uint32)  - conversation id
+//	offset 4:  cmd    (uint8)   - command
+//	offset 5:  frg    (uint8)   - fragment count
+//	offset 6:  wnd    (uint16)  - window size
+//	offset 8:  ts     (uint32)  - timestamp
+//	offset 12: sn     (uint32)  - sequence number
+//	offset 16: una    (uint32)  - unacknowledged sequence number
+//	offset 20: length (uint32)  - data length
+type segmentHeader struct {
+	conv   uint32
+	cmd    uint8
+	frg    uint8
+	wnd    uint16
+	ts     uint32
+	sn     uint32
+	una    uint32
+	length uint32
 }
 
 func _imin_(a, b uint32) uint32 {
@@ -178,16 +163,18 @@ type segment struct {
 	data     []byte
 }
 
-// encode a segment into buffer
+// encode a segment header into buffer
 func (seg *segment) encode(ptr []byte) []byte {
-	binary.LittleEndian.PutUint32(ptr, seg.conv)
-	ptr[4] = seg.cmd
-	ptr[5] = seg.frg
-	binary.LittleEndian.PutUint16(ptr[6:], seg.wnd)
-	binary.LittleEndian.PutUint32(ptr[8:], seg.ts)
-	binary.LittleEndian.PutUint32(ptr[12:], seg.sn)
-	binary.LittleEndian.PutUint32(ptr[16:], seg.una)
-	binary.LittleEndian.PutUint32(ptr[20:], uint32(len(seg.data)))
+	encodeSegHeader(ptr, segmentHeader{
+		conv:   seg.conv,
+		cmd:    seg.cmd,
+		frg:    seg.frg,
+		wnd:    seg.wnd,
+		ts:     seg.ts,
+		sn:     seg.sn,
+		una:    seg.una,
+		length: uint32(len(seg.data)),
+	})
 	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 	return ptr[IKCP_OVERHEAD:]
 }
@@ -609,26 +596,24 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 	var flushSegments int // signal to flush segments
 
 	for {
-		var ts, sn, length, una, conv uint32
-		var wnd uint16
-		var cmd, frg uint8
-
 		if len(data) < int(IKCP_OVERHEAD) {
 			break
 		}
 
-		conv = binary.LittleEndian.Uint32(data)
-		if conv != kcp.conv {
+		var hdr segmentHeader
+		decodeSegHeader(data, &hdr)
+		if hdr.conv != kcp.conv {
 			return -1
 		}
 
-		cmd = data[4]
-		frg = data[5]
-		wnd = binary.LittleEndian.Uint16(data[6:])
-		ts = binary.LittleEndian.Uint32(data[8:])
-		sn = binary.LittleEndian.Uint32(data[12:])
-		una = binary.LittleEndian.Uint32(data[16:])
-		length = binary.LittleEndian.Uint32(data[20:])
+		conv := hdr.conv
+		cmd := hdr.cmd
+		frg := hdr.frg
+		wnd := hdr.wnd
+		ts := hdr.ts
+		sn := hdr.sn
+		una := hdr.una
+		length := hdr.length
 		data = data[IKCP_OVERHEAD:]
 
 		kcp.debugLog(IKCP_LOG_INPUT, "conv", conv, "cmd", cmd, "frg", frg, "wnd", wnd, "ts", ts, "sn", sn, "una", una, "len", length, "datalen", len(data))
