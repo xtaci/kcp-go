@@ -125,24 +125,6 @@ type segmentHeader struct {
 	length uint32
 }
 
-func _imin_(a, b uint32) uint32 {
-	if a <= b {
-		return a
-	}
-	return b
-}
-
-func _imax_(a, b uint32) uint32 {
-	if a >= b {
-		return a
-	}
-	return b
-}
-
-func _ibound_(lower, middle, upper uint32) uint32 {
-	return _imin_(_imax_(lower, middle), upper)
-}
-
 func _itimediff(later, earlier uint32) int32 {
 	return (int32)(later - earlier)
 }
@@ -467,8 +449,8 @@ func (kcp *KCP) update_ack(rtt int32) {
 			kcp.rx_rttvar += (delta - kcp.rx_rttvar) >> 2
 		}
 	}
-	rto = uint32(kcp.rx_srtt) + _imax_(kcp.interval, uint32(kcp.rx_rttvar)<<2)
-	kcp.rx_rto = _ibound_(kcp.rx_minrto, rto, IKCP_RTO_MAX)
+	rto = uint32(kcp.rx_srtt) + max(kcp.interval, uint32(kcp.rx_rttvar)<<2)
+	kcp.rx_rto = min(max(kcp.rx_minrto, rto), IKCP_RTO_MAX)
 }
 
 func (kcp *KCP) shrink_buf() {
@@ -838,9 +820,9 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 	kcp.probe = 0
 
 	// calculate window size
-	cwnd := _imin_(kcp.snd_wnd, kcp.rmt_wnd)
+	cwnd := min(kcp.snd_wnd, kcp.rmt_wnd)
 	if kcp.nocwnd == 0 {
-		cwnd = _imin_(kcp.cwnd, cwnd)
+		cwnd = min(kcp.cwnd, cwnd)
 	}
 
 	// sliding window, controlled by snd_nxt && sna_una+cwnd
