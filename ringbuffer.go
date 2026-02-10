@@ -101,7 +101,7 @@ func (r *RingBuffer[T]) Discard(n int) int {
 	}
 	cap := len(r.elements)
 	end := r.head + n
-	if end <= cap {
+	if end < cap {
 		// no wrap: clear contiguous range
 		clear(r.elements[r.head:end])
 		r.head = end

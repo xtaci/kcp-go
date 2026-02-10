@@ -236,6 +236,38 @@ func TestRingForEach(t *testing.T) {
 	}
 }
 
+// TestRingBufferDiscardBoundary tests discarding elements that land exactly
+// at the end of the backing array. This previously caused head to equal
+// len(elements), leading to an index-out-of-range panic in Peek().
+func TestRingBufferDiscardBoundary(t *testing.T) {
+	// Create a ring buffer with backing array length 64 (MaxLen = 63).
+	r := NewRingBuffer[int](64)
+
+	// Fill to capacity (63 elements), head=0, tail=63.
+	for i := range 63 {
+		r.Push(i)
+	}
+
+	// Pop 1 element so head=1, push 1 so tail wraps to 0. Still 63 elements.
+	r.Pop()
+	r.Push(63)
+	// Now head=1, tail=0, len=63.
+
+	// Discard exactly 63 elements. head + 63 = 64 = len(elements).
+	// This must wrap head to 0, not leave it at 64.
+	r.Discard(63)
+
+	if r.Len() != 0 {
+		t.Fatalf("expected empty ring, got Len()=%d", r.Len())
+	}
+
+	// Push a new element and Peek — this panicked before the fix.
+	r.Push(99)
+	if v, ok := r.Peek(); !ok || *v != 99 {
+		t.Fatalf("expected Peek()=99, got %v (ok=%v)", v, ok)
+	}
+}
+
 func TestRingForEachReverse(t *testing.T) {
 	r := NewRingBuffer[int](10)
 	for i := range 10 {
