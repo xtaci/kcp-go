@@ -14,6 +14,28 @@ import (
 	"unsafe"
 )
 
+// segmentHeader is the wire format of a KCP segment header (24 bytes).
+// The struct layout exactly matches the KCP protocol wire format with no padding.
+//
+//	offset 0:  conv   (uint32)  - conversation id
+//	offset 4:  cmd    (uint8)   - command
+//	offset 5:  frg    (uint8)   - fragment count
+//	offset 6:  wnd    (uint16)  - window size
+//	offset 8:  ts     (uint32)  - timestamp
+//	offset 12: sn     (uint32)  - sequence number
+//	offset 16: una    (uint32)  - unacknowledged sequence number
+//	offset 20: length (uint32)  - data length
+type segmentHeader struct {
+	conv   uint32
+	cmd    uint8
+	frg    uint8
+	wnd    uint16
+	ts     uint32
+	sn     uint32
+	una    uint32
+	length uint32
+}
+
 // Compile-time assertion: segmentHeader must be exactly IKCP_OVERHEAD bytes.
 var _ [0]struct{} = [unsafe.Sizeof(segmentHeader{}) - IKCP_OVERHEAD]struct{}{}
 var _ [0]struct{} = [IKCP_OVERHEAD - unsafe.Sizeof(segmentHeader{})]struct{}{}
