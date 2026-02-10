@@ -1075,10 +1075,9 @@ type (
 		conn         net.PacketConn // the underlying packet connection
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions        map[string]*UDPSession // all sessions accepted by this Listener
-		sessionLock     sync.RWMutex
-		chAccepts       chan *UDPSession // Listen() backlog
-		chSessionClosed chan net.Addr    // session close queue
+		sessions    map[string]*UDPSession // all sessions accepted by this Listener
+		sessionLock sync.RWMutex
+		chAccepts   chan *UDPSession // Listen() backlog
 
 		die     chan struct{} // notify the listener has closed
 		dieOnce sync.Once
@@ -1401,7 +1400,6 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.ownConn = ownConn
 	l.sessions = make(map[string]*UDPSession)
 	l.chAccepts = make(chan *UDPSession, acceptBacklog)
-	l.chSessionClosed = make(chan net.Addr)
 	l.die = make(chan struct{})
 	l.dataShards = dataShards
 	l.parityShards = parityShards

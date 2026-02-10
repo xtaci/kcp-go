@@ -99,10 +99,17 @@ func (r *RingBuffer[T]) Discard(n int) int {
 		r.Clear()
 		return n
 	}
-	var zero T
-	for range n {
-		r.elements[r.head] = zero
-		r.head = (r.head + 1) % len(r.elements)
+	cap := len(r.elements)
+	end := r.head + n
+	if end <= cap {
+		// no wrap: clear contiguous range
+		clear(r.elements[r.head:end])
+		r.head = end
+	} else {
+		// wraps around
+		clear(r.elements[r.head:cap])
+		clear(r.elements[:end-cap])
+		r.head = end - cap
 	}
 	return n
 }
