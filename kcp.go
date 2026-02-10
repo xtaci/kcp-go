@@ -24,6 +24,7 @@ package kcp
 
 import (
 	"container/heap"
+	"encoding/binary"
 	"sync/atomic"
 	"time"
 )
@@ -165,16 +166,15 @@ type segment struct {
 
 // encode a segment header into buffer
 func (seg *segment) encode(ptr []byte) []byte {
-	encodeSegHeader(ptr, segmentHeader{
-		conv:   seg.conv,
-		cmd:    seg.cmd,
-		frg:    seg.frg,
-		wnd:    seg.wnd,
-		ts:     seg.ts,
-		sn:     seg.sn,
-		una:    seg.una,
-		length: uint32(len(seg.data)),
-	})
+	_ = ptr[IKCP_OVERHEAD-1] // BCE hint
+	binary.LittleEndian.PutUint32(ptr, seg.conv)
+	ptr[4] = seg.cmd
+	ptr[5] = seg.frg
+	binary.LittleEndian.PutUint16(ptr[6:], seg.wnd)
+	binary.LittleEndian.PutUint32(ptr[8:], seg.ts)
+	binary.LittleEndian.PutUint32(ptr[12:], seg.sn)
+	binary.LittleEndian.PutUint32(ptr[16:], seg.una)
+	binary.LittleEndian.PutUint32(ptr[20:], uint32(len(seg.data)))
 	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
 	return ptr[IKCP_OVERHEAD:]
 }
@@ -600,21 +600,20 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 			break
 		}
 
-		var hdr segmentHeader
-		decodeSegHeader(data, &hdr)
-		if hdr.conv != kcp.conv {
+		_ = data[IKCP_OVERHEAD-1] // BCE hint
+		conv := binary.LittleEndian.Uint32(data)
+		cmd := data[4]
+		frg := data[5]
+		wnd := binary.LittleEndian.Uint16(data[6:])
+		ts := binary.LittleEndian.Uint32(data[8:])
+		sn := binary.LittleEndian.Uint32(data[12:])
+		una := binary.LittleEndian.Uint32(data[16:])
+		length := binary.LittleEndian.Uint32(data[20:])
+		data = data[IKCP_OVERHEAD:]
+
+		if conv != kcp.conv {
 			return -1
 		}
-
-		conv := hdr.conv
-		cmd := hdr.cmd
-		frg := hdr.frg
-		wnd := hdr.wnd
-		ts := hdr.ts
-		sn := hdr.sn
-		una := hdr.una
-		length := hdr.length
-		data = data[IKCP_OVERHEAD:]
 
 		kcp.debugLog(IKCP_LOG_INPUT, "conv", conv, "cmd", cmd, "frg", frg, "wnd", wnd, "ts", ts, "sn", sn, "una", una, "len", length, "datalen", len(data))
 
