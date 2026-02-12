@@ -220,7 +220,7 @@ func tinyBufferEchoServer(port int) net.Listener {
 
 func handleEcho(conn *UDPSession) {
 	conn.SetStreamMode(true)
-	conn.SetWindowSize(4096, 4096)
+	conn.SetWindowSize(1024, 1024)
 	conn.SetNoDelay(1, 10, 2, 1)
 	conn.SetDSCP(46)
 	conn.SetMtu(1400)
@@ -240,7 +240,7 @@ func handleEcho(conn *UDPSession) {
 
 func handleSink(conn *UDPSession) {
 	conn.SetStreamMode(true)
-	conn.SetWindowSize(4096, 4096)
+	conn.SetWindowSize(1024, 1024)
 	conn.SetNoDelay(1, 10, 2, 1)
 	conn.SetDSCP(46)
 	conn.SetMtu(1400)
