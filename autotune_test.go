@@ -230,7 +230,7 @@ func TestAutoTuneStablePeriodAfterOverwrite(t *testing.T) {
 
 	// Generate a lot of samples with a consistent period
 	totalSamples := maxAutoTuneSamples * 5
-	for i := 0; i < totalSamples; i++ {
+	for i := range totalSamples {
 		posInPeriod := i % period
 		bit := posInPeriod < trueDuration
 		tune.Sample(bit, uint32(i))
@@ -274,7 +274,7 @@ func TestAutoTuneVariousPeriodsFull(t *testing.T) {
 
 			// Fill buffer completely and then some more
 			totalSamples := maxAutoTuneSamples + 100
-			for i := 0; i < totalSamples; i++ {
+			for i := range totalSamples {
 				posInPeriod := i % period
 				bit := posInPeriod < trueDuration
 				tune.Sample(bit, uint32(i))
@@ -302,7 +302,7 @@ func TestAutoTuneContinuousOverwrite(t *testing.T) {
 
 	// First phase: fill with period 4 signal
 	period1 := 4
-	for i := 0; i < maxAutoTuneSamples; i++ {
+	for i := range maxAutoTuneSamples {
 		bit := (i % period1) < (period1 / 2)
 		tune.Sample(bit, uint32(i))
 	}
@@ -316,7 +316,7 @@ func TestAutoTuneContinuousOverwrite(t *testing.T) {
 	// After enough samples, the old period 4 data should be overwritten
 	period2 := 6
 	baseSeq := uint32(maxAutoTuneSamples)
-	for i := 0; i < maxAutoTuneSamples; i++ {
+	for i := range maxAutoTuneSamples {
 		bit := (i % period2) < (period2 / 2)
 		tune.Sample(bit, baseSeq+uint32(i))
 	}
@@ -328,7 +328,7 @@ func TestAutoTuneContinuousOverwrite(t *testing.T) {
 	// Third phase: continue with period 8 signal
 	period3 := 8
 	baseSeq = uint32(maxAutoTuneSamples * 2)
-	for i := 0; i < maxAutoTuneSamples; i++ {
+	for i := range maxAutoTuneSamples {
 		bit := (i % period3) < (period3 / 2)
 		tune.Sample(bit, baseSeq+uint32(i))
 	}
@@ -367,7 +367,7 @@ func TestAutoTunePeriodChangeAfterOverwrite(t *testing.T) {
 			newPeriod := tc.newTrueDuration + tc.newFalseDuration
 
 			// Phase 1: Fill buffer completely with old period signal
-			for i := 0; i < maxAutoTuneSamples; i++ {
+			for i := range maxAutoTuneSamples {
 				posInPeriod := i % oldPeriod
 				bit := posInPeriod < tc.oldTrueDuration
 				tune.Sample(bit, uint32(i))
@@ -384,7 +384,7 @@ func TestAutoTunePeriodChangeAfterOverwrite(t *testing.T) {
 			// Phase 2: Overwrite with new period signal
 			// Fill buffer completely to ensure all old data is replaced
 			baseSeq := uint32(maxAutoTuneSamples)
-			for i := 0; i < maxAutoTuneSamples; i++ {
+			for i := range maxAutoTuneSamples {
 				posInPeriod := i % newPeriod
 				bit := posInPeriod < tc.newTrueDuration
 				tune.Sample(bit, baseSeq+uint32(i))
@@ -426,7 +426,7 @@ func TestAutoTuneMultiplePeriodChanges(t *testing.T) {
 		period := p.trueDuration + p.falseDuration
 
 		// Fill buffer completely with current period
-		for i := 0; i < maxAutoTuneSamples; i++ {
+		for i := range maxAutoTuneSamples {
 			posInPeriod := i % period
 			bit := posInPeriod < p.trueDuration
 			tune.Sample(bit, seq)
@@ -455,7 +455,7 @@ func TestAutoTuneGradualPeriodTransition(t *testing.T) {
 	oldTrueDuration := 2
 	oldFalseDuration := 2
 	oldPeriod := 4
-	for i := 0; i < maxAutoTuneSamples; i++ {
+	for i := range maxAutoTuneSamples {
 		bit := (i % oldPeriod) < oldTrueDuration
 		tune.Sample(bit, uint32(i))
 	}
@@ -475,7 +475,7 @@ func TestAutoTuneGradualPeriodTransition(t *testing.T) {
 	// Track when the new period becomes stable
 	transitionCompleteTrue := -1
 	transitionCompleteFalse := -1
-	for i := 0; i < maxAutoTuneSamples; i++ {
+	for i := range maxAutoTuneSamples {
 		bit := (i % newPeriod) < newTrueDuration
 		tune.Sample(bit, baseSeq+uint32(i))
 
@@ -534,7 +534,7 @@ func TestAutoTuneExactPeriodAfterWrap(t *testing.T) {
 
 			// Generate enough samples to wrap around multiple times
 			totalSamples := maxAutoTuneSamples * 3
-			for i := 0; i < totalSamples; i++ {
+			for i := range totalSamples {
 				posInPeriod := i % period
 				bit := posInPeriod < tc.trueDuration
 				tune.Sample(bit, uint32(i))
@@ -566,7 +566,7 @@ func TestAutoTuneSequenceWrapAround(t *testing.T) {
 	startSeq := uint32(0xFFFFFFFF - 100)
 
 	// Generate samples that will cause sequence wrap-around
-	for i := 0; i < maxAutoTuneSamples+50; i++ {
+	for i := range maxAutoTuneSamples + 50 {
 		posInPeriod := i % period
 		bit := posInPeriod < trueDuration
 		tune.Sample(bit, startSeq+uint32(i))

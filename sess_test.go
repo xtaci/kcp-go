@@ -448,7 +448,7 @@ func randomEchoTest(t *testing.T, cli *UDPSession, N int64) {
 			t.Fatalf("Random fill error: %v", err)
 		}
 		if !bytes.Equal(buf[:n], expected) {
-			for i := 0; i < n; i++ {
+			for i := range n {
 				if buf[i] != expected[i] {
 					t.Fatalf("Data mismatch at byte %d: got %v, want %v", bytesReceived+int64(i), buf[i], expected[i])
 				}

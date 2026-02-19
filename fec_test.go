@@ -193,13 +193,13 @@ func TestFECDecodeVariablePacketSizes(t *testing.T) {
 		}
 	}
 
-	for group := 0; group < groups; group++ {
+	for group := range groups {
 		losses := map[int]struct{}{
 			group % dataShards:       {},
 			(group + 3) % dataShards: {},
 		}
 
-		for shard := 0; shard < dataShards; shard++ {
+		for shard := range dataShards {
 			payloadLen := minPayload + rnd.Intn(maxPayload-minPayload+1)
 			buf := make([]byte, fecHeaderSizePlus2+payloadLen)
 			payload := buf[fecHeaderSizePlus2:]
