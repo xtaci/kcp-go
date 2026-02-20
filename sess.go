@@ -1091,6 +1091,24 @@ type (
 	}
 )
 
+func (l *Listener) AddConn(raddr string) (*UDPSession, error) {
+	raddr_, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	l.sessionLock.Lock()
+	defer l.sessionLock.Unlock()
+	if _, have := l.sessions[raddr_.String()]; have {
+		return nil, errors.New("connect existed")
+	}
+	var convid uint32
+	binary.Read(rand.Reader, binary.LittleEndian, &convid)
+	s := newUDPSession(convid, l.dataShards, l.parityShards, l, l.conn, false, raddr_, l.block)
+	l.sessions[raddr_.String()] = s
+	l.chAccepts <- s
+	return s, nil
+}
+
 // packet input stage
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	switch block := l.block.(type) {
