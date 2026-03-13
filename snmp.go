@@ -44,9 +44,9 @@ type Snmp struct {
 	OutSegs             uint64 // outgoing KCP segments
 	InBytes             uint64 // UDP bytes received
 	OutBytes            uint64 // UDP bytes sent
-	RetransSegs         uint64 // accmulated retransmited segments
-	FastRetransSegs     uint64 // accmulated fast retransmitted segments
-	EarlyRetransSegs    uint64 // accmulated early retransmitted segments
+	RetransSegs         uint64 // accumulated retransmitted segments
+	FastRetransSegs     uint64 // accumulated fast retransmitted segments
+	EarlyRetransSegs    uint64 // accumulated early retransmitted segments
 	LostSegs            uint64 // number of segs inferred as lost
 	RepeatSegs          uint64 // number of segs duplicated
 	FECFullShardSet     uint64 // number of FEC segments that are full

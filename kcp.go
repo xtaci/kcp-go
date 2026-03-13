@@ -29,29 +29,39 @@ import (
 	"time"
 )
 
+// KCP Protocol Constants
 const (
-	IKCP_RTO_NDL     = 30  // no delay min rto
-	IKCP_RTO_MIN     = 100 // normal min rto
-	IKCP_RTO_DEF     = 200
-	IKCP_RTO_MAX     = 60000
-	IKCP_CMD_PUSH    = 81 // cmd: push data
-	IKCP_CMD_ACK     = 82 // cmd: ack
-	IKCP_CMD_WASK    = 83 // cmd: window probe (ask)
-	IKCP_CMD_WINS    = 84 // cmd: window size (tell)
-	IKCP_ASK_SEND    = 1  // need to send IKCP_CMD_WASK
-	IKCP_ASK_TELL    = 2  // need to send IKCP_CMD_WINS
-	IKCP_WND_SND     = 32
-	IKCP_WND_RCV     = 32
-	IKCP_MTU_DEF     = 1400
-	IKCP_ACK_FAST    = 3
-	IKCP_INTERVAL    = 100
-	IKCP_OVERHEAD    = 24
-	IKCP_DEADLINK    = 20
-	IKCP_THRESH_INIT = 2
-	IKCP_THRESH_MIN  = 2
-	IKCP_PROBE_INIT  = 500    // 500ms to probe window size
-	IKCP_PROBE_LIMIT = 120000 // up to 120 secs to probe window
-	IKCP_SN_OFFSET   = 12
+	// Retransmission Timeout (RTO) bounds, in milliseconds
+	IKCP_RTO_NDL = 30    // no-delay mode: minimum RTO (ms)
+	IKCP_RTO_MIN = 100   // normal mode: minimum RTO (ms)
+	IKCP_RTO_DEF = 200   // default RTO (ms)
+	IKCP_RTO_MAX = 60000 // maximum RTO (ms), 60 seconds
+
+	// Command types for the KCP segment header (cmd field)
+	IKCP_CMD_PUSH = 81 // cmd: push data
+	IKCP_CMD_ACK  = 82 // cmd: acknowledge
+	IKCP_CMD_WASK = 83 // cmd: window probe request (ask)
+	IKCP_CMD_WINS = 84 // cmd: window size response (tell)
+
+	// Probe flags (bitfield), set in kcp.probe to schedule probe commands
+	IKCP_ASK_SEND = 1 // schedule sending IKCP_CMD_WASK
+	IKCP_ASK_TELL = 2 // schedule sending IKCP_CMD_WINS
+
+	// Default window and MTU sizes
+	IKCP_WND_SND = 32   // default send window size (packets)
+	IKCP_WND_RCV = 32   // default receive window size (packets)
+	IKCP_MTU_DEF = 1400 // default MTU (bytes, not including UDP/IP header)
+
+	// Protocol parameters
+	IKCP_ACK_FAST    = 3      // fast retransmit trigger threshold (duplicate ACK count)
+	IKCP_INTERVAL    = 100    // default flush interval (ms)
+	IKCP_OVERHEAD    = 24     // per-segment header size: conv(4) + cmd(1) + frg(1) + wnd(2) + ts(4) + sn(4) + una(4) + len(4)
+	IKCP_DEADLINK    = 20     // max retransmissions before declaring dead link
+	IKCP_THRESH_INIT = 2      // initial slow-start threshold (packets)
+	IKCP_THRESH_MIN  = 2      // minimum slow-start threshold (packets)
+	IKCP_PROBE_INIT  = 500    // initial window probe timeout (ms)
+	IKCP_PROBE_LIMIT = 120000 // maximum window probe timeout (ms), 120 seconds
+	IKCP_SN_OFFSET   = 12     // byte offset of sequence number (sn) within the segment header
 )
 
 type PacketType int8
@@ -179,35 +189,62 @@ func (h *segmentHeap) Has(sn uint32) bool {
 	return exists
 }
 
-// KCP defines a single KCP connection
+// KCP defines a single KCP connection's protocol state machine.
+// It is a pure ARQ (Automatic Repeat reQuest) implementation with no I/O.
 type KCP struct {
-	conv, mtu, mss, state                  uint32
-	snd_una, snd_nxt, rcv_nxt              uint32
-	ssthresh                               uint32
-	rx_rttvar, rx_srtt                     int32
-	rx_rto, rx_minrto                      uint32
-	snd_wnd, rcv_wnd, rmt_wnd, cwnd, probe uint32
-	interval, ts_flush                     uint32
-	nodelay, updated                       uint32
-	ts_probe, probe_wait                   uint32
-	dead_link, incr                        uint32
+	// Connection identity and framing
+	conv  uint32 // conversation id, must be equal on both sides
+	mtu   uint32 // maximum transmission unit (bytes)
+	mss   uint32 // maximum segment size = mtu - IKCP_OVERHEAD
+	state uint32 // connection state, 0 = active, 0xFFFFFFFF = dead link
 
-	fastresend     int32
-	nocwnd, stream int32
+	// Sequence numbers and acknowledgment tracking
+	snd_una uint32 // oldest unacknowledged sequence number
+	snd_nxt uint32 // next sequence number to send
+	rcv_nxt uint32 // next expected sequence number to receive
 
+	// Congestion control (RFC 5681 / RFC 6937)
+	ssthresh           uint32 // slow-start threshold (packets)
+	rx_rttvar, rx_srtt int32  // RTT variance and smoothed RTT (ms), per RFC 6298
+	rx_rto, rx_minrto  uint32 // retransmission timeout and its lower bound (ms)
+	snd_wnd            uint32 // local send window size (packets)
+	rcv_wnd            uint32 // local receive window size (packets)
+	rmt_wnd            uint32 // remote advertised window size (packets)
+	cwnd               uint32 // congestion window (packets)
+	incr               uint32 // bytes accumulated for cwnd increment
+
+	// Window probing
+	probe      uint32 // probe flags (IKCP_ASK_SEND / IKCP_ASK_TELL)
+	ts_probe   uint32 // timestamp for next window probe (ms)
+	probe_wait uint32 // current probe timeout (ms), doubles on each retry
+
+	// Timers and scheduling
+	interval uint32 // flush interval (ms)
+	ts_flush uint32 // next flush timestamp (ms)
+	nodelay  uint32 // 0: normal, 1: no-delay mode (reduces RTO aggressively)
+	updated  uint32 // whether Update() has been called at least once
+
+	// Reliability
+	dead_link  uint32 // max retransmit count before link is considered dead
+	fastresend int32  // fast retransmit trigger count, 0 = disabled
+	nocwnd     int32  // 1 = disable congestion control
+	stream     int32  // 1 = stream mode (no message boundaries), 0 = message mode
+
+	// Logging
 	logmask KCPLogType
 
-	snd_queue *RingBuffer[segment]
-	rcv_queue *RingBuffer[segment]
-	snd_buf   *RingBuffer[segment]
-	rcv_buf   *segmentHeap
+	// Data queues and buffers
+	snd_queue *RingBuffer[segment] // send queue: segments waiting to enter the send window
+	rcv_queue *RingBuffer[segment] // receive queue: ordered segments ready for user read
+	snd_buf   *RingBuffer[segment] // send buffer: segments in-flight (sent but unacknowledged)
+	rcv_buf   *segmentHeap         // receive buffer: out-of-order segments awaiting reordering
 
-	acklist []ackItem
+	acklist []ackItem // pending ACKs to be flushed
 
-	buffer []byte
-	output output_callback
+	buffer []byte          // pre-allocated encoding buffer for flush()
+	output output_callback // callback to write data to the underlying transport
 
-	log logoutput_callback
+	log logoutput_callback // trace log callback
 }
 
 type ackItem struct {
@@ -406,8 +443,9 @@ func (kcp *KCP) Send(buffer []byte) int {
 	return 0
 }
 
+// update_ack updates the smoothed RTT and RTO based on a new RTT sample.
+// Algorithm follows RFC 6298: Computing TCP's Retransmission Timer.
 func (kcp *KCP) update_ack(rtt int32) {
-	// https://tools.ietf.org/html/rfc6298
 	var rto uint32
 	if kcp.rx_srtt == 0 {
 		kcp.rx_srtt = rtt
@@ -431,6 +469,7 @@ func (kcp *KCP) update_ack(rtt int32) {
 	kcp.rx_rto = min(max(kcp.rx_minrto, rto), IKCP_RTO_MAX)
 }
 
+// shrink_buf advances snd_una to the oldest unacknowledged segment in snd_buf.
 func (kcp *KCP) shrink_buf() {
 	if seg, ok := kcp.snd_buf.Peek(); ok {
 		kcp.snd_una = seg.sn
@@ -439,6 +478,9 @@ func (kcp *KCP) shrink_buf() {
 	}
 }
 
+// parse_ack marks a segment as acknowledged in snd_buf by sequence number.
+// The segment is not removed immediately; it stays until snd_una advances past it,
+// avoiding expensive shifts in the ring buffer.
 func (kcp *KCP) parse_ack(sn uint32) {
 	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
 		return
@@ -460,6 +502,8 @@ func (kcp *KCP) parse_ack(sn uint32) {
 	}
 }
 
+// parse_fastack increments the fast-ack counter for segments with sn < the given sn.
+// Returns 1 if any segment's fastack counter has reached the fast retransmit threshold.
 func (kcp *KCP) parse_fastack(sn, ts uint32) int {
 	shouldFastAck := 0
 	if _itimediff(sn, kcp.snd_una) < 0 || _itimediff(sn, kcp.snd_nxt) >= 0 {
@@ -482,6 +526,8 @@ func (kcp *KCP) parse_fastack(sn, ts uint32) int {
 	return shouldFastAck
 }
 
+// parse_una removes all segments from snd_buf that have been cumulatively acknowledged
+// (i.e., segments with sn < una). Returns the number of segments removed.
 func (kcp *KCP) parse_una(una uint32) int {
 	count := 0
 	for seg := range kcp.snd_buf.ForEach {
@@ -643,7 +689,8 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 		}
 	}
 
-	// cwnd update when packet arrived
+	// Congestion window (cwnd) update on ACK arrival.
+	// Uses Reno-style algorithm: slow-start below ssthresh, then AIMD.
 	if kcp.nocwnd == 0 {
 		if _itimediff(kcp.snd_una, snd_una) > 0 {
 			if kcp.cwnd < kcp.rmt_wnd {
@@ -698,7 +745,17 @@ func (kcp *KCP) wnd_unused() uint16 {
 	return 0
 }
 
-// flush pending data
+// flush sends pending data through the KCP output callback.
+// This is the core scheduling function, organized in 6 phases:
+//
+//	Phase 1: Flush pending ACKs
+//	Phase 2: Window probing (when remote window is zero)
+//	Phase 3: Send window probe commands (WASK/WINS)
+//	Phase 4: Move segments from snd_queue to snd_buf (sliding window)
+//	Phase 5: Retransmit segments (initial, fast, early, RTO)
+//	Phase 6: Update SNMP counters and congestion window
+//
+// Returns the suggested interval (ms) until the next flush call.
 func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 	var seg segment
 	seg.conv = kcp.conv
@@ -733,9 +790,7 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 		atomic.StoreUint64(&DefaultSnmp.RingBufferSndBuffer, uint64(kcp.snd_buf.Len()))
 	}()
 
-	/*
-	 * flush acknowledges
-	 */
+	// --- Phase 1: Flush pending ACKs ---
 	if flushType == IKCP_FLUSH_ACKONLY || flushType == IKCP_FLUSH_FULL {
 		for i, ack := range kcp.acklist {
 			makeSpace(IKCP_OVERHEAD)
@@ -749,7 +804,7 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 		kcp.acklist = kcp.acklist[0:0]
 	}
 
-	// probe window size (if remote window size equals zero)
+	// --- Phase 2: Window probing (when remote window is zero) ---
 	if kcp.rmt_wnd == 0 {
 		current := currentMs()
 		if kcp.probe_wait == 0 {
@@ -773,9 +828,7 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 		kcp.probe_wait = 0
 	}
 
-	/*
-	 * flush window probing commands
-	 */
+	// --- Phase 3: Flush window probing commands ---
 	if (kcp.probe & IKCP_ASK_SEND) != 0 {
 		seg.cmd = IKCP_CMD_WASK
 		makeSpace(IKCP_OVERHEAD)
@@ -793,13 +846,13 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 
 	kcp.probe = 0
 
-	// calculate window size
+	// --- Phase 4: Move segments from snd_queue to snd_buf (sliding window) ---
+	// Effective window = min(snd_wnd, rmt_wnd, cwnd)
 	cwnd := min(kcp.snd_wnd, kcp.rmt_wnd)
 	if kcp.nocwnd == 0 {
 		cwnd = min(kcp.cwnd, cwnd)
 	}
 
-	// sliding window, controlled by snd_nxt && sna_una+cwnd
 	newSegsCount := 0
 	for {
 		if _itimediff(kcp.snd_nxt, kcp.snd_una+cwnd) >= 0 {
@@ -825,9 +878,12 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 		resent = 0xffffffff
 	}
 
-	/*
-	 * flush segments
-	 */
+	// --- Phase 5: Retransmit segments from snd_buf ---
+	// Determines which segments need (re)transmission:
+	// - Initial transmit (xmit == 0)
+	// - Fast retransmit (fastack >= fastresend threshold)
+	// - Early retransmit (fastack > 0, no new segments queued)
+	// - RTO-based retransmit (current >= resendts)
 	current := currentMs()
 	var change, lostSegs, fastRetransSegs, earlyRetransSegs uint64
 	nextUpdate = kcp.interval
@@ -884,7 +940,7 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 				kcp.debugLog(IKCP_LOG_OUT_PUSH, "conv", segment.conv, "sn", segment.sn, "frg", segment.frg, "una", segment.una, "ts", segment.ts, "xmit", segment.xmit, "datalen", len(segment.data))
 
 				if segment.xmit >= kcp.dead_link {
-					kcp.state = 0xFFFFFFFF
+					kcp.state = 0xFFFFFFFF // mark connection as dead
 				}
 			}
 
@@ -895,7 +951,7 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 		}
 	}
 
-	// counter updates
+	// --- Phase 6: Update SNMP counters and congestion window ---
 	sum := lostSegs
 	if lostSegs > 0 {
 		atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
@@ -914,8 +970,8 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 
 	// cwnd update
 	if kcp.nocwnd == 0 {
-		// update ssthresh
-		// rate halving, https://tools.ietf.org/html/rfc6937
+		// Update ssthresh after fast retransmit.
+		// Rate halving per RFC 6937: ssthresh = inflight / 2
 		if change > 0 {
 			inflight := kcp.snd_nxt - kcp.snd_una
 			kcp.ssthresh = max(inflight/2, IKCP_THRESH_MIN)
@@ -923,7 +979,7 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 			kcp.incr = kcp.cwnd * kcp.mss
 		}
 
-		// congestion control, https://tools.ietf.org/html/rfc5681
+		// Congestion control after RTO: reset cwnd per RFC 5681
 		if lostSegs > 0 {
 			kcp.ssthresh = max(cwnd/2, IKCP_THRESH_MIN)
 			kcp.cwnd = 1

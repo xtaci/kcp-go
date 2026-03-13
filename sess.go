@@ -62,32 +62,35 @@ import (
 	"golang.org/x/time/rate"
 )
 
+// Session-layer constants
 const (
 	// 16-bytes nonce for each packet
 	nonceSize = 16
 
-	// 4-bytes packet checksum
+	// 4-bytes CRC32 checksum per packet
 	crcSize = 4
 
-	// overall crypto header size
+	// overall crypto header size: nonce + CRC32
 	cryptHeaderSize = nonceSize + crcSize
 
-	// maximum packet size
+	// maximum packet size (Ethernet MTU)
 	mtuLimit = 1500
 
-	// conv field size
+	// conversation ID field size (bytes)
 	convSize = 4
 
-	// accept backlog
+	// accept backlog: max pending connections for Listener
 	acceptBacklog = 128
 
-	// dev backlog
+	// devBacklog: channel buffer size for post-processing pipeline
 	devBacklog = 2048
 
-	// max latency for consecutive FEC encoding, in millisecond
+	// max latency for consecutive FEC encoding (ms).
+	// If the interval between two data packets exceeds this,
+	// parity generation is skipped.
 	maxFECEncodeLatency = 500
 
-	// max batch size
+	// max number of packets batched in a single sendmmsg/writev call
 	maxBatchSize = 64
 )
 
@@ -638,10 +641,13 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 	return f(s.conn)
 }
 
-// a goroutine to handle post processing of kcp and make the critical section smaller
-// pipeline for outgoing packets (from ARQ to network)
+// postProcess is the goroutine that handles the outgoing packet pipeline.
+// It runs the following stages sequentially for each packet:
+//  1. FEC encoding   — generate parity shards (Reed-Solomon)
+//  2. Encryption     — AEAD (e.g. AES-GCM) or CFB mode with CRC32
+//  3. TX batching    — accumulate packets and flush via sendmmsg/writev
 //
-//	KCP output -> FEC encoding -> CRC32 integrity -> Encryption -> TxQueue
+// Pipeline: KCP output -> chPostProcessing -> [FEC] -> [Encrypt] -> TxQueue -> Network
 func (s *UDPSession) postProcess() {
 	txqueue := make([]ipv4.Message, 0, devBacklog)
 	chDie := s.die
@@ -656,7 +662,7 @@ func (s *UDPSession) postProcess() {
 
 			var ecc [][]byte
 
-			// 1. FEC encoding
+			// --- Stage 1: FEC encoding ---
 			if s.fecEncoder != nil {
 				if !oob {
 					ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
@@ -665,7 +671,10 @@ func (s *UDPSession) postProcess() {
 				}
 			}
 
-			// 2. Encryption
+			// --- Stage 2: Encryption ---
+			// Two modes supported:
+			//   - AEAD (e.g. AES-GCM): nonce + authenticated ciphertext, no separate CRC
+			//   - CFB (legacy block ciphers): random nonce + CRC32 checksum + CFB encryption
 			switch block := s.block.(type) {
 			case nil:
 			case *aeadCrypt: // AEAD mode
@@ -700,7 +709,7 @@ func (s *UDPSession) postProcess() {
 				}
 			}
 
-			// 3. TxQueue
+			// --- Stage 3: TX batching ---
 			var msg ipv4.Message
 			msg.Addr = s.remote
 
@@ -920,8 +929,14 @@ func (s *UDPSession) notifyWriteError(err error) {
 	})
 }
 
-// packet input pipeline:
-// network -> [decryption ->] [crc32 ->] [FEC ->] [KCP input ->] stream -> application
+// -----------------------------------------------------------------------
+// Packet input pipeline (decryption -> integrity check -> FEC -> KCP)
+// -----------------------------------------------------------------------
+
+// packetInput is the entry point for incoming packets.
+// It handles decryption and CRC32 verification before passing data to kcpInput.
+//
+// Pipeline: Network -> [Decrypt] -> [CRC32] -> kcpInput
 func (s *UDPSession) packetInput(data []byte) {
 	switch block := s.block.(type) {
 	case nil:
@@ -969,7 +984,16 @@ func (s *UDPSession) packetInput(data []byte) {
 	s.kcpInput(data)
 }
 
-// kcpInput inputs a decrypted and crc32-checked packet into kcp with FEC handling
+// kcpInput routes a decrypted packet into the KCP state machine,
+// handling FEC decoding and OOB delivery.
+//
+// Packet demultiplexing uses the 16-bit field at offset 4:
+//   - 0xf1 (typeData) / 0xf2 (typeParity): FEC-encoded packet
+//   - 0xf3 (typeOOB): out-of-band packet (unreliable, bypasses KCP)
+//   - other values: raw KCP packet (no FEC)
+//
+// Note: KCP cmd values [81-84] with frg [0-255] do not collide with
+// FEC type markers 0x00f1/0x00f2/0x00f3 in little-endian.
 func (s *UDPSession) kcpInput(data []byte) {
 	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
 	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
@@ -1066,6 +1090,10 @@ func (s *UDPSession) kcpInput(data []byte) {
 	}
 }
 
+// -----------------------------------------------------------------------
+// Listener: server-side session multiplexer
+// -----------------------------------------------------------------------
+
 type (
 	// Listener defines a server which will be waiting to accept incoming connections
 	Listener struct {
@@ -1091,7 +1119,9 @@ type (
 	}
 )
 
-// packet input stage
+// packetInput is the Listener's packet input handler.
+// It decrypts the packet, demultiplexes by remote address,
+// and dispatches to existing sessions or creates new ones.
 func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	switch block := l.block.(type) {
 	case nil:
@@ -1362,6 +1392,10 @@ func (l *Listener) closeSession(remote net.Addr) (ret bool) {
 func (l *Listener) Addr() net.Addr {
 	return l.conn.LocalAddr()
 }
+
+// -----------------------------------------------------------------------
+// Public API: Dial, Listen, and connection factory functions
+// -----------------------------------------------------------------------
 
 // Listen listens for incoming KCP packets addressed to the local address laddr on the network "udp",
 func Listen(laddr string) (net.Listener, error) {

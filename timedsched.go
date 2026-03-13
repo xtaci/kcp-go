@@ -29,7 +29,8 @@ import (
 	"time"
 )
 
-// SystemTimedSched is the library level timed-scheduler
+// SystemTimedSched is the library-level timed scheduler, shared by all sessions.
+// It drives periodic KCP flush()/update() calls, avoiding one goroutine per session.
 var SystemTimedSched *TimedSched = NewTimedSched(runtime.NumCPU())
 
 type timedFunc struct {
@@ -53,14 +54,31 @@ func (h *timedFuncHeap) Pop() any {
 	return x
 }
 
-// TimedSched represents the control struct for timed parallel scheduler
+// TimedSched is a two-stage parallel scheduler for timed task execution.
+//
+// Architecture (two-stage pipeline):
+//
+//	Stage 1 - "prepend" goroutine:
+//	  External callers submit tasks via Put(). Tasks are appended to a shared
+//	  slice under a mutex (fast, non-blocking). The prepend goroutine drains
+//	  this slice and feeds tasks one-by-one into chTask.
+//
+//	Stage 2 - "sched" goroutines (N = NumCPU):
+//	  Each sched goroutine maintains a local min-heap of pending tasks.
+//	  It receives tasks from chTask, executes overdue ones immediately,
+//	  and uses a timer for the earliest future task.
+//
+// Why two stages?
+//   - Stage 1 decouples callers from the scheduler's internal heap,
+//     ensuring Put() never blocks on heap operations.
+//   - Stage 2 runs in parallel, distributing timer-driven work across CPUs.
 type TimedSched struct {
-	// prepending tasks
+	// Stage 1: task collection
 	prependTasks    []timedFunc
 	prependLock     sync.Mutex
 	chPrependNotify chan struct{}
 
-	// tasks will be distributed through chTask
+	// Stage 2: parallel execution
 	chTask chan timedFunc
 
 	dieOnce sync.Once
@@ -81,7 +99,8 @@ func NewTimedSched(parallel int) *TimedSched {
 	return ts
 }
 
-// sched is a goroutine to schedule and execute timed tasks.
+// sched is a worker goroutine (Stage 2) that manages a local min-heap
+// of timed tasks. It executes tasks when their deadline arrives.
 func (ts *TimedSched) sched() {
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -122,7 +141,8 @@ func (ts *TimedSched) sched() {
 	}
 }
 
-// prepend is the front desk goroutine to register tasks
+// prepend is the Stage 1 goroutine that collects externally submitted tasks
+// and feeds them into the Stage 2 worker pool via chTask.
 func (ts *TimedSched) prepend() {
 	var tasks []timedFunc
 	for {

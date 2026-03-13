@@ -23,8 +23,8 @@
 package kcp
 
 const (
-	RINGBUFFER_MIN = 8
-	RINGBUFFER_EXP = 1024
+	RINGBUFFER_MIN = 8    // minimum ring buffer capacity
+	RINGBUFFER_EXP = 1024 // growth threshold: below this, double; above this, grow by 25%
 )
 
 // RingBuffer is a generic ring (circular) buffer that supports dynamic resizing.
