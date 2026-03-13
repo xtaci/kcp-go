@@ -1,8 +1,8 @@
-// Package kcp-go is a Reliable-UDP library for golang.
+// Package kcp is a Reliable-UDP library for Go.
 //
-// This library intents to provide a smooth, resilient, ordered,
+// This library intends to provide a smooth, resilient, ordered,
 // error-checked and anonymous delivery of streams over UDP packets.
 //
-// The interfaces of this package aims to be compatible with
-// net.Conn in standard library, but offers powerful features for advanced users.
+// The interfaces of this package aim to be compatible with
+// net.Conn in the standard library, but offer powerful features for advanced users.
 package kcp

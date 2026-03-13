@@ -37,7 +37,7 @@ type Snmp struct {
 	CurrEstab           uint64 // current number of established connections
 	InErrs              uint64 // UDP read errors reported from net.PacketConn
 	InCsumErrors        uint64 // checksum errors from CRC32
-	KCPInErrors         uint64 // packet iput errors reported from KCP
+	KCPInErrors         uint64 // packet input errors reported from KCP
 	InPkts              uint64 // incoming packets count
 	OutPkts             uint64 // outgoing packets count
 	InSegs              uint64 // incoming KCP segments
@@ -53,8 +53,8 @@ type Snmp struct {
 	FECRecovered        uint64 // correct packets recovered from FEC
 	FECErrs             uint64 // incorrect packets recovered from FEC
 	FECParityShards     uint64 // FEC segments received
-	FECShardSet         uint64 // number of parity shards that are not yet received
-	FECShardMin         uint64 // the minimum ID of FEC shards
+	FECShardSet         uint64 // number of shard sets that are not yet complete
+	FECShardMin         uint64 // minimum shard ID among active FEC shard sets
 	RingBufferSndQueue  uint64 // Len of segments in send queue ring buffer
 	RingBufferRcvQueue  uint64 // Len of segments in receive queue ring buffer
 	RingBufferSndBuffer uint64 // Len of segments in send buffer ring buffer
