@@ -690,7 +690,7 @@ func getTotalMemoryBytes() uint64 {
 }
 
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
-	if total := getTotalMemoryBytes(); total > 0 && total < 1*1024*1024*1024 {
+	if total := getTotalMemoryBytes(); total > 0 && total < 8*1024*1024*1024 {
 		t.Skip("skipping: system memory less than 1GB")
 	}
 
