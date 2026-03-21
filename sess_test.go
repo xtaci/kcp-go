@@ -228,7 +228,7 @@ func handleEcho(conn *UDPSession) {
 	conn.SetReadDeadline(time.Now().Add(time.Hour))
 	conn.SetWriteDeadline(time.Now().Add(time.Hour))
 	conn.SetRateLimit(200 * 1024 * 1024)
-	buf := make([]byte, 16*1024*1024)
+	buf := make([]byte, 512*1024)
 	for {
 		n, err := conn.Read(buf)
 		if err != nil {
