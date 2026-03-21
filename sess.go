@@ -273,14 +273,19 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 // Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
-RESET_TIMER:
 	var timeout *time.Timer
-	// deadline for current reading operation
 	var c <-chan time.Time
+
+RESET_TIMER:
+	// deadline for current reading operation
 	if trd, ok := s.rd.Load().(time.Time); ok && !trd.IsZero() {
-		timeout = time.NewTimer(time.Until(trd))
-		c = timeout.C
-		defer timeout.Stop()
+		if timeout == nil {
+			timeout = time.NewTimer(time.Until(trd))
+			c = timeout.C
+			defer timeout.Stop()
+		} else {
+			timeout.Reset(time.Until(trd))
+		}
 	}
 
 	for {
@@ -349,13 +354,18 @@ func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers(
 
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
-RESET_TIMER:
 	var timeout *time.Timer
 	var c <-chan time.Time
+
+RESET_TIMER:
 	if twd, ok := s.wd.Load().(time.Time); ok && !twd.IsZero() {
-		timeout = time.NewTimer(time.Until(twd))
-		c = timeout.C
-		defer timeout.Stop()
+		if timeout == nil {
+			timeout = time.NewTimer(time.Until(twd))
+			c = timeout.C
+			defer timeout.Stop()
+		} else {
+			timeout.Reset(time.Until(twd))
+		}
 	}
 
 	for {
