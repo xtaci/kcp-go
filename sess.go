@@ -284,8 +284,13 @@ RESET_TIMER:
 			c = timeout.C
 			defer timeout.Stop()
 		} else {
+			// Pre-Go 1.23: Reset does not drain the channel;
+			// callers must drain at the goto-site before arriving here.
 			timeout.Reset(time.Until(trd))
 		}
+	} else if timeout != nil {
+		timeout.Stop()
+		c = nil // disable timeout select case
 	}
 
 	for {
@@ -336,7 +341,12 @@ RESET_TIMER:
 		select {
 		case <-s.chReadEvent:
 			if timeout != nil {
-				timeout.Stop()
+				if !timeout.Stop() {
+					select {
+					case <-timeout.C:
+					default:
+					}
+				}
 				goto RESET_TIMER
 			}
 		case <-c:
@@ -364,8 +374,13 @@ RESET_TIMER:
 			c = timeout.C
 			defer timeout.Stop()
 		} else {
+			// Pre-Go 1.23: Reset does not drain the channel;
+			// callers must drain at the goto-site before arriving here.
 			timeout.Reset(time.Until(twd))
 		}
+	} else if timeout != nil {
+		timeout.Stop()
+		c = nil // disable timeout select case
 	}
 
 	for {
@@ -417,7 +432,12 @@ RESET_TIMER:
 		select {
 		case <-s.chWriteEvent:
 			if timeout != nil {
-				timeout.Stop()
+				if !timeout.Stop() {
+					select {
+					case <-timeout.C:
+					default:
+					}
+				}
 				goto RESET_TIMER
 			}
 		case <-c:
