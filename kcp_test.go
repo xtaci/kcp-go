@@ -196,8 +196,45 @@ func TestSegmentHeap(t *testing.T) {
 //	go test -benchmem -run=^$ -bench ^BenchmarkDebugLog$ -tags debug
 //
 // trace log off:
-//
-//	go test -benchmem -run=^$ -bench ^BenchmarkDebugLog$
+func TestSetMtuBoundary(t *testing.T) {
+	kcp := NewKCP(0, func(buf []byte, size int) {})
+
+	tests := []struct {
+		name string
+		mtu  int
+		want int // 0 = success, -1 = failure
+	}{
+		{"negative", -1, -1},
+		{"zero", 0, -1},
+		{"below overhead", IKCP_OVERHEAD - 1, -1},
+		{"equal overhead", IKCP_OVERHEAD, -1},
+		{"one above overhead (minimum valid)", IKCP_OVERHEAD + 1, 0},
+		{"typical MTU", 1400, 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := kcp.SetMtu(tt.mtu)
+			if got != tt.want {
+				t.Errorf("SetMtu(%d) = %d, want %d", tt.mtu, got, tt.want)
+			}
+		})
+	}
+
+	// verify mss is correctly derived after a valid SetMtu
+	kcp.SetMtu(1400)
+	if kcp.mss != 1400-IKCP_OVERHEAD {
+		t.Errorf("mss = %d, want %d", kcp.mss, 1400-IKCP_OVERHEAD)
+	}
+
+	// minimum valid MTU yields mss = 1
+	kcp.SetMtu(IKCP_OVERHEAD + 1)
+	if kcp.mss != 1 {
+		t.Errorf("mss = %d, want 1 for minimum valid MTU", kcp.mss)
+	}
+}
+
+// go test -benchmem -run=^$ -bench ^BenchmarkDebugLog$
 func BenchmarkDebugLog(b *testing.B) {
 	kcp := &KCP{
 		conv:    123,

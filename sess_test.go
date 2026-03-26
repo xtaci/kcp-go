@@ -1112,16 +1112,34 @@ func TestSetMTU(t *testing.T) {
 	}
 	defer cli.Close()
 
-	if cli.SetMtu(IKCP_OVERHEAD) {
-		t.Fatal("should not allow MTU equal to IKCP_OVERHEAD")
-	}
-	if cli.SetMtu(IKCP_OVERHEAD - 1) {
-		t.Fatal("should not allow MTU below IKCP_OVERHEAD")
-	}
-	if !cli.SetMtu(IKCP_OVERHEAD + cryptHeaderSize + fecHeaderSizePlus2 + 1) {
-		t.Fatal("should allow MTU just above total overhead")
+	// Session headerSize = cryptHeaderSize(20) + fecHeaderSizePlus2(8) = 28
+	// UDPSession.SetMtu subtracts headerSize before calling kcp.SetMtu,
+	// so the minimum user-facing MTU that yields kcp mtu = IKCP_OVERHEAD+1 is:
+	//   IKCP_OVERHEAD + 1 + headerSize = 25 + 28 = 53
+	sessionOverhead := cryptHeaderSize + fecHeaderSizePlus2
+	minValidMTU := IKCP_OVERHEAD + sessionOverhead + 1
+
+	tests := []struct {
+		name string
+		mtu  int
+		want bool
+	}{
+		{"reject: kcp mtu would be negative", IKCP_OVERHEAD, false},
+		{"reject: kcp mtu would equal IKCP_OVERHEAD", minValidMTU - 1, false},
+		{"accept: minimum valid MTU", minValidMTU, true},
+		{"accept: typical MTU", 1400, true},
 	}
 
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := cli.SetMtu(tt.mtu)
+			if got != tt.want {
+				t.Errorf("SetMtu(%d) = %v, want %v", tt.mtu, got, tt.want)
+			}
+		})
+	}
+
+	// echo round-trip at standard MTU
 	cli.SetMtu(1500)
 	cli.SetWriteDelay(false)
 	cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
