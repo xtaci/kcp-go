@@ -1112,10 +1112,14 @@ func TestSetMTU(t *testing.T) {
 	}
 	defer cli.Close()
 
-	ok := cli.SetMtu(49)
-	if ok {
-		t.Fatal("can not set mtu small than 50")
-		return
+	if cli.SetMtu(IKCP_OVERHEAD) {
+		t.Fatal("should not allow MTU equal to IKCP_OVERHEAD")
+	}
+	if cli.SetMtu(IKCP_OVERHEAD - 1) {
+		t.Fatal("should not allow MTU below IKCP_OVERHEAD")
+	}
+	if !cli.SetMtu(IKCP_OVERHEAD + cryptHeaderSize + fecHeaderSizePlus2 + 1) {
+		t.Fatal("should allow MTU just above total overhead")
 	}
 
 	cli.SetMtu(1500)
