@@ -674,26 +674,7 @@ func TestClose(t *testing.T) {
 	}
 }
 
-func getTotalMemoryBytes() uint64 {
-	data, err := os.ReadFile("/proc/meminfo")
-	if err != nil {
-		return 0
-	}
-	var kb uint64
-	for _, line := range bytes.Split(data, []byte("\n")) {
-		if bytes.HasPrefix(line, []byte("MemTotal:")) {
-			fmt.Sscanf(string(line), "MemTotal: %d kB", &kb)
-			return kb * 1024
-		}
-	}
-	return 0
-}
-
 func TestParallel1024CLIENT_64BMSG_64CNT(t *testing.T) {
-	if total := getTotalMemoryBytes(); total > 0 && total < 8*1024*1024*1024 {
-		t.Skip("skipping: system memory less than 1GB")
-	}
-
 	port := nextPort()
 	block, _ := NewSalsa20BlockCrypt(pass)
 	l := echoServer(port, block)
