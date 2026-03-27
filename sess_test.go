@@ -38,6 +38,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"reflect"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1444,6 +1445,9 @@ func TestOOB(t *testing.T) {
 			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
 				t.Errorf("client failed to send OOB payload: %v", err)
 			}
+			if i%128 == 0 {
+				runtime.Gosched()
+			}
 		}
 	}()
 
@@ -1534,6 +1538,9 @@ func TestOOB_OneSideHandler(t *testing.T) {
 		for i := range 10 * 1024 * 1024 {
 			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
 				t.Errorf("client failed to send OOB payload: %v", err)
+			}
+			if i%128 == 0 {
+				runtime.Gosched()
 			}
 		}
 	}()
