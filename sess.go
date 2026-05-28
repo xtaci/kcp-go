@@ -1196,8 +1196,9 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	}
 
 	// look for existing session
+	addrStr := addr.String()
 	l.sessionLock.RLock()
-	s, exist := l.sessions[addr.String()]
+	s, exist := l.sessions[addrStr]
 	l.sessionLock.RUnlock()
 
 	var conv, sn uint32
@@ -1263,13 +1264,40 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		return
 	}
 
-	// new session
-	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
-	s.kcpInput(data)
 	l.sessionLock.Lock()
-	l.sessions[addr.String()] = s
-	l.sessionLock.Unlock()
+
+	// Double-check: another goroutine might have created the session
+	// while we were waiting for the lock.
+	if s2, exist := l.sessions[addrStr]; exist {
+		l.sessionLock.Unlock()
+
+		// If the conversation ID matches, feed data to the existing session.
+		// If it mismatches, it's safe to drop this packet, as the session
+		// was established just milliseconds ago.
+		if !hasConv || conv == s2.kcp.conv {
+			s2.kcpInput(data)
+		}
+		return
+	}
+
+	// Double-check the capacity because other concurrent goroutines might have filled
+	// the channel in the time window between the fast-path check and acquiring the lock.
+	if len(l.chAccepts) >= cap(l.chAccepts) {
+		l.sessionLock.Unlock()
+		return
+	}
+
+	// Create new session safely inside the lock to ensure exactly-once initialization.
+	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
+	l.sessions[addrStr] = s
+
+	// Guaranteed to be non-blocking as we strictly verified len < cap under the write lock.
 	l.chAccepts <- s
+
+	l.sessionLock.Unlock()
+
+	// Feed the data to the session outside the listener's lock
+	s.kcpInput(data)
 }
 
 func (l *Listener) notifyReadError(err error) {
