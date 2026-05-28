@@ -1263,12 +1263,29 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		return
 	}
 
+	// Take the write lock first and re-check under it. Without this, two
+	// packets from the same remote address (e.g. a handshake retransmit or
+	// duplicate packet) can both miss on the RLock lookup above and each
+	// spawn a UDPSession, leading to AcceptKCP returning two sessions for
+	// the same RemoteAddr (issue #340).
+	l.sessionLock.Lock()
+	if existing, ok := l.sessions[addr.String()]; ok {
+		l.sessionLock.Unlock()
+		// A concurrent packet from the same remote already created the
+		// session; if its conv matches, feed this packet into it instead of
+		// spawning a duplicate. If the conv differs, drop this packet — the
+		// stale-conv reset path above will handle reconnection.
+		if conv == existing.kcp.conv {
+			existing.kcpInput(data)
+		}
+		return
+	}
+
 	// new session
 	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
-	s.kcpInput(data)
-	l.sessionLock.Lock()
 	l.sessions[addr.String()] = s
 	l.sessionLock.Unlock()
+	s.kcpInput(data)
 	l.chAccepts <- s
 }
 
