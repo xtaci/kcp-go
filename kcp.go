@@ -1145,3 +1145,17 @@ func (kcp *KCP) SetLogger(mask KCPLogType, logger logoutput_callback) {
 	kcp.logmask = mask
 	kcp.log = logger
 }
+
+// ResetRTO resets the retransmission timeout (RTO) and resend timestamp
+// for all segments currently in the send buffer.
+//
+// This forces all unacknowledged segments to be eligible for immediate
+// retransmission during the next flush.
+func (kcp *KCP) ResetRTO() {
+	current := currentMs()
+
+	for segment := range kcp.snd_buf.ForEach {
+		segment.rto = kcp.rx_rto
+		segment.resendts = current
+	}
+}

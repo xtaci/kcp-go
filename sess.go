@@ -1120,6 +1120,21 @@ func (s *UDPSession) kcpInput(data []byte) {
 	}
 }
 
+// ResetRTO resets the retransmission timers for all pending segments.
+//
+// This method does not trigger a synchronous flush. Retransmission will
+// naturally occur at the next background update tick, governed by the
+// `interval` configured via SetNoDelay (default 100ms).
+//
+// It is intended for cases where the application knows connectivity
+// has been restored and wants to resume data delivery without waiting
+// for existing retransmission timers to expire.
+func (s *UDPSession) ResetRTO() {
+	s.mu.Lock()
+	s.kcp.ResetRTO()
+	s.mu.Unlock()
+}
+
 // -----------------------------------------------------------------------
 // Listener: server-side session multiplexer
 // -----------------------------------------------------------------------
