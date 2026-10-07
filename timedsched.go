@@ -23,7 +23,6 @@
 package kcp
 
 import (
-	"container/heap"
 	"runtime"
 	"sync"
 	"time"
@@ -38,20 +37,48 @@ type timedFunc struct {
 	ts      time.Time
 }
 
-// a heap for sorted timed function
+// timedFuncHeap is a min-heap by deadline. It is typed rather than built on
+// container/heap, whose any-typed Push and Pop allocate for every task.
 type timedFuncHeap []timedFunc
 
-func (h timedFuncHeap) Len() int           { return len(h) }
-func (h timedFuncHeap) Less(i, j int) bool { return h[i].ts.Before(h[j].ts) }
-func (h timedFuncHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *timedFuncHeap) Push(x any)        { *h = append(*h, x.(timedFunc)) }
-func (h *timedFuncHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = timedFunc{} // clear to avoid memory leak (both execute and ts)
-	*h = old[:n-1]
-	return x
+func (h timedFuncHeap) Len() int { return len(h) }
+
+func (h *timedFuncHeap) push(f timedFunc) {
+	*h = append(*h, f)
+	s := *h
+	for i := len(s) - 1; i > 0; {
+		p := (i - 1) / 2
+		if !s[i].ts.Before(s[p].ts) {
+			break
+		}
+		s[i], s[p] = s[p], s[i]
+		i = p
+	}
+}
+
+func (h *timedFuncHeap) pop() timedFunc {
+	s := *h
+	n := len(s) - 1
+	top := s[0]
+	s[0] = s[n]
+	s[n] = timedFunc{} // clear to avoid memory leak (both execute and ts)
+	s = s[:n]
+	for i := 0; ; {
+		l, m := 2*i+1, i
+		if l < n && s[l].ts.Before(s[m].ts) {
+			m = l
+		}
+		if r := l + 1; r < n && s[r].ts.Before(s[m].ts) {
+			m = r
+		}
+		if m == i {
+			break
+		}
+		s[i], s[m] = s[m], s[i]
+		i = m
+	}
+	*h = s
+	return top
 }
 
 // TimedSched is a two-stage parallel scheduler for timed task execution.
@@ -115,7 +142,7 @@ func (ts *TimedSched) sched() {
 				// already delayed! execute immediately
 				task.execute()
 			} else {
-				heap.Push(&tasks, task)
+				tasks.push(task)
 				// properly reset timer to trigger based on the top element
 				stopped := timer.Stop()
 				if !stopped && !drained {
@@ -128,7 +155,7 @@ func (ts *TimedSched) sched() {
 			drained = true
 			for tasks.Len() > 0 {
 				if now.After(tasks[0].ts) {
-					heap.Pop(&tasks).(timedFunc).execute()
+					tasks.pop().execute()
 				} else {
 					timer.Reset(tasks[0].ts.Sub(now))
 					drained = false
