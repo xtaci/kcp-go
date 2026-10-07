@@ -127,3 +127,12 @@ func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
 	}
 	s.packetInput(b)
 }
+
+// pushedPacket is the PacketPusher callback of a Listener.
+func (l *Listener) pushedPacket(b []byte, addr net.Addr, err error) {
+	if err != nil {
+		l.notifyReadError(errors.WithStack(err))
+		return
+	}
+	l.packetInput(b, addr)
+}

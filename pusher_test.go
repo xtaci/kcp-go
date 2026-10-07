@@ -61,3 +61,38 @@ func TestPacketPusherEcho(t *testing.T) {
 		t.Fatal("read succeeded after the conn failed")
 	}
 }
+
+func TestPacketPusherListener(t *testing.T) {
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc := &pushConn{UDPConn: udp}
+	l, err := ServeConn(nil, 10, 3, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	go func() {
+		for {
+			s, err := l.AcceptKCP()
+			if err != nil {
+				return
+			}
+			go handleEcho(s)
+		}
+	}()
+
+	cli, err := DialWithOptions(udp.LocalAddr().String(), nil, 10, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	cli.SetNoDelay(1, 10, 2, 1)
+	if err := echo_tester(cli, 1024, 128); err != nil {
+		t.Fatal(err)
+	}
+	if pc.pushed.Load() == 0 {
+		t.Fatal("no packet arrived through the receiver")
+	}
+}

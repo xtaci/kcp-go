@@ -1440,7 +1440,11 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.chSocketReadError = make(chan struct{})
-	go l.monitor()
+	if pp, ok := conn.(PacketPusher); ok {
+		pp.SetPacketReceiver(l.pushedPacket)
+	} else {
+		go l.monitor()
+	}
 	return l, nil
 }
 
