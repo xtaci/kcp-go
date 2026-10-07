@@ -364,6 +364,18 @@ func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers(
 
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
+	// An empty write only reports the conn's state. It used to run a full
+	// flush, which callers that probe with Write(nil) paid on every frame.
+	if buffersEmpty(v) {
+		select {
+		case <-s.chSocketWriteError:
+			return 0, s.socketWriteError.Load().(error)
+		case <-s.die:
+			return 0, errors.WithStack(io.ErrClosedPipe)
+		default:
+			return 0, nil
+		}
+	}
 	var timeout *time.Timer
 	var c <-chan time.Time
 
@@ -1531,4 +1543,14 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 		return nil, errors.WithStack(err)
 	}
 	return NewConn2(udpaddr, block, dataShards, parityShards, conn)
+}
+
+// buffersEmpty reports whether v holds no bytes.
+func buffersEmpty(v [][]byte) bool {
+	for _, b := range v {
+		if len(b) > 0 {
+			return false
+		}
+	}
+	return true
 }
