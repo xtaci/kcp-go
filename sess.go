@@ -273,26 +273,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 // Read implements net.Conn
 func (s *UDPSession) Read(b []byte) (n int, err error) {
+	// The deadline timer is armed only when the read has to wait.
 	var timeout *time.Timer
-	var c <-chan time.Time
-
-RESET_TIMER:
-	// deadline for current reading operation
-	if trd, ok := s.rd.Load().(time.Time); ok && !trd.IsZero() {
-		if timeout == nil {
-			timeout = time.NewTimer(time.Until(trd))
-			c = timeout.C
-			defer timeout.Stop()
-		} else {
-			// Pre-Go 1.23: Reset does not drain the channel;
-			// callers must drain at the goto-site before arriving here.
-			timeout.Reset(time.Until(trd))
-		}
-	} else if timeout != nil {
-		timeout.Stop()
-		c = nil // disable timeout select case
-	}
-
 	for {
 		s.mu.Lock()
 		// bufptr points to the current position of recvbuf,
@@ -338,22 +320,17 @@ RESET_TIMER:
 
 		// if it runs here, that means we have to block the call, and wait until the
 		// next data packet arrives.
+		c := armDeadline(&timeout, &s.rd)
 		select {
 		case <-s.chReadEvent:
-			if timeout != nil {
-				if !timeout.Stop() {
-					select {
-					case <-timeout.C:
-					default:
-					}
-				}
-				goto RESET_TIMER
-			}
+			stopTimer(timeout)
 		case <-c:
 			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketReadError:
+			stopTimer(timeout)
 			return 0, s.socketReadError.Load().(error)
 		case <-s.die:
+			stopTimer(timeout)
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -364,25 +341,8 @@ func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers(
 
 // WriteBuffers write a vector of byte slices to the underlying connection
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
+	// The deadline timer is armed only when the write has to wait.
 	var timeout *time.Timer
-	var c <-chan time.Time
-
-RESET_TIMER:
-	if twd, ok := s.wd.Load().(time.Time); ok && !twd.IsZero() {
-		if timeout == nil {
-			timeout = time.NewTimer(time.Until(twd))
-			c = timeout.C
-			defer timeout.Stop()
-		} else {
-			// Pre-Go 1.23: Reset does not drain the channel;
-			// callers must drain at the goto-site before arriving here.
-			timeout.Reset(time.Until(twd))
-		}
-	} else if timeout != nil {
-		timeout.Stop()
-		c = nil // disable timeout select case
-	}
-
 	for {
 		// check for connection close and socket error
 		select {
@@ -429,22 +389,17 @@ RESET_TIMER:
 
 		// if it runs here, that means we have to block the call, and wait until the
 		// transmit buffer to become available again.
+		c := armDeadline(&timeout, &s.wd)
 		select {
 		case <-s.chWriteEvent:
-			if timeout != nil {
-				if !timeout.Stop() {
-					select {
-					case <-timeout.C:
-					default:
-					}
-				}
-				goto RESET_TIMER
-			}
+			stopTimer(timeout)
 		case <-c:
 			return 0, errors.WithStack(errTimeout)
 		case <-s.chSocketWriteError:
+			stopTimer(timeout)
 			return 0, s.socketWriteError.Load().(error)
 		case <-s.die:
+			stopTimer(timeout)
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -1531,4 +1486,29 @@ func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn 
 		return nil, errors.WithStack(err)
 	}
 	return NewConn2(udpaddr, block, dataShards, parityShards, conn)
+}
+
+// armDeadline starts or resets t for the deadline held in v, just before a
+// blocking wait, and returns its channel. It returns nil without a deadline.
+func armDeadline(t **time.Timer, v *atomic.Value) <-chan time.Time {
+	d, ok := v.Load().(time.Time)
+	if !ok || d.IsZero() {
+		return nil
+	}
+	if *t == nil {
+		*t = time.NewTimer(time.Until(d))
+	} else {
+		(*t).Reset(time.Until(d))
+	}
+	return (*t).C
+}
+
+// stopTimer stops t, if armed, and drains a fire it may have left.
+func stopTimer(t *time.Timer) {
+	if t != nil && !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
+	}
 }
