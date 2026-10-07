@@ -741,7 +741,9 @@ func (s *UDPSession) postProcess() {
 					_ = limiter.WaitN(ctx, bytesToSend)
 				}
 				s.tx(txqueue)
-				s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
+				if kcpTrace {
+					s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
+				}
 				// recycle
 				for k := range txqueue {
 					defaultBufferPool.Put(txqueue[k].Buffers[0])

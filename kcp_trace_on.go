@@ -37,3 +37,6 @@ func (kcp *KCP) debugLog(logtype KCPLogType, args ...any) {
 	}
 	kcp.log(msg, args...)
 }
+
+// kcpTrace guards debugLog calls, so their arguments are not built when off.
+const kcpTrace = true
