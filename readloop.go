@@ -98,3 +98,32 @@ func (l *Listener) defaultMonitor() {
 		l.packetInput(buf[:n], from)
 	}
 }
+
+// PacketPusher is a net.PacketConn that can hand each received packet to a
+// callback instead of being read. A client session on such a conn runs no
+// read goroutine. The callback must not keep b after it returns, and a
+// non-nil err ends the session's reads.
+type PacketPusher interface {
+	SetPacketReceiver(fn func(b []byte, addr net.Addr, err error))
+}
+
+// pushedPacket is the PacketPusher callback of a client session.
+func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
+	if err != nil {
+		s.notifyReadError(errors.WithStack(err))
+		return
+	}
+	if s.isClosed() {
+		return
+	}
+	if src, ok := s.remote.(*net.UDPAddr); ok {
+		if udp, ok := addr.(*net.UDPAddr); !ok || !sameUDPAddr(src, udp) {
+			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+			return
+		}
+	} else if s.remote != nil && addr.String() != s.remote.String() {
+		atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+		return
+	}
+	s.packetInput(b)
+}

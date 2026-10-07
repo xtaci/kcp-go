@@ -253,7 +253,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	go sess.postProcess()
 
 	if sess.l == nil { // it's a client connection
-		go sess.readLoop()
+		if pp, ok := conn.(PacketPusher); ok {
+			pp.SetPacketReceiver(sess.pushedPacket)
+		} else {
+			go sess.readLoop()
+		}
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
 	} else {
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
