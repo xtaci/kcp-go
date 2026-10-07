@@ -646,7 +646,14 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 //
 // Pipeline: KCP output -> chPostProcessing -> [FEC] -> [Encrypt] -> TxQueue -> Network
 func (s *UDPSession) postProcess() {
-	txqueue := make([]ipv4.Message, 0, devBacklog)
+	// The queue is flushed at maxBatchSize, so that is all it needs up front.
+	// Each message takes its one-element Buffers slice from bufs.
+	txqueue := make([]ipv4.Message, 0, maxBatchSize)
+	bufs := make([][]byte, 0, maxBatchSize)
+	oneBuf := func(b []byte) [][]byte {
+		bufs = append(bufs, b)
+		return bufs[len(bufs)-1 : len(bufs) : len(bufs)]
+	}
 	chDie := s.die
 
 	ctx := context.Background()
@@ -711,7 +718,7 @@ func (s *UDPSession) postProcess() {
 			msg.Addr = s.remote
 
 			// original copy, move buf to txqueue directly
-			msg.Buffers = [][]byte{buf}
+			msg.Buffers = oneBuf(buf)
 			bytesToSend += len(buf)
 			txqueue = append(txqueue, msg)
 
@@ -719,7 +726,7 @@ func (s *UDPSession) postProcess() {
 			for i := 0; i < s.dup; i++ {
 				bts := defaultBufferPool.Get()[:len(buf)]
 				copy(bts, buf)
-				msg.Buffers = [][]byte{bts}
+				msg.Buffers = oneBuf(bts)
 				bytesToSend += len(bts)
 				txqueue = append(txqueue, msg)
 			}
@@ -728,7 +735,7 @@ func (s *UDPSession) postProcess() {
 			for k := range ecc {
 				bts := defaultBufferPool.Get()[:len(ecc[k])]
 				copy(bts, ecc[k])
-				msg.Buffers = [][]byte{bts}
+				msg.Buffers = oneBuf(bts)
 				bytesToSend += len(bts)
 				txqueue = append(txqueue, msg)
 			}
@@ -748,6 +755,8 @@ func (s *UDPSession) postProcess() {
 					txqueue[k].Buffers = nil
 				}
 				txqueue = txqueue[:0]
+				clear(bufs)
+				bufs = bufs[:0]
 				bytesToSend = 0
 			}
 
