@@ -135,13 +135,14 @@ type (
 		fecEncoder *fecEncoder
 
 		// settings
-		remote     net.Addr     // remote peer address
-		rd         atomic.Value // read deadline
-		wd         atomic.Value // write deadline
-		headerSize int          // the header size additional to a KCP frame
-		ackNoDelay bool         // send ack immediately for each incoming packet(testing purpose)
-		writeDelay bool         // delay kcp.flush() for Write() for bulk transfer
-		dup        int          // duplicate udp packets(testing purpose)
+		remote     net.Addr               // remote peer address
+		rd         atomic.Value           // read deadline
+		readNotify atomic.Pointer[func()] // see SetReadNotify
+		wd         atomic.Value           // write deadline
+		headerSize int                    // the header size additional to a KCP frame
+		ackNoDelay bool                   // send ack immediately for each incoming packet(testing purpose)
+		writeDelay bool                   // delay kcp.flush() for Write() for bulk transfer
+		dup        int                    // duplicate udp packets(testing purpose)
 
 		// notifications
 		die          chan struct{} // notify current session has Closed
@@ -277,46 +278,12 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	var timeout *time.Timer
 	for {
 		s.mu.Lock()
-		// bufptr points to the current position of recvbuf,
-		// if previous 'b' is insufficient to accommodate the data, the
-		// remaining data will be stored in bufptr for next read.
-		if len(s.bufptr) > 0 {
-			n = copy(b, s.bufptr)
-			s.bufptr = s.bufptr[n:]
-			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
-			return n, nil
-		}
-
-		if size := s.kcp.PeekSize(); size > 0 { // peek data size from kcp
-			// if 'b' is large enough to accommodate the data, read directly
-			// from kcp.recv() to 'b', like 'DMA'.
-			if len(b) >= size {
-				s.kcp.Recv(b)
-				s.mu.Unlock()
-				atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(size))
-				return size, nil
-			}
-
-			// otherwise, read to recvbuf first, then copy to 'b'.
-			// dynamically adjust the buffer size to the maximum of 'packet size' when necessary.
-			if cap(s.recvbuf) < size {
-				// usually recvbuf has a size of maximum packet size
-				s.recvbuf = make([]byte, size)
-			}
-
-			// resize the length of recvbuf to match the data size
-			s.recvbuf = s.recvbuf[:size]
-			s.kcp.Recv(s.recvbuf)    // read data to recvbuf first
-			n = copy(b, s.recvbuf)   // then copy bytes to 'b' as many as possible
-			s.bufptr = s.recvbuf[n:] // pointer update
-
-			s.mu.Unlock()
-			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
-			return n, nil
-		}
-
+		n, ok := s.readLocked(b)
 		s.mu.Unlock()
+		if ok {
+			atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
+			return n, nil
+		}
 
 		// if it runs here, that means we have to block the call, and wait until the
 		// next data packet arrives.
@@ -439,6 +406,7 @@ func (s *UDPSession) Close() error {
 	}
 
 	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+	s.callReadNotify()
 
 	// try best to send all queued messages especially the data in txqueue
 	s.mu.Lock()
@@ -903,6 +871,7 @@ func (s *UDPSession) notifyReadEvent() {
 	case s.chReadEvent <- struct{}{}:
 	default:
 	}
+	s.callReadNotify()
 }
 
 func (s *UDPSession) notifyWriteEvent() {
@@ -917,6 +886,7 @@ func (s *UDPSession) notifyReadError(err error) {
 		s.socketReadError.Store(err)
 		close(s.chSocketReadError)
 	})
+	s.callReadNotify()
 }
 
 func (s *UDPSession) notifyWriteError(err error) {
@@ -1533,4 +1503,76 @@ func buffersEmpty(v [][]byte) bool {
 		}
 	}
 	return true
+}
+
+// readLocked copies data that is ready into b and reports whether there was
+// any. It must be called with s.mu held.
+func (s *UDPSession) readLocked(b []byte) (int, bool) {
+	// bufptr points to the current position of recvbuf,
+	// if previous 'b' is insufficient to accommodate the data, the
+	// remaining data will be stored in bufptr for next read.
+	if len(s.bufptr) > 0 {
+		n := copy(b, s.bufptr)
+		s.bufptr = s.bufptr[n:]
+		return n, true
+	}
+
+	size := s.kcp.PeekSize() // peek data size from kcp
+	if size <= 0 {
+		return 0, false
+	}
+	// if 'b' is large enough to accommodate the data, read directly
+	// from kcp.recv() to 'b', like 'DMA'.
+	if len(b) >= size {
+		s.kcp.Recv(b)
+		return size, true
+	}
+
+	// otherwise, read to recvbuf first, then copy to 'b'.
+	// dynamically adjust the buffer size to the maximum of 'packet size' when necessary.
+	if cap(s.recvbuf) < size {
+		// usually recvbuf has a size of maximum packet size
+		s.recvbuf = make([]byte, size)
+	}
+
+	// resize the length of recvbuf to match the data size
+	s.recvbuf = s.recvbuf[:size]
+	s.kcp.Recv(s.recvbuf)    // read data to recvbuf first
+	n := copy(b, s.recvbuf)  // then copy bytes to 'b' as many as possible
+	s.bufptr = s.recvbuf[n:] // pointer update
+	return n, true
+}
+
+// TryRead is Read without waiting. It returns 0 and no error when no data is
+// ready, and the session's error once it is closed or its socket failed and
+// no data is left.
+func (s *UDPSession) TryRead(b []byte) (int, error) {
+	s.mu.Lock()
+	n, ok := s.readLocked(b)
+	s.mu.Unlock()
+	if ok {
+		atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
+		return n, nil
+	}
+	select {
+	case <-s.chSocketReadError:
+		return 0, s.socketReadError.Load().(error)
+	case <-s.die:
+		return 0, errors.WithStack(io.ErrClosedPipe)
+	default:
+		return 0, nil
+	}
+}
+
+// SetReadNotify sets fn to be called whenever data may have become ready for
+// TryRead, and when the session closes or its socket fails. fn runs with the
+// session locked, so it must not block or call into the session.
+func (s *UDPSession) SetReadNotify(fn func()) {
+	s.readNotify.Store(&fn)
+}
+
+func (s *UDPSession) callReadNotify() {
+	if fn := s.readNotify.Load(); fn != nil {
+		(*fn)()
+	}
 }
