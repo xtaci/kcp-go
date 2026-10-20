@@ -248,3 +248,45 @@ func BenchmarkDebugLog(b *testing.B) {
 		kcp.debugLog(IKCP_LOG_OUT_WASK, "conv", kcp.conv, "wnd", kcp.snd_wnd)
 	}
 }
+
+func TestSetMtuRetainsBufferForQueuedOldMssSegment(t *testing.T) {
+	tests := []struct {
+		name  string
+		queue bool
+	}{
+		{name: "in-flight"},
+		{name: "pending", queue: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var packets [][]byte
+			kcp := NewKCP(1, func(buf []byte, size int) {
+				if size > 0 {
+					packets = append(packets, append([]byte(nil), buf[:size]...))
+				}
+			})
+			oldData := make([]byte, 1000)
+			segment := segment{cmd: IKCP_CMD_PUSH, xmit: 1, resendts: 0, data: oldData}
+			if tt.queue {
+				kcp.snd_queue.Push(segment)
+				kcp.cwnd = 1
+			} else {
+				segment.sn = 0
+				kcp.snd_buf.Push(segment)
+				kcp.snd_nxt = 1
+			}
+
+			if got := kcp.SetMtu(25); got != 0 {
+				t.Fatalf("SetMtu(25) = %d, want 0", got)
+			}
+			kcp.flush(IKCP_FLUSH_FULL)
+
+			if len(packets) != 1 {
+				t.Fatalf("got %d output packets, want 1", len(packets))
+			}
+			if got, want := len(packets[0]), IKCP_OVERHEAD+len(oldData); got != want {
+				t.Fatalf("output packet size = %d, want %d", got, want)
+			}
+		})
+	}
+}

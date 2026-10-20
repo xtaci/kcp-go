@@ -1082,9 +1082,21 @@ func (kcp *KCP) SetMtu(mtu int) int {
 		return -1
 	}
 
+	bufferSize := (mtu + IKCP_OVERHEAD) * 3
+	for segment := range kcp.snd_buf.ForEach {
+		if size := IKCP_OVERHEAD + len(segment.data); size > bufferSize {
+			bufferSize = size
+		}
+	}
+	for segment := range kcp.snd_queue.ForEach {
+		if size := IKCP_OVERHEAD + len(segment.data); size > bufferSize {
+			bufferSize = size
+		}
+	}
+
 	kcp.mtu = uint32(mtu)
 	kcp.mss = kcp.mtu - IKCP_OVERHEAD
-	kcp.buffer = make([]byte, (mtu+IKCP_OVERHEAD)*3)
+	kcp.buffer = make([]byte, bufferSize)
 	return 0
 }
 
