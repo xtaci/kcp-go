@@ -125,6 +125,8 @@ type (
 		l       *Listener      // pointing to the Listener object if it's been accepted by a Listener
 		block   BlockCrypt     // block encryption object
 
+		updateFn func() // s.update, made once so rescheduling does not allocate
+
 		// kcp receiving is based on packets
 		// recvbuf turns packets into stream
 		recvbuf []byte
@@ -260,7 +262,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	// start per-session updater
-	SystemTimedSched.Put(sess.update, time.Now())
+	sess.updateFn = sess.update
+	SystemTimedSched.Put(sess.updateFn, time.Now())
 
 	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
 	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
@@ -789,7 +792,11 @@ func (s *UDPSession) update() {
 		}
 		s.mu.Unlock()
 		// self-synchronized timed scheduling
-		SystemTimedSched.Put(s.update, time.Now().Add(time.Duration(interval)*time.Millisecond))
+		fn := s.updateFn
+		if fn == nil {
+			fn = s.update
+		}
+		SystemTimedSched.Put(fn, time.Now().Add(time.Duration(interval)*time.Millisecond))
 	}
 }
 

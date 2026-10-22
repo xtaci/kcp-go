@@ -23,162 +23,180 @@
 package kcp
 
 import (
-	"container/heap"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
 // SystemTimedSched is the library-level timed scheduler, shared by all sessions.
 // It drives periodic KCP flush()/update() calls, avoiding one goroutine per session.
-var SystemTimedSched *TimedSched = NewTimedSched(max(runtime.NumCPU(), 2))
+var SystemTimedSched *TimedSched = NewTimedSched(min(runtime.NumCPU(), 2))
 
 type timedFunc struct {
 	execute func()
 	ts      time.Time
 }
 
-// a heap for sorted timed function
+// timedFuncHeap is a min-heap by deadline. It is typed rather than built on
+// container/heap, whose any-typed Push and Pop allocate for every task.
 type timedFuncHeap []timedFunc
 
-func (h timedFuncHeap) Len() int           { return len(h) }
-func (h timedFuncHeap) Less(i, j int) bool { return h[i].ts.Before(h[j].ts) }
-func (h timedFuncHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
-func (h *timedFuncHeap) Push(x any)        { *h = append(*h, x.(timedFunc)) }
-func (h *timedFuncHeap) Pop() any {
-	old := *h
-	n := len(old)
-	x := old[n-1]
-	old[n-1] = timedFunc{} // clear to avoid memory leak (both execute and ts)
-	*h = old[:n-1]
-	return x
+func (h timedFuncHeap) Len() int { return len(h) }
+
+func (h *timedFuncHeap) push(f timedFunc) {
+	*h = append(*h, f)
+	s := *h
+	for i := len(s) - 1; i > 0; {
+		p := (i - 1) / 2
+		if !s[i].ts.Before(s[p].ts) {
+			break
+		}
+		s[i], s[p] = s[p], s[i]
+		i = p
+	}
 }
 
-// TimedSched is a two-stage parallel scheduler for timed task execution.
-//
-// Architecture (two-stage pipeline):
-//
-//	Stage 1 - "prepend" goroutine:
-//	  External callers submit tasks via Put(). Tasks are appended to a shared
-//	  slice under a mutex (fast, non-blocking). The prepend goroutine drains
-//	  this slice and feeds tasks one-by-one into chTask.
-//
-//	Stage 2 - "sched" goroutines (N = NumCPU):
-//	  Each sched goroutine maintains a local min-heap of pending tasks.
-//	  It receives tasks from chTask, executes overdue ones immediately,
-//	  and uses a timer for the earliest future task.
-//
-// Why two stages?
-//   - Stage 1 decouples callers from the scheduler's internal heap,
-//     ensuring Put() never blocks on heap operations.
-//   - Stage 2 runs in parallel, distributing timer-driven work across CPUs.
-type TimedSched struct {
-	// Stage 1: task collection
-	prependTasks    []timedFunc
-	prependLock     sync.Mutex
-	chPrependNotify chan struct{}
+func (h *timedFuncHeap) pop() timedFunc {
+	s := *h
+	n := len(s) - 1
+	top := s[0]
+	s[0] = s[n]
+	s[n] = timedFunc{} // clear to avoid memory leak (both execute and ts)
+	s = s[:n]
+	for i := 0; ; {
+		l, m := 2*i+1, i
+		if l < n && s[l].ts.Before(s[m].ts) {
+			m = l
+		}
+		if r := l + 1; r < n && s[r].ts.Before(s[m].ts) {
+			m = r
+		}
+		if m == i {
+			break
+		}
+		s[i], s[m] = s[m], s[i]
+		i = m
+	}
+	*h = s
+	return top
+}
 
-	// Stage 2: parallel execution
-	chTask chan timedFunc
+// schedSlack is how early a task may run so that one wakeup serves several
+// tasks. It is half of KCP's shortest update interval, 10ms.
+const schedSlack = 5 * time.Millisecond
+
+// testHookBeforeArm runs in a shard just before it arms its timer.
+var testHookBeforeArm atomic.Pointer[func()]
+
+// TimedSched runs functions at given times on a few shard goroutines.
+//
+// Put pushes onto a shard's heap under its lock and wakes the shard only when
+// the new task is due before everything already queued there. A shard runs
+// all tasks due within schedSlack per wakeup, outside its lock, so a task may
+// Put itself again. Each Put used to pass through a feeder goroutine and an
+// unbuffered channel and reset a timer, several thread switches per task
+// where goroutines are threads.
+type TimedSched struct {
+	shards []tsShard
+	next   atomic.Uint32
 
 	dieOnce sync.Once
 	die     chan struct{}
 }
 
-// NewTimedSched creates a parallel-scheduler with given parallelization
-func NewTimedSched(parallel int) *TimedSched {
-	ts := new(TimedSched)
-	ts.chTask = make(chan timedFunc)
-	ts.die = make(chan struct{})
-	ts.chPrependNotify = make(chan struct{}, 1)
+type tsShard struct {
+	mu    sync.Mutex
+	tasks timedFuncHeap
+	// armed is the deadline the shard goroutine sleeps until, zero if none.
+	armed time.Time
+	wake  chan struct{}
+}
 
-	for range parallel {
-		go ts.sched()
+// NewTimedSched starts a scheduler with parallel shards.
+func NewTimedSched(parallel int) *TimedSched {
+	ts := &TimedSched{
+		shards: make([]tsShard, max(parallel, 1)),
+		die:    make(chan struct{}),
 	}
-	go ts.prepend()
+	for i := range ts.shards {
+		ts.shards[i].wake = make(chan struct{}, 1)
+		go ts.run(&ts.shards[i])
+	}
 	return ts
 }
 
-// sched is a worker goroutine (Stage 2) that manages a local min-heap
-// of timed tasks. It executes tasks when their deadline arrives.
-func (ts *TimedSched) sched() {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-
-	var tasks timedFuncHeap
-	drained := false
+func (ts *TimedSched) run(sh *tsShard) {
+	timer := time.NewTimer(time.Hour)
+	timer.Stop()
+	var due []timedFunc
 	for {
-		select {
-		case task := <-ts.chTask:
-			now := time.Now()
-			if now.After(task.ts) {
-				// already delayed! execute immediately
-				task.execute()
-			} else {
-				heap.Push(&tasks, task)
-				// properly reset timer to trigger based on the top element
-				stopped := timer.Stop()
-				if !stopped && !drained {
-					<-timer.C
-				}
-				timer.Reset(tasks[0].ts.Sub(now))
-				drained = false
-			}
-		case now := <-timer.C:
-			drained = true
-			for tasks.Len() > 0 {
-				if now.After(tasks[0].ts) {
-					heap.Pop(&tasks).(timedFunc).execute()
-				} else {
-					timer.Reset(tasks[0].ts.Sub(now))
-					drained = false
-					break
-				}
-			}
-		case <-ts.die:
-			return
+		sh.mu.Lock()
+		limit := time.Now().Add(schedSlack)
+		for len(sh.tasks) > 0 && !sh.tasks[0].ts.After(limit) {
+			due = append(due, sh.tasks.pop())
 		}
-	}
-}
+		var wait time.Duration
+		pending := false
+		sh.armed = time.Time{}
+		if len(due) == 0 && len(sh.tasks) > 0 {
+			if hook := testHookBeforeArm.Load(); hook != nil {
+				(*hook)()
+			}
+			sh.armed = sh.tasks[0].ts
+			wait = time.Until(sh.armed)
+			pending = true
+		}
+		sh.mu.Unlock()
 
-// prepend is the Stage 1 goroutine that collects externally submitted tasks
-// and feeds them into the Stage 2 worker pool via chTask.
-func (ts *TimedSched) prepend() {
-	var tasks []timedFunc
-	for {
+		if len(due) > 0 {
+			for k := range due {
+				due[k].execute()
+				due[k] = timedFunc{}
+			}
+			due = due[:0]
+			continue
+		}
+
+		// A head that came due while arming, as after a GC pause, fires at once.
+		// Without a timer no Put could wake the shard for it.
+		var fire <-chan time.Time
+		if pending {
+			timer.Reset(max(wait, 0))
+			fire = timer.C
+		}
 		select {
-		case <-ts.chPrependNotify:
-			ts.prependLock.Lock()
-			// swap slices to minimize time under lock
-			tasks, ts.prependTasks = ts.prependTasks, tasks[:0]
-			ts.prependLock.Unlock()
-
-			for k := range tasks {
+		case <-fire:
+		case <-sh.wake:
+			if fire != nil && !timer.Stop() {
 				select {
-				case ts.chTask <- tasks[k]:
-					tasks[k] = timedFunc{} // clear to avoid memory leak
-				case <-ts.die:
-					return
+				case <-timer.C:
+				default:
 				}
 			}
-			tasks = tasks[:0]
 		case <-ts.die:
+			timer.Stop()
 			return
 		}
 	}
 }
 
-// Put a function 'f' awaiting to be executed at 'deadline'
+// Put schedules f to run at deadline.
 func (ts *TimedSched) Put(f func(), deadline time.Time) {
-	ts.prependLock.Lock()
-	ts.prependTasks = append(ts.prependTasks, timedFunc{f, deadline})
-	ts.prependLock.Unlock()
-
-	select {
-	case ts.chPrependNotify <- struct{}{}:
-	default:
+	sh := &ts.shards[ts.next.Add(1)%uint32(len(ts.shards))]
+	sh.mu.Lock()
+	sh.tasks.push(timedFunc{f, deadline})
+	// The shard is busy or sleeping until something sooner; only an
+	// earlier head needs it awake.
+	wake := sh.tasks[0].ts.Equal(deadline) && (sh.armed.IsZero() || deadline.Before(sh.armed))
+	sh.mu.Unlock()
+	if wake {
+		select {
+		case sh.wake <- struct{}{}:
+		default:
+		}
 	}
 }
 
-// Close terminates this scheduler
+// Close stops the scheduler. Pending tasks are dropped.
 func (ts *TimedSched) Close() { ts.dieOnce.Do(func() { close(ts.die) }) }
