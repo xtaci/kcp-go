@@ -242,3 +242,13 @@ func (r *RingBuffer[T]) grow() {
 	r.tail = currentLength
 	r.elements = newElements
 }
+
+// At returns the i-th element from the head. Index loops over it need no
+// closure, which TinyGo would allocate on every call.
+func (r *RingBuffer[T]) At(i int) *T {
+	j := r.head + i
+	if j >= len(r.elements) {
+		j -= len(r.elements)
+	}
+	return &r.elements[j]
+}
