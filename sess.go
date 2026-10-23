@@ -256,7 +256,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	go sess.postProcess()
 
 	if sess.l == nil { // it's a client connection
-		go sess.readLoop()
+		if pp, ok := conn.(PacketPusher); ok {
+			pp.SetPacketReceiver(sess.pushedPacket)
+		} else {
+			go sess.readLoop()
+		}
 		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
 	} else {
 		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
@@ -1424,7 +1428,11 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.chSocketReadError = make(chan struct{})
-	go l.monitor()
+	if pp, ok := conn.(PacketPusher); ok {
+		pp.SetPacketReceiver(l.pushedPacket)
+	} else {
+		go l.monitor()
+	}
 	return l, nil
 }
 
