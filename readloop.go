@@ -100,9 +100,15 @@ func (l *Listener) defaultMonitor() {
 }
 
 // PacketPusher is a net.PacketConn that can hand each received packet to a
-// callback instead of being read. A client session on such a conn runs no
-// read goroutine. The callback must not keep b after it returns, and a
-// non-nil err ends the session's reads.
+// callback instead of being read. A client session or Listener on such a
+// conn runs no read goroutine and processes each packet inside the callback,
+// OOB handlers included, so a slow handler delays every conn the pusher
+// serves.
+//
+// The pusher must not call fn concurrently, just as one goroutine reads a
+// conn. fn may modify b but must not keep it after returning. A non-nil err
+// ends reads. Closing a client session, or a Listener once its sessions have
+// closed, sets a nil fn, which must remove the receiver.
 type PacketPusher interface {
 	SetPacketReceiver(fn func(b []byte, addr net.Addr, err error))
 }
@@ -116,12 +122,21 @@ func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
 	if s.isClosed() {
 		return
 	}
-	if src, ok := s.remote.(*net.UDPAddr); ok {
-		if udp, ok := addr.(*net.UDPAddr); !ok || !sameUDPAddr(src, udp) {
+	// Without a remote address, pin the peer to the first packet as
+	// defaultReadLoop does.
+	src := s.remote
+	if src == nil {
+		if s.pushedFrom == nil {
+			s.pushedFrom = addr
+		}
+		src = s.pushedFrom
+	}
+	if udp, ok := src.(*net.UDPAddr); ok {
+		if a, ok := addr.(*net.UDPAddr); !ok || !sameUDPAddr(udp, a) {
 			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 			return
 		}
-	} else if s.remote != nil && addr.String() != s.remote.String() {
+	} else if addr.String() != src.String() {
 		atomic.AddUint64(&DefaultSnmp.InErrs, 1)
 		return
 	}

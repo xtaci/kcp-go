@@ -138,6 +138,7 @@ type (
 
 		// settings
 		remote     net.Addr               // remote peer address
+		pushedFrom net.Addr               // peer pinned by pushedPacket when remote is nil
 		rd         atomic.Value           // read deadline
 		readNotify atomic.Pointer[func()] // see SetReadNotify
 		wd         atomic.Value           // write deadline
@@ -423,6 +424,10 @@ func (s *UDPSession) Close() error {
 	if s.l != nil { // belongs to listener
 		s.l.closeSession(s.remote)
 		return nil
+	}
+
+	if pp, ok := s.conn.(PacketPusher); ok {
+		pp.SetPacketReceiver(nil)
 	}
 
 	if s.ownConn { // client socket close
@@ -1349,6 +1354,10 @@ func (l *Listener) Close() error {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 
+	l.sessionLock.Lock()
+	l.releasePusherLocked()
+	l.sessionLock.Unlock()
+
 	if l.ownConn {
 		return l.conn.Close()
 	}
@@ -1372,9 +1381,26 @@ func (l *Listener) closeSession(remote net.Addr) (ret bool) {
 
 	if _, ok := l.sessions[remote.String()]; ok {
 		delete(l.sessions, remote.String())
+		l.releasePusherLocked()
 		return true
 	}
 	return false
+}
+
+// releasePusherLocked removes the PacketPusher receiver once the Listener is
+// closed and its last session has gone. sessionLock must be held.
+func (l *Listener) releasePusherLocked() {
+	select {
+	case <-l.die:
+	default:
+		return
+	}
+	if len(l.sessions) > 0 {
+		return
+	}
+	if pp, ok := l.conn.(PacketPusher); ok {
+		pp.SetPacketReceiver(nil)
+	}
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
