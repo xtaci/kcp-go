@@ -161,7 +161,12 @@ type (
 
 		// packets waiting to be sent on wire
 		chPostProcessing chan sendRequest
-		ppRunning        atomic.Bool // a postProcess goroutine is running
+		ppRunning        atomic.Bool // queued for or served by a postProcess worker
+		ppHeld           struct {    // a batch waiting for the rate limiter
+			w     *ppWorker
+			bytes int
+			until time.Time
+		}
 
 		// platform-dependent optimizations
 		platform platform
@@ -619,8 +624,8 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 //
 // Pipeline: KCP output -> chPostProcessing -> [FEC] -> [Encrypt] -> TxQueue -> Network
 //
-// It returns once the queue is empty or after ppBudget packets, and reports
-// whether s still has packets queued.
+// It returns once the queue is empty, after ppBudget packets, or when s keeps
+// a batch for the rate limiter, and reports whether s needs serving again.
 func (s *UDPSession) postProcess(w *ppWorker) bool {
 	bytesToSend := 0
 	for n := 0; n < ppBudget; n++ {
@@ -711,12 +716,14 @@ func (s *UDPSession) postProcess(w *ppWorker) bool {
 
 		// transmit when chPostProcessing is empty or we've reached max batch size
 		if len(s.chPostProcessing) == 0 || len(w.txqueue) >= maxBatchSize {
-			s.flushTx(w, bytesToSend)
+			if s.flushTx(w, bytesToSend) {
+				return true
+			}
 			bytesToSend = 0
 		}
 	}
-	if len(w.txqueue) > 0 {
-		s.flushTx(w, bytesToSend)
+	if len(w.txqueue) > 0 && s.flushTx(w, bytesToSend) {
+		return true
 	}
 	return len(s.chPostProcessing) > 0
 }

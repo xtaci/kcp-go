@@ -1,9 +1,9 @@
 package kcp
 
 import (
-	"context"
 	"runtime"
 	"sync"
+	"time"
 
 	"golang.org/x/net/ipv4"
 	"golang.org/x/time/rate"
@@ -45,12 +45,34 @@ func (w *ppWorker) recycle() {
 	w.bufs = w.bufs[:0]
 }
 
-func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) {
-	if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
-		// WaitN only returns error if the limiter is misconfigured
-		// or context is cancelled. In either case, we continue sending.
-		_ = limiter.WaitN(context.Background(), bytesToSend)
+// ppWorkers recycles batches handed to a rate limited session and back.
+var ppWorkers = sync.Pool{New: func() any {
+	return &ppWorker{
+		txqueue: make([]ipv4.Message, 0, maxBatchSize),
+		bufs:    make([][]byte, 0, maxBatchSize),
 	}
+}}
+
+// flushTx sends the batch in w. When the rate limiter needs time first, s
+// keeps the batch and flushTx reports true, so that no worker sleeps while
+// other sessions wait for it.
+func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
+	if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
+		now := time.Now()
+		// A batch above the burst can never be allowed. WaitN failed on it
+		// and the batch was sent anyway, so it still is.
+		if r := limiter.ReserveN(now, bytesToSend); r.OK() {
+			if d := r.DelayFrom(now); d > 0 {
+				s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until = w, bytesToSend, now.Add(d)
+				return true
+			}
+		}
+	}
+	s.sendTx(w, bytesToSend)
+	return false
+}
+
+func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) {
 	s.tx(w.txqueue)
 	if kcpTrace {
 		s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
@@ -94,10 +116,7 @@ func startPostProcessWorkers() {
 }
 
 func postProcessWorker() {
-	w := &ppWorker{
-		txqueue: make([]ipv4.Message, 0, maxBatchSize),
-		bufs:    make([][]byte, 0, maxBatchSize),
-	}
+	w := ppWorkers.Get().(*ppWorker)
 	for {
 		ppQueue.mu.Lock()
 		for ppQueue.head == len(ppQueue.q) {
@@ -111,7 +130,21 @@ func postProcessWorker() {
 		}
 		ppQueue.mu.Unlock()
 
-		if s.postProcess(w) {
+		// The limiter allowed a held batch when it was held, so send it now.
+		if h := s.ppHeld.w; h != nil {
+			s.ppHeld.w = nil
+			s.sendTx(h, s.ppHeld.bytes)
+			ppWorkers.Put(h)
+		}
+
+		more := s.postProcess(w)
+		if s.ppHeld.w == w {
+			// s keeps the batch, and stays queued, until the limiter allows it.
+			w = ppWorkers.Get().(*ppWorker)
+			SystemTimedSched.Put(func() { ppEnqueue(s) }, s.ppHeld.until)
+			continue
+		}
+		if more {
 			ppEnqueue(s)
 			continue
 		}
