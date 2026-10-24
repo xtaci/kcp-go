@@ -46,7 +46,6 @@
 package kcp
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"hash/crc32"
@@ -163,6 +162,12 @@ type (
 
 		// packets waiting to be sent on wire
 		chPostProcessing chan sendRequest
+		ppRunning        atomic.Bool // queued for or served by a postProcess worker
+		ppHeld           struct {    // a batch waiting for the rate limiter
+			w     *ppWorker
+			bytes int
+			until time.Time
+		}
 
 		// platform-dependent optimizations
 		platform platform
@@ -239,6 +244,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 			// delivery to post processing (non-blocking to avoid deadlock under lock)
 			select {
 			case sess.chPostProcessing <- sendRequest{bts, false}:
+				sess.kickPostProcess()
 			case <-sess.die:
 				return
 			default:
@@ -252,9 +258,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	if !sess.SetMtu(IKCP_MTU_DEF) {
 		panic("Overhead too large")
 	}
-
-	// create post-processing goroutine
-	go sess.postProcess()
 
 	if sess.l == nil { // it's a client connection
 		if pp, ok := conn.(PacketPusher); ok {
@@ -618,142 +621,116 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 	return f(s.conn)
 }
 
-// postProcess is the goroutine that handles the outgoing packet pipeline.
+// postProcess runs the outgoing packet pipeline for s on a shared worker.
 // It runs the following stages sequentially for each packet:
 //  1. FEC encoding   — generate parity shards (Reed-Solomon)
 //  2. Encryption     — AEAD (e.g. AES-GCM) or CFB mode with CRC32
 //  3. TX batching    — accumulate packets and flush via sendmmsg/writev
 //
 // Pipeline: KCP output -> chPostProcessing -> [FEC] -> [Encrypt] -> TxQueue -> Network
-func (s *UDPSession) postProcess() {
-	// The queue is flushed at maxBatchSize, so that is all it needs up front.
-	// Each message takes its one-element Buffers slice from bufs.
-	txqueue := make([]ipv4.Message, 0, maxBatchSize)
-	bufs := make([][]byte, 0, maxBatchSize)
-	oneBuf := func(b []byte) [][]byte {
-		bufs = append(bufs, b)
-		return bufs[len(bufs)-1 : len(bufs) : len(bufs)]
-	}
-	chDie := s.die
-
-	ctx := context.Background()
+//
+// It returns once the queue is empty, after ppBudget packets, or when s keeps
+// a batch for the rate limiter, and reports whether s needs serving again.
+func (s *UDPSession) postProcess(w *ppWorker) bool {
 	bytesToSend := 0
-	for {
+	for n := 0; n < ppBudget; n++ {
+		var req sendRequest
 		select {
-		case req := <-s.chPostProcessing: // dequeue from post processing
-			buf := req.buffer
-			oob := req.oob
+		case req = <-s.chPostProcessing: // dequeue from post processing
+		default:
+			return false
+		}
+		buf := req.buffer
+		oob := req.oob
 
-			var ecc [][]byte
+		var ecc [][]byte
 
-			// --- Stage 1: FEC encoding ---
-			if s.fecEncoder != nil {
-				if !oob {
-					ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
-				} else {
-					s.fecEncoder.encodeOOB(buf)
-				}
+		// --- Stage 1: FEC encoding ---
+		if s.fecEncoder != nil {
+			if !oob {
+				ecc = s.fecEncoder.encode(buf, maxFECEncodeLatency)
+			} else {
+				s.fecEncoder.encodeOOB(buf)
 			}
+		}
 
-			// --- Stage 2: Encryption ---
-			// Two modes supported:
-			//   - AEAD (e.g. AES-GCM): nonce + authenticated ciphertext, no separate CRC
-			//   - CFB (legacy block ciphers): random nonce + CRC32 checksum + CFB encryption
-			switch block := s.block.(type) {
-			case nil:
-			case *aeadCrypt: // AEAD mode
-				nonceSize := block.NonceSize()
+		// --- Stage 2: Encryption ---
+		// Two modes supported:
+		//   - AEAD (e.g. AES-GCM): nonce + authenticated ciphertext, no separate CRC
+		//   - CFB (legacy block ciphers): random nonce + CRC32 checksum + CFB encryption
+		switch block := s.block.(type) {
+		case nil:
+		case *aeadCrypt: // AEAD mode
+			nonceSize := block.NonceSize()
 
-				dst := buf[:nonceSize]
-				nonce := buf[:nonceSize]
-				plaintext := buf[nonceSize:]
+			dst := buf[:nonceSize]
+			nonce := buf[:nonceSize]
+			plaintext := buf[nonceSize:]
+
+			fillRand(nonce)
+			buf = block.Seal(dst, nonce, plaintext, nil)
+
+			for k := range ecc {
+				dst := ecc[k][:nonceSize]
+				nonce := ecc[k][:nonceSize]
+				plaintext := ecc[k][nonceSize:]
 
 				fillRand(nonce)
-				buf = block.Seal(dst, nonce, plaintext, nil)
-
-				for k := range ecc {
-					dst := ecc[k][:nonceSize]
-					nonce := ecc[k][:nonceSize]
-					plaintext := ecc[k][nonceSize:]
-
-					fillRand(nonce)
-					ecc[k] = block.Seal(dst, nonce, plaintext, nil)
-				}
-			default: // Cipher Feedback (CFB) mode
-				fillRand(buf[:nonceSize])
-				checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
-				binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
-				block.Encrypt(buf, buf)
-
-				for k := range ecc {
-					fillRand(ecc[k][:nonceSize])
-					checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
-					binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
-					block.Encrypt(ecc[k], ecc[k])
-				}
+				ecc[k] = block.Seal(dst, nonce, plaintext, nil)
 			}
+		default: // Cipher Feedback (CFB) mode
+			fillRand(buf[:nonceSize])
+			checksum := crc32.ChecksumIEEE(buf[cryptHeaderSize:])
+			binary.LittleEndian.PutUint32(buf[nonceSize:], checksum)
+			block.Encrypt(buf, buf)
 
-			// --- Stage 3: TX batching ---
-			var msg ipv4.Message
-			msg.Addr = s.remote
-
-			// original copy, move buf to txqueue directly
-			msg.Buffers = oneBuf(buf)
-			bytesToSend += len(buf)
-			txqueue = append(txqueue, msg)
-
-			// dup copies for testing if set
-			for i := 0; i < s.dup; i++ {
-				bts := defaultBufferPool.Get()[:len(buf)]
-				copy(bts, buf)
-				msg.Buffers = oneBuf(bts)
-				bytesToSend += len(bts)
-				txqueue = append(txqueue, msg)
-			}
-
-			// parity
 			for k := range ecc {
-				bts := defaultBufferPool.Get()[:len(ecc[k])]
-				copy(bts, ecc[k])
-				msg.Buffers = oneBuf(bts)
-				bytesToSend += len(bts)
-				txqueue = append(txqueue, msg)
+				fillRand(ecc[k][:nonceSize])
+				checksum := crc32.ChecksumIEEE(ecc[k][cryptHeaderSize:])
+				binary.LittleEndian.PutUint32(ecc[k][nonceSize:], checksum)
+				block.Encrypt(ecc[k], ecc[k])
 			}
+		}
 
-			// transmit when chPostProcessing is empty or we've reached max batch size
-			if len(s.chPostProcessing) == 0 || len(txqueue) >= maxBatchSize {
-				if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
-					// WaitN only returns error if the limiter is misconfigured
-					// or context is cancelled. In either case, we continue sending.
-					_ = limiter.WaitN(ctx, bytesToSend)
-				}
-				s.tx(txqueue)
-				if kcpTrace {
-					s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
-				}
-				// recycle
-				for k := range txqueue {
-					defaultBufferPool.Put(txqueue[k].Buffers[0])
-					txqueue[k].Buffers = nil
-				}
-				txqueue = txqueue[:0]
-				clear(bufs)
-				bufs = bufs[:0]
-				bytesToSend = 0
+		// --- Stage 3: TX batching ---
+		var msg ipv4.Message
+		msg.Addr = s.remote
+
+		// original copy, move buf to txqueue directly
+		msg.Buffers = w.oneBuf(buf)
+		bytesToSend += len(buf)
+		w.txqueue = append(w.txqueue, msg)
+
+		// dup copies for testing if set
+		for i := 0; i < s.dup; i++ {
+			bts := defaultBufferPool.Get()[:len(buf)]
+			copy(bts, buf)
+			msg.Buffers = w.oneBuf(bts)
+			bytesToSend += len(bts)
+			w.txqueue = append(w.txqueue, msg)
+		}
+
+		// parity
+		for k := range ecc {
+			bts := defaultBufferPool.Get()[:len(ecc[k])]
+			copy(bts, ecc[k])
+			msg.Buffers = w.oneBuf(bts)
+			bytesToSend += len(bts)
+			w.txqueue = append(w.txqueue, msg)
+		}
+
+		// transmit when chPostProcessing is empty or we've reached max batch size
+		if len(s.chPostProcessing) == 0 || len(w.txqueue) >= maxBatchSize {
+			if s.flushTx(w, bytesToSend) {
+				return true
 			}
-
-			// re-enable die channel
-			chDie = s.die
-
-		case <-chDie:
-			// remaining packets in txqueue should be sent out
-			if len(s.chPostProcessing) > 0 {
-				chDie = nil // block chDie temporarily
-				continue
-			}
-			return
+			bytesToSend = 0
 		}
 	}
+	if len(w.txqueue) > 0 && s.flushTx(w, bytesToSend) {
+		return true
+	}
+	return len(s.chPostProcessing) > 0
 }
 
 // sess update to trigger protocol
@@ -880,6 +857,7 @@ func (s *UDPSession) SendOOB(data []byte) error {
 	// Performs OOB framing, encryption, and transmission, bypassing FEC and KCP.
 	select {
 	case s.chPostProcessing <- sendRequest{buf, true}:
+		s.kickPostProcess()
 		return nil
 	case <-s.die:
 		// Session is closing.
