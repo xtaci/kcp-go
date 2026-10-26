@@ -161,9 +161,9 @@ type (
 		socketWriteErrorOnce sync.Once
 
 		// packets waiting to be sent on wire
-		chPostProcessing chan sendRequest
-		ppRunning        atomic.Bool // queued for or served by a postProcess worker
-		ppHeld           struct {    // a batch waiting for the rate limiter
+		postQueue sendQueue
+		ppRunning atomic.Bool // queued for or served by a postProcess worker
+		ppHeld    struct {    // a batch waiting for the rate limiter
 			w     *ppWorker
 			bytes int
 			until time.Time
@@ -205,7 +205,6 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chSocketReadError = make(chan struct{})
 	sess.chSocketWriteError = make(chan struct{})
-	sess.chPostProcessing = make(chan sendRequest, devBacklog)
 	sess.remote = remote
 	sess.conn = conn
 	sess.ownConn = ownConn
@@ -243,11 +242,14 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 			// delivery to post processing (non-blocking to avoid deadlock under lock)
 			select {
-			case sess.chPostProcessing <- sendRequest{bts, false}:
-				sess.kickPostProcess()
 			case <-sess.die:
+				defaultBufferPool.Put(bts)
 				return
 			default:
+			}
+			if sess.postQueue.push(sendRequest{bts, false}) {
+				sess.kickPostProcess()
+			} else {
 				// drop and recycle to avoid blocking; KCP will retransmit if needed
 				defaultBufferPool.Put(bts)
 			}
@@ -627,17 +629,15 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 //  2. Encryption     — AEAD (e.g. AES-GCM) or CFB mode with CRC32
 //  3. TX batching    — accumulate packets and flush via sendmmsg/writev
 //
-// Pipeline: KCP output -> chPostProcessing -> [FEC] -> [Encrypt] -> TxQueue -> Network
+// Pipeline: KCP output -> postQueue -> [FEC] -> [Encrypt] -> TxQueue -> Network
 //
 // It returns once the queue is empty, after ppBudget packets, or when s keeps
 // a batch for the rate limiter, and reports whether s needs serving again.
 func (s *UDPSession) postProcess(w *ppWorker) bool {
 	bytesToSend := 0
 	for n := 0; n < ppBudget; n++ {
-		var req sendRequest
-		select {
-		case req = <-s.chPostProcessing: // dequeue from post processing
-		default:
+		req, ok := s.postQueue.pop()
+		if !ok {
 			return false
 		}
 		buf := req.buffer
@@ -719,8 +719,8 @@ func (s *UDPSession) postProcess(w *ppWorker) bool {
 			w.txqueue = append(w.txqueue, msg)
 		}
 
-		// transmit when chPostProcessing is empty or we've reached max batch size
-		if len(s.chPostProcessing) == 0 || len(w.txqueue) >= maxBatchSize {
+		// transmit when postQueue is empty or we've reached max batch size
+		if s.postQueue.len() == 0 || len(w.txqueue) >= maxBatchSize {
 			if s.flushTx(w, bytesToSend) {
 				return true
 			}
@@ -730,7 +730,7 @@ func (s *UDPSession) postProcess(w *ppWorker) bool {
 	if len(w.txqueue) > 0 && s.flushTx(w, bytesToSend) {
 		return true
 	}
-	return len(s.chPostProcessing) > 0
+	return s.postQueue.len() > 0
 }
 
 // sess update to trigger protocol
@@ -856,19 +856,20 @@ func (s *UDPSession) SendOOB(data []byte) error {
 	// Enqueue the packet for post-processing.
 	// Performs OOB framing, encryption, and transmission, bypassing FEC and KCP.
 	select {
-	case s.chPostProcessing <- sendRequest{buf, true}:
-		s.kickPostProcess()
-		return nil
 	case <-s.die:
 		// Session is closing.
 		defaultBufferPool.Put(buf)
 		return errors.WithStack(io.ErrClosedPipe)
 	default:
+	}
+	if s.postQueue.push(sendRequest{buf, true}) {
+		s.kickPostProcess()
+	} else {
 		// Drop silently to avoid blocking the sender.
 		// OOB delivery is best-effort by design.
 		defaultBufferPool.Put(buf)
-		return nil
 	}
+	return nil
 }
 
 func (s *UDPSession) notifyReadEvent() {

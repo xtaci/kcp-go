@@ -150,7 +150,7 @@ func postProcessWorker() {
 		}
 		// Hand back to kickPostProcess, unless a packet arrived meanwhile.
 		s.ppRunning.Store(false)
-		if len(s.chPostProcessing) > 0 && s.ppRunning.CompareAndSwap(false, true) {
+		if s.postQueue.len() > 0 && s.ppRunning.CompareAndSwap(false, true) {
 			ppEnqueue(s)
 		}
 	}
