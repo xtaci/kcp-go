@@ -1639,16 +1639,20 @@ func TestSendOOB_Errors(t *testing.T) {
 	}
 	// NOTE: SendOOB no longer requires callbackForOOB to be non-nil on sender side.
 	// It should not return error if callback is not set after FEC is enabled.
-	sess.fecEncoder = newFECEncoder(1, 1, 0)
+	// An accepted packet is sent, so this needs a real session.
+	sess, err = DialWithOptions("127.0.0.1:9", nil, 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sess.Close() //nolint:errcheck
 	err = sess.SendOOB([]byte("abc"))
 	if err != nil {
 		t.Errorf("expected no error when callback not set, got %v", err)
 	}
 	// Should error if payload is too large
-	sess.kcp.mtu = 8
 	cb := func([]byte) {}
 	sess.SetOOBHandler(cb)
-	err = sess.SendOOB([]byte("123456789"))
+	err = sess.SendOOB(make([]byte, sess.GetOOBMaxSize()+1))
 	if err == nil || err.Error() != "OOB payload too large" {
 		t.Errorf("expected 'OOB payload too large', got %v", err)
 	}

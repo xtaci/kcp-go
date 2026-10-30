@@ -1,0 +1,58 @@
+package kcp
+
+import "sync"
+
+// sendQueue holds a session's packets waiting for post processing. It
+// allocates only while packets are queued, so an idle session costs nothing,
+// where a channel of devBacklog requests cost 64 KB per session.
+// sendQueueKeep is the buffer a drained queue keeps for the next packets.
+const sendQueueKeep = 64
+
+type sendQueue struct {
+	mu   sync.Mutex
+	q    []sendRequest
+	head int
+}
+
+// push queues r, or reports false when devBacklog packets are already waiting.
+func (sq *sendQueue) push(r sendRequest) bool {
+	sq.mu.Lock()
+	defer sq.mu.Unlock()
+	if len(sq.q)-sq.head >= devBacklog {
+		return false
+	}
+	if sq.head > 0 && len(sq.q) == cap(sq.q) {
+		n := copy(sq.q, sq.q[sq.head:])
+		clear(sq.q[n:])
+		sq.q, sq.head = sq.q[:n], 0
+	}
+	sq.q = append(sq.q, r)
+	return true
+}
+
+// pop takes the oldest packet. A drained queue keeps a buffer only up to
+// sendQueueKeep packets, so a burst does not stay allocated.
+func (sq *sendQueue) pop() (sendRequest, bool) {
+	sq.mu.Lock()
+	defer sq.mu.Unlock()
+	if sq.head == len(sq.q) {
+		return sendRequest{}, false
+	}
+	r := sq.q[sq.head]
+	sq.q[sq.head] = sendRequest{}
+	sq.head++
+	if sq.head == len(sq.q) {
+		sq.q, sq.head = sq.q[:0], 0
+		if cap(sq.q) > sendQueueKeep {
+			sq.q = nil
+		}
+	}
+	return r, true
+}
+
+// len returns the number of queued packets.
+func (sq *sendQueue) len() int {
+	sq.mu.Lock()
+	defer sq.mu.Unlock()
+	return len(sq.q) - sq.head
+}
