@@ -18,6 +18,22 @@ type pushConn struct {
 	start    sync.Once
 }
 
+type gatedAddr struct {
+	calls   atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (a *gatedAddr) Network() string { return "udp" }
+
+func (a *gatedAddr) String() string {
+	if a.calls.Add(1) == 2 {
+		close(a.entered)
+		<-a.release
+	}
+	return "127.0.0.1:1"
+}
+
 func (c *pushConn) SetPacketReceiver(fn func([]byte, net.Addr, error)) {
 	if fn == nil {
 		c.receiver.Store(nil)
@@ -215,5 +231,67 @@ func TestPacketPusherListenerClosed(t *testing.T) {
 	l.sessionLock.RUnlock()
 	if n != 0 {
 		t.Fatalf("closed listener registered %d sessions", n)
+	}
+}
+
+func TestPacketPusherListenerCloseRegistrationRace(t *testing.T) {
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+
+	l, err := ServeConn(nil, 0, 0, &pushConn{UDPConn: udp})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addr := &gatedAddr{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	pkt := make([]byte, IKCP_OVERHEAD)
+	pkt[0] = 1
+	pkt[4] = IKCP_CMD_PUSH
+
+	inputDone := make(chan struct{})
+	go func() {
+		l.packetInput(pkt, addr)
+		close(inputDone)
+	}()
+	<-addr.entered
+
+	closeStarted := make(chan struct{})
+	closeDone := make(chan error, 1)
+	go func() {
+		close(closeStarted)
+		closeDone <- l.Close()
+	}()
+	<-closeStarted
+
+	closedEarly := false
+	select {
+	case <-l.die:
+		closedEarly = true
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(addr.release)
+	<-inputDone
+	closeErr := <-closeDone
+
+	l.sessionLock.RLock()
+	s := l.sessions[addr.String()]
+	l.sessionLock.RUnlock()
+	if s != nil {
+		if err := s.Close(); err != nil {
+			t.Errorf("close accepted session: %v", err)
+		}
+	}
+	if closeErr != nil {
+		t.Fatal(closeErr)
+	}
+	if closedEarly {
+		t.Fatal("Listener closed while packetInput held sessionLock")
 	}
 }

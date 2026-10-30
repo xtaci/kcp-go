@@ -1210,7 +1210,6 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
 	s.kcpInput(data)
 	l.sessionLock.Lock()
-	// Close may already have released the PacketPusher receiver.
 	select {
 	case <-l.die:
 		l.sessionLock.Unlock()
@@ -1332,16 +1331,17 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 // Close stops listening on the UDP address, and closes the socket
 func (l *Listener) Close() error {
 	var once bool
+	l.sessionLock.Lock()
 	l.dieOnce.Do(func() {
 		close(l.die)
 		once = true
 	})
 
 	if !once {
+		l.sessionLock.Unlock()
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 
-	l.sessionLock.Lock()
 	l.releasePusherLocked()
 	l.sessionLock.Unlock()
 
