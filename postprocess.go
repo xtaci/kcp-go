@@ -75,7 +75,9 @@ func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
 func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) {
 	s.tx(w.txqueue)
 	if kcpTrace {
+		s.mu.Lock()
 		s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
+		s.mu.Unlock()
 	}
 	w.recycle()
 }

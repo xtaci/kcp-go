@@ -608,7 +608,9 @@ func (s *UDPSession) SetRateLimit(bytesPerSecond uint32) {
 
 // SetLogger configures the kcp trace logger
 func (s *UDPSession) SetLogger(mask KCPLogType, logger logoutput_callback) {
+	s.mu.Lock()
 	s.kcp.SetLogger(mask, logger)
+	s.mu.Unlock()
 }
 
 // Control applys a procedure to the underly socket fd.
@@ -813,7 +815,10 @@ func (s *UDPSession) GetOOBMaxSize() int {
 		return 0
 	}
 	// Packet layout: | conv (4B) | OOB payload |
-	return int(s.kcp.mtu) - convSize
+	s.mu.Lock()
+	size := int(s.kcp.mtu) - convSize
+	s.mu.Unlock()
+	return size
 }
 
 // SendOOB sends an out-of-band (OOB) data packet.
@@ -1342,8 +1347,11 @@ func (l *Listener) Close() error {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 
-	l.releasePusherLocked()
+	pp := l.releasePusherLocked()
 	l.sessionLock.Unlock()
+	if pp != nil {
+		pp.SetPacketReceiver(nil)
+	}
 
 	if l.ownConn {
 		return l.conn.Close()
@@ -1364,30 +1372,35 @@ func (l *Listener) Control(f func(conn net.PacketConn) error) error {
 // closeSession notify the listener that a session has closed
 func (l *Listener) closeSession(remote net.Addr) (ret bool) {
 	l.sessionLock.Lock()
-	defer l.sessionLock.Unlock()
-
 	if _, ok := l.sessions[remote.String()]; ok {
 		delete(l.sessions, remote.String())
-		l.releasePusherLocked()
+		pp := l.releasePusherLocked()
+		l.sessionLock.Unlock()
+		if pp != nil {
+			pp.SetPacketReceiver(nil)
+		}
 		return true
 	}
+	l.sessionLock.Unlock()
 	return false
 }
 
 // releasePusherLocked removes the PacketPusher receiver once the Listener is
-// closed and its last session has gone. sessionLock must be held.
-func (l *Listener) releasePusherLocked() {
+// closed and its last session has gone. sessionLock must be held. The caller
+// must unregister the returned pusher after releasing sessionLock.
+func (l *Listener) releasePusherLocked() PacketPusher {
 	select {
 	case <-l.die:
 	default:
-		return
+		return nil
 	}
 	if len(l.sessions) > 0 {
-		return
+		return nil
 	}
 	if pp, ok := l.conn.(PacketPusher); ok {
-		pp.SetPacketReceiver(nil)
+		return pp
 	}
+	return nil
 }
 
 // Addr returns the listener's network address, The Addr returned is shared by all invocations of Addr, so do not modify it.
@@ -1553,6 +1566,7 @@ func (s *UDPSession) readLocked(b []byte) (int, bool) {
 	if len(s.bufptr) > 0 {
 		n := copy(b, s.bufptr)
 		s.bufptr = s.bufptr[n:]
+		s.notifyReadIfAvailableLocked()
 		return n, true
 	}
 
@@ -1564,6 +1578,7 @@ func (s *UDPSession) readLocked(b []byte) (int, bool) {
 	// from kcp.recv() to 'b', like 'DMA'.
 	if len(b) >= size {
 		s.kcp.Recv(b)
+		s.notifyReadIfAvailableLocked()
 		return size, true
 	}
 
@@ -1579,7 +1594,14 @@ func (s *UDPSession) readLocked(b []byte) (int, bool) {
 	s.kcp.Recv(s.recvbuf)    // read data to recvbuf first
 	n := copy(b, s.recvbuf)  // then copy bytes to 'b' as many as possible
 	s.bufptr = s.recvbuf[n:] // pointer update
+	s.notifyReadIfAvailableLocked()
 	return n, true
+}
+
+func (s *UDPSession) notifyReadIfAvailableLocked() {
+	if len(s.bufptr) > 0 || s.kcp.PeekSize() > 0 {
+		s.notifyReadEvent()
+	}
 }
 
 // TryRead is Read without waiting. It returns 0 and no error when no data is

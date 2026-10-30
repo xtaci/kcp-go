@@ -18,6 +18,22 @@ type pushConn struct {
 	start    sync.Once
 }
 
+type lockCheckingPusher struct {
+	net.PacketConn
+	check    chan bool
+	listener *Listener
+}
+
+func (p *lockCheckingPusher) SetPacketReceiver(fn func([]byte, net.Addr, error)) {
+	if fn == nil {
+		locked := p.listener.sessionLock.TryRLock()
+		if locked {
+			p.listener.sessionLock.RUnlock()
+		}
+		p.check <- locked
+	}
+}
+
 type gatedAddr struct {
 	calls   atomic.Int32
 	entered chan struct{}
@@ -350,5 +366,80 @@ func TestPacketPusherListenerCloseRegistrationRace(t *testing.T) {
 	}
 	if closedEarly {
 		t.Fatal("Listener closed while packetInput held sessionLock")
+	}
+}
+
+func TestPacketPusherUnregisterOutsideListenerLock(t *testing.T) {
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+
+	pc := &lockCheckingPusher{
+		PacketConn: udp,
+		check:      make(chan bool, 1),
+	}
+	l, err := ServeConn(nil, 0, 0, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc.listener = l
+
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case unlocked := <-pc.check:
+		if !unlocked {
+			t.Fatal("PacketPusher was unregistered while sessionLock was held")
+		}
+	default:
+		t.Fatal("Listener.Close did not unregister the PacketPusher")
+	}
+}
+
+func TestPacketPusherLastSessionUnregisterOutsideListenerLock(t *testing.T) {
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+
+	pc := &lockCheckingPusher{
+		PacketConn: udp,
+		check:      make(chan bool, 1),
+	}
+	l, err := ServeConn(nil, 0, 0, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pc.listener = l
+
+	remote := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
+	s := &UDPSession{
+		conn:   pc,
+		kcp:    NewKCP(1, nil),
+		l:      l,
+		remote: remote,
+		die:    make(chan struct{}),
+	}
+	l.sessionLock.Lock()
+	l.sessions[remote.String()] = s
+	l.sessionLock.Unlock()
+
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case unlocked := <-pc.check:
+		if !unlocked {
+			t.Fatal("PacketPusher was unregistered while sessionLock was held")
+		}
+	default:
+		t.Fatal("last session close did not unregister the PacketPusher")
 	}
 }
