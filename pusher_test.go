@@ -191,3 +191,29 @@ func TestPacketPusherReleasedOnClose(t *testing.T) {
 		t.Fatal("Listener kept its receiver after its last session closed")
 	}
 }
+
+func TestPacketPusherListenerClosed(t *testing.T) {
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+	l, err := ServeConn(nil, 0, 0, &pushConn{UDPConn: udp})
+	if err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+
+	// A callback already running when Close released the receiver must not
+	// register a session that will never get another packet.
+	pkt := make([]byte, IKCP_OVERHEAD)
+	pkt[0] = 1
+	pkt[4] = IKCP_CMD_PUSH
+	l.pushedPacket(pkt, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, nil)
+	l.sessionLock.RLock()
+	n := len(l.sessions)
+	l.sessionLock.RUnlock()
+	if n != 0 {
+		t.Fatalf("closed listener registered %d sessions", n)
+	}
+}

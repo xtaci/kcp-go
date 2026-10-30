@@ -1210,6 +1210,14 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
 	s.kcpInput(data)
 	l.sessionLock.Lock()
+	// Close may already have released the PacketPusher receiver.
+	select {
+	case <-l.die:
+		l.sessionLock.Unlock()
+		s.Close()
+		return
+	default:
+	}
 	l.sessions[addr.String()] = s
 	l.sessionLock.Unlock()
 	l.chAccepts <- s
