@@ -214,11 +214,17 @@ func TestPacketPusherListenerClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer udp.Close()
-	l, err := ServeConn(nil, 0, 0, &pushConn{UDPConn: udp})
+	pc := &pushConn{UDPConn: udp}
+	l, err := ServeConn(nil, 0, 0, pc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	l.Close()
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if pc.receiver.Load() != nil {
+		t.Fatal("Listener kept the receiver after closing without sessions")
+	}
 
 	// A callback already running when Close released the receiver must not
 	// register a session that will never get another packet.
