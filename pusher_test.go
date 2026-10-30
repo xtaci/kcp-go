@@ -241,15 +241,24 @@ func TestPacketPusherListenerCloseRegistrationRace(t *testing.T) {
 	}
 	defer udp.Close()
 
-	l, err := ServeConn(nil, 0, 0, &pushConn{UDPConn: udp})
+	pc := &pushConn{UDPConn: udp}
+	l, err := ServeConn(nil, 0, 0, pc)
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer l.Close()
 
 	addr := &gatedAddr{
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	defer func() {
+		select {
+		case <-addr.release:
+		default:
+			close(addr.release)
+		}
+	}()
 	pkt := make([]byte, IKCP_OVERHEAD)
 	pkt[0] = 1
 	pkt[4] = IKCP_CMD_PUSH
@@ -259,7 +268,11 @@ func TestPacketPusherListenerCloseRegistrationRace(t *testing.T) {
 		l.packetInput(pkt, addr)
 		close(inputDone)
 	}()
-	<-addr.entered
+	select {
+	case <-addr.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("packetInput did not reach session registration")
+	}
 
 	closeStarted := make(chan struct{})
 	closeDone := make(chan error, 1)
@@ -267,7 +280,11 @@ func TestPacketPusherListenerCloseRegistrationRace(t *testing.T) {
 		close(closeStarted)
 		closeDone <- l.Close()
 	}()
-	<-closeStarted
+	select {
+	case <-closeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Listener.Close did not start")
+	}
 
 	closedEarly := false
 	select {
@@ -276,17 +293,51 @@ func TestPacketPusherListenerCloseRegistrationRace(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 
-	close(addr.release)
-	<-inputDone
-	closeErr := <-closeDone
+	select {
+	case <-addr.release:
+	default:
+		close(addr.release)
+	}
+	select {
+	case <-inputDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("packetInput did not finish")
+	}
+	var closeErr error
+	select {
+	case closeErr = <-closeDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Listener.Close did not finish")
+	}
 
 	l.sessionLock.RLock()
 	s := l.sessions[addr.String()]
 	l.sessionLock.RUnlock()
-	if s != nil {
-		if err := s.Close(); err != nil {
-			t.Errorf("close accepted session: %v", err)
+	if s == nil {
+		t.Fatal("in-flight packet did not register its session before Close")
+	}
+	select {
+	case accepted := <-l.chAccepts:
+		if accepted != s {
+			t.Error("accepted a different session than the one registered")
 		}
+	default:
+		t.Error("registered session was not added to the accept queue")
+	}
+	if pc.receiver.Load() == nil {
+		t.Error("Listener released the receiver while the session was open")
+	}
+	if err := s.Close(); err != nil {
+		t.Errorf("close accepted session: %v", err)
+	}
+	l.sessionLock.RLock()
+	remaining := len(l.sessions)
+	l.sessionLock.RUnlock()
+	if remaining != 0 {
+		t.Errorf("session close left %d sessions registered", remaining)
+	}
+	if pc.receiver.Load() != nil {
+		t.Error("Listener kept the receiver after its last session closed")
 	}
 	if closeErr != nil {
 		t.Fatal(closeErr)
