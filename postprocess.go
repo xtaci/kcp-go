@@ -83,9 +83,18 @@ func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) {
 // kickPostProcess queues s for a worker unless it is already queued or being
 // served. Callers queue their packet first.
 func (s *UDPSession) kickPostProcess() {
-	if s.ppRunning.CompareAndSwap(false, true) {
+	if s.claimPostProcess() {
 		ppEnqueue(s)
 	}
+}
+
+func (s *UDPSession) claimPostProcess() bool {
+	return s.ppRunning.CompareAndSwap(false, true)
+}
+
+func (s *UDPSession) finishPostProcess() bool {
+	s.ppRunning.Store(false)
+	return s.postQueue.len() > 0 && s.claimPostProcess()
 }
 
 func ppEnqueue(s *UDPSession) {
@@ -149,8 +158,7 @@ func postProcessWorker() {
 			continue
 		}
 		// Hand back to kickPostProcess, unless a packet arrived meanwhile.
-		s.ppRunning.Store(false)
-		if s.postQueue.len() > 0 && s.ppRunning.CompareAndSwap(false, true) {
+		if s.finishPostProcess() {
 			ppEnqueue(s)
 		}
 	}

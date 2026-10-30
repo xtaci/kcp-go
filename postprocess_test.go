@@ -1,9 +1,47 @@
 package kcp
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+func TestPostProcessWorkerHandoff(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		s := &UDPSession{}
+		s.postQueue.push(sendRequest{})
+		s.ppRunning.Store(true)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		var claims atomic.Int32
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			if s.claimPostProcess() {
+				claims.Add(1)
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			if s.finishPostProcess() {
+				claims.Add(1)
+			}
+		}()
+		close(start)
+		wg.Wait()
+
+		if got := claims.Load(); got != 1 {
+			t.Fatalf("iteration %d: got %d scheduling claims, want exactly one", i, got)
+		}
+		if !s.ppRunning.Load() {
+			t.Fatalf("iteration %d: pending packet has no worker scheduled", i)
+		}
+	}
+}
 
 // Rate limited sessions waiting for tokens must not hold the shared
 // postProcess workers from a session without a limit.
