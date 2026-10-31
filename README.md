@@ -1,12 +1,10 @@
 <img src="assets/kcp-go.png" alt="kcp-go" height="100px" />
 
 
-[![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Coverage Status][7]][8] [![Sourcegraph][13]][14]
+[![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Coverage Status][7]][8] [![Sourcegraph][13]][14]
 
 [1]: https://godoc.org/github.com/xtaci/kcp-go?status.svg
 [2]: https://pkg.go.dev/github.com/xtaci/kcp-go/v5
-[3]: https://img.shields.io/github/created-at/xtaci/kcp-go
-[4]: https://img.shields.io/github/created-at/xtaci/kcp-go
 [7]: https://codecov.io/gh/xtaci/kcp-go/branch/master/graph/badge.svg
 [8]: https://codecov.io/gh/xtaci/kcp-go
 [9]: https://img.shields.io/badge/KCP-Powered-blue.svg
@@ -20,20 +18,22 @@
 ## Table of Contents
 
 - [Introduction](#introduction)
+- [Quick Start](#quick-start)
 - [Features](#features)
 - [Documentation](#documentation)
 - [Layer-Model of KCP-GO](#layer-model-of-kcp-go)
-- [Key Design Considerations](#key-design-considerations)
+- [Design and Tuning Notes](#design-and-tuning-notes)
   - [1. Slice vs. Container/List](#1-slice-vs-containerlist)
-  - [2. Timing Accuracy vs. Syscall clock_gettime](#2-timing-accuracy-vs-syscall-clock_gettime)
+  - [2. Timing Accuracy and RTT Estimation](#2-timing-accuracy-and-rtt-estimation)
   - [3. Memory Management](#3-memory-management)
-  - [4. Information Security](#4-information-security)
-  - [5. Packet Clocking](#5-packet-clocking)
-  - [6. FEC Design Characteristics](#6-fec-design-characteristics)
+  - [4. Per-session Outbound Rate Limiting](#4-per-session-outbound-rate-limiting)
+  - [5. Information Security](#5-information-security)
+  - [6. Packet Clocking](#6-packet-clocking)
+  - [7. FEC Design Characteristics](#7-fec-design-characteristics)
 - [Specification](#specification)
 - [Performance](#performance)
 - [Typical Flame Graph](#typical-flame-graph)
-- [Connection Termination](#connection-termination)
+- [Connection Termination and Multiplexing](#connection-termination-and-multiplexing)
 - [FAQ](#faq)
 - [Who is using this?](#who-is-using-this)
 - [Examples](#examples)
@@ -47,18 +47,88 @@ This library provides a reliable, ordered byte-stream transport over **UDP**. Op
 
 [Latest Release](https://github.com/xtaci/kcp-go/releases)
 
+## Quick Start
+
+`kcp-go` implements `net.Conn` and `net.Listener`, so applications can use familiar stream I/O. These standalone examples show a basic echo server and client; they use no packet encryption or FEC.
+
+Echo server:
+
+```go
+package main
+
+import (
+	"io"
+	"log"
+	"net"
+
+	"github.com/xtaci/kcp-go/v5"
+)
+
+func main() {
+	ln, err := kcp.Listen("127.0.0.1:12345")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer ln.Close()
+
+	for {
+		conn, err := ln.Accept()
+		if err != nil {
+			log.Fatal(err)
+		}
+		go func(conn net.Conn) {
+			defer conn.Close()
+			if _, err := io.Copy(conn, conn); err != nil {
+				log.Println(err)
+			}
+		}(conn)
+	}
+}
+```
+
+Echo client:
+
+```go
+package main
+
+import (
+	"fmt"
+	"io"
+	"log"
+
+	"github.com/xtaci/kcp-go/v5"
+)
+
+func main() {
+	conn, err := kcp.Dial("127.0.0.1:12345")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	payload := []byte("hello over KCP")
+	if _, err := conn.Write(payload); err != nil {
+		log.Fatal(err)
+	}
+	reply := make([]byte, len(payload))
+	if _, err := io.ReadFull(conn, reply); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(string(reply))
+}
+```
+
+For optional packet encryption or FEC, use `ListenWithOptions` and `DialWithOptions`; both peers must use matching encryption keys and FEC shard settings. See [Godoc](https://pkg.go.dev/github.com/xtaci/kcp-go/v5) for configuration details.
+
 ## Features
 
-1. Designed for **latency-sensitive** scenarios.
-2. **Cache-friendly** and **memory-optimized** design, offering an extremely **high-performance** core.
-3. Designed to handle thousands of concurrent connections, depending on workload and server resources.
-4. Implements [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener); its API resembles TCP, but its transport semantics differ.
-5. [FEC (Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) support using [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction).
-6. Packet encryption support for [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm), [3DES](https://en.wikipedia.org/wiki/Triple_DES), [Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher)), [Cast5](https://en.wikipedia.org/wiki/CAST-128), [Salsa20](https://en.wikipedia.org/wiki/Salsa20), and other algorithms. The legacy block-cipher mode uses [CFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)); not all supported algorithms use CFB.
-7. Supports packet encryption with [AEAD](https://en.wikipedia.org/wiki/Authenticated_encryption).
-8. A shared timer scheduler drives KCP updates; goroutines for socket reading and packet processing depend on the connection and transport setup.
-9. Compatible with [skywind3000's](https://github.com/skywind3000) C version, with various improvements.
-10. Platform-specific optimizations: [sendmmsg](http://man7.org/linux/man-pages/man2/sendmmsg.2.html) and [recvmmsg](http://man7.org/linux/man-pages/man2/recvmmsg.2.html) for Linux.
+- Reliable, ordered byte-stream delivery over UDP with configurable latency/throughput trade-offs.
+- `net.Conn` and `net.Listener` APIs; the familiar interface does not make the transport TCP.
+- Optional Reed-Solomon FEC to recover some packet loss, with configurable data/parity shard counts.
+- Optional packet encryption, including AEAD for packet-level integrity and authentication.
+- A shared timer scheduler and batched, platform-specific UDP I/O to support many sessions efficiently.
+- Designed for high concurrency; capacity depends on workload, configuration, and hardware.
+- Based on [skywind3000's KCP](https://github.com/skywind3000/kcp), with additional features and optimizations.
 
 ## Documentation
 
@@ -69,7 +139,7 @@ For complete documentation, see the associated [Godoc](https://pkg.go.dev/github
 
 <img src="assets/layermodel.jpg" alt="layer-model" />
 
-## Key Design Considerations
+## Design and Tuning Notes
 
 ### 1. Slice vs. Container/List
 
@@ -100,7 +170,18 @@ The number of clock reads varies with the flush path: KCP samples time while che
 
 Many packet buffers are obtained from the package-wide `defaultBufferPool`, which provides buffers with a fixed capacity of 1500 bytes (`mtuLimit`). Buffers are returned to the pool when they are no longer needed, reducing repeated allocations. The pool uses `sync.Pool`, so the Go runtime may discard pooled buffers during garbage collection; reuse and retention are not guaranteed.
 
-### 4. Information Security
+### 4. Per-session Outbound Rate Limiting
+
+`UDPSession.SetRateLimit(bytesPerSecond)` configures an independent token-bucket rate limit for that session's outgoing traffic. The limit is measured in bytes per second and counts the UDP payload bytes actually queued for transmission, including KCP/FEC/encryption overhead and FEC parity packets; it does not include UDP or IP headers. Rate limiting is disabled by default, and passing `0` disables it.
+
+The bucket allows an initial burst of up to `maxBatchSize * mtuLimit` bytes (currently 64 × 1500 = 96,000 bytes), then limits the average send rate to the configured value. Outgoing packets are sent in batches; if a batch must wait for tokens, it is held and rescheduled rather than making a shared packet-processing worker sleep. A batch larger than the bucket's burst capacity cannot be reserved and is sent immediately, so configure workloads to keep batches within that capacity if strict limiting is required.
+
+```go
+sess.SetRateLimit(256 * 1024) // limit this session to 256 KiB/s
+sess.SetRateLimit(0)           // disable rate limiting
+```
+
+### 5. Information Security
 
 Applications commonly use TLS or a similar protocol to protect application data. That protection does not extend to the KCP and FEC headers added below the application layer. kcp-go's packet protection is a separate layer: it can encrypt and, when using AEAD, authenticate each UDP payload, including those transport headers.
 
@@ -113,7 +194,7 @@ Other possible attacks on kcp-go include:
 - **[Traffic analysis](https://en.wikipedia.org/wiki/Traffic_analysis):** Packet sizes, timing, and endpoints can reveal communication patterns even when packet contents are encrypted. Multiplexing streams with [smux](https://github.com/xtaci/smux) does not eliminate traffic analysis.
 - **[Replay attack](https://en.wikipedia.org/wiki/Replay_attack):** Packet encryption does not by itself establish peer identity or guarantee application messages are processed only once. Applications that need these properties should use an authenticated protocol and implement appropriate replay protection.
 
-### 5. Packet Clocking
+### 6. Packet Clocking
 
 1. **Immediate flush on window progress or fast retransmit**: Flush pending data when acknowledgments advance the send window or trigger fast retransmission, without waiting for the next periodic update.
 2. **ACK clocking**: Flush ACKs when the pending ACK list reaches approximately one MTU's worth of ACK segments, rather than waiting for the periodic update.
@@ -123,7 +204,7 @@ Other possible attacks on kcp-go include:
 
 Ultimately, nothing is more critical in a transmission system than the clock (real-time performance).
 
-### 6. FEC Design Characteristics
+### 7. FEC Design Characteristics
 
 - Reed-Solomon encoding and decoding are performed in the outgoing and incoming packet-processing paths.
 - Data/parity ratios are configurable per session. More parity can recover more packet loss, at the cost of additional bandwidth; the overhead depends on the configured ratio.
@@ -173,6 +254,12 @@ KCP Header
 ```
 
 ## Performance
+
+The results below are historical and hardware-specific, not performance guarantees. Run `go test -run='^$' -bench .` on your target system for comparable measurements. Expand a section to see the raw output.
+
+<details>
+<summary>Linux amd64 — AMD Ryzen 9 5950X</summary>
+
 ```
 2025/11/26 11:12:51 beginning tests, encryption:salsa20, fec:10/3
 goos: linux
@@ -244,6 +331,10 @@ BenchmarkSinkSpeed1M-32                      667           1783214 ns/op        
 PASS
 ok      github.com/xtaci/kcp-go/v5      49.978s
 ```
+</details>
+
+<details>
+<summary>macOS amd64 — MacBook Pro, Intel Core i5</summary>
 
 ```
 ===
@@ -296,6 +387,10 @@ BenchmarkSinkSpeed1M-4         	     300	   5117927 ns/op	 204.88 MB/s	  310378 
 PASS
 ok  	github.com/xtaci/kcp-go	50.349s
 ```
+</details>
+
+<details>
+<summary>Linux arm — Raspberry Pi 4</summary>
 
 ```
 === Raspberry Pi 4 ===
@@ -349,6 +444,7 @@ BenchmarkSinkSpeed1M-4               100          31040703 ns/op          33.78 
 PASS
 ok      github.com/xtaci/kcp-go/v5      64.151s
 ```
+</details>
 
 
 ## Typical Flame Graph
@@ -356,15 +452,19 @@ ok      github.com/xtaci/kcp-go/v5      64.151s
 
 
 
-## Connection Termination
+## Connection Termination and Multiplexing
 
-Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP. You need a **keepalive/heartbeat mechanism** at the application level. A practical example is to use a **multiplexing** protocol over the session, such as [smux](https://github.com/xtaci/smux) (which has an embedded keepalive mechanism).
+KCP does not define TCP-style connection setup and teardown messages such as **SYN/FIN/RST**. Use an application-level keepalive/heartbeat when needed. [smux](https://github.com/xtaci/smux) can multiplex logical streams over a KCP session and provides its own keepalive mechanism.
+
+Multiplexing also affects congestion behavior. KCP's congestion control is maintained per session, so logical streams carried by one smux connection share that session's congestion window and loss response. Opening a separate KCP session for every logical stream creates independent congestion controllers; over the same bottleneck, these sessions may compete with one another and collectively use more bandwidth. smux itself is not a network congestion controller: it multiplexes streams over the KCP transport.
+
+The trade-off is that KCP delivers an ordered byte stream. Packet loss can therefore delay delivery to all smux streams sharing that session, even if some streams' data arrived successfully. Multiplex streams over one session when they should share transport and congestion state; use separate sessions when isolation is more important, while accounting for their independent congestion behavior.
 
 ## FAQ
 
 **Q: I'm handling thousands of connections on my server, and CPU utilization is high.**
 
-**A:** Profile the workload and consider separating KCP traffic into a dedicated service. If the session is currently using a short update interval (for example, 10 ms), increasing it (for example, to 40 ms with `conn.SetNoDelay(1, 40, 1, 1)`) may reduce scheduling and update overhead, at the cost of response latency. The default KCP interval is 100 ms, so 40 ms is not an increase over the default.
+**A:** Profile the workload and consider separating KCP traffic into a dedicated service. If the session is currently using a short update interval (for example, 10 ms), increasing it (for example, to 40 ms) may reduce scheduling and update overhead, at the cost of response latency. The default KCP interval is 100 ms, so 40 ms is not an increase over the default. `SetNoDelay` takes `(nodelay, intervalMs, fastResend, disableCongestionControl)`; for example, `conn.SetNoDelay(1, 40, 1, 0)` keeps congestion control enabled. Disabling congestion control can increase congestion on shared networks and should only be done when appropriate for the deployment.
 
 **Q: When should I enable FEC?**
 
