@@ -167,15 +167,15 @@ func TestAutoTunePop(t *testing.T) {
 	assert.Equal(t, 1, tune.FindPeriod(true))
 }
 
-// TestAutoTuneRingBufferWrapAround tests that the ring buffer correctly handles
-// wrap-around scenarios and still finds the correct period after many overwrites.
+// TestAutoTuneRingBufferWrapAround tests that the ring buffer handles
+// wrap-around and period detection returns a valid result after many overwrites.
 func TestAutoTuneRingBufferWrapAround(t *testing.T) {
 	// Test with various periods after buffer wrap-around
 	testCases := []struct {
 		name           string
 		period         int  // period of the signal
 		totalSamples   int  // total samples to generate (should exceed maxAutoTuneSamples)
-		expectedPeriod int  // expected period to be found
+		expectedPeriod int  // expected period shown in diagnostic output
 		bit            bool // which bit's period to find
 	}{
 		{"Period3_2xBuffer", 3, maxAutoTuneSamples * 2, 3, true},
@@ -210,9 +210,8 @@ func TestAutoTuneRingBufferWrapAround(t *testing.T) {
 			t.Logf("Period=%d, TotalSamples=%d, Found=%d, Expected=%d",
 				tc.period, tc.totalSamples, foundPeriod, tc.expectedPeriod)
 
-			// The found period should match the expected period
-			// Note: Due to how period is calculated (right edge - left edge),
-			// the actual value depends on the signal pattern
+			// This test checks for a valid result; exact periods are checked by
+			// TestAutoTuneExactPeriodAfterWrap.
 			assert.True(t, foundPeriod > 0, "Should find a valid period")
 		})
 	}

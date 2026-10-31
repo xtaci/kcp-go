@@ -1,14 +1,12 @@
 <img src="assets/kcp-go.png" alt="kcp-go" height="100px" />
 
 
-[![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Go Report Card][5]][6] [![Coverage Status][7]][8] [![Sourcegraph][13]][14]
+[![GoDoc][1]][2] [![Powered][9]][10] [![MIT licensed][11]][12] [![Build Status][3]][4] [![Coverage Status][7]][8] [![Sourcegraph][13]][14]
 
 [1]: https://godoc.org/github.com/xtaci/kcp-go?status.svg
 [2]: https://pkg.go.dev/github.com/xtaci/kcp-go/v5
 [3]: https://img.shields.io/github/created-at/xtaci/kcp-go
 [4]: https://img.shields.io/github/created-at/xtaci/kcp-go
-[5]: https://goreportcard.com/badge/github.com/xtaci/kcp-go
-[6]: https://goreportcard.com/report/github.com/xtaci/kcp-go
 [7]: https://codecov.io/gh/xtaci/kcp-go/branch/master/graph/badge.svg
 [8]: https://codecov.io/gh/xtaci/kcp-go
 [9]: https://img.shields.io/badge/KCP-Powered-blue.svg
@@ -45,7 +43,7 @@
 
 **kcp-go** is a **Reliable-UDP** library for [golang](https://golang.org/).
 
-This library provides **smooth, resilient, ordered, error-checked, and anonymous** stream delivery over **UDP** packets. It has been deployed across millions of devices—from low-end MIPS routers to high-end servers—across various applications, including **online games, live broadcasting, file synchronization, and network acceleration**.
+This library provides a reliable, ordered byte-stream transport over **UDP**. Optional FEC and packet encryption are available. Encryption can hide packet contents, but random per-packet nonces do not make network traffic anonymous: endpoints, packet sizes, timing, and traffic volume may still be observable. It has been deployed across a range of devices and applications, including **online games, live broadcasting, file synchronization, and network acceleration**.
 
 [Latest Release](https://github.com/xtaci/kcp-go/releases)
 
@@ -53,12 +51,12 @@ This library provides **smooth, resilient, ordered, error-checked, and anonymous
 
 1. Designed for **latency-sensitive** scenarios.
 2. **Cache-friendly** and **memory-optimized** design, offering an extremely **high-performance** core.
-3. Handles **>5K concurrent connections** on a single commodity server.
-4. Compatible with [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener), serving as a drop-in replacement for [net.TCPConn](https://golang.org/pkg/net/#TCPConn).
+3. Designed to handle thousands of concurrent connections, depending on workload and server resources.
+4. Implements [net.Conn](https://golang.org/pkg/net/#Conn) and [net.Listener](https://golang.org/pkg/net/#Listener); its API resembles TCP, but its transport semantics differ.
 5. [FEC (Forward Error Correction)](https://en.wikipedia.org/wiki/Forward_error_correction) support using [Reed-Solomon Codes](https://en.wikipedia.org/wiki/Reed%E2%80%93Solomon_error_correction).
-6. Packet-level encryption support for [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm), [3DES](https://en.wikipedia.org/wiki/Triple_DES), [Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher)), [Cast5](https://en.wikipedia.org/wiki/CAST-128), [Salsa20](https://en.wikipedia.org/wiki/Salsa20), etc., in [CFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)) mode, generating completely anonymous packets.
-7. [AEAD](https://en.wikipedia.org/wiki/Authenticated_encryption) packet encryption support.
-8. Only **a fixed number of goroutines** are created for the entire server application, with **context switching** costs between goroutines taken into consideration.
+6. Packet encryption support for [AES](https://en.wikipedia.org/wiki/Advanced_Encryption_Standard), [TEA](https://en.wikipedia.org/wiki/Tiny_Encryption_Algorithm), [3DES](https://en.wikipedia.org/wiki/Triple_DES), [Blowfish](https://en.wikipedia.org/wiki/Blowfish_(cipher)), [Cast5](https://en.wikipedia.org/wiki/CAST-128), [Salsa20](https://en.wikipedia.org/wiki/Salsa20), and other algorithms. The legacy block-cipher mode uses [CFB](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)); not all supported algorithms use CFB.
+7. Supports packet encryption with [AEAD](https://en.wikipedia.org/wiki/Authenticated_encryption).
+8. A shared timer scheduler drives KCP updates; goroutines for socket reading and packet processing depend on the connection and transport setup.
 9. Compatible with [skywind3000's](https://github.com/skywind3000) C version, with various improvements.
 10. Platform-specific optimizations: [sendmmsg](http://man7.org/linux/man-pages/man2/sendmmsg.2.html) and [recvmmsg](http://man7.org/linux/man-pages/man2/recvmmsg.2.html) for Linux.
 
@@ -75,7 +73,7 @@ For complete documentation, see the associated [Godoc](https://pkg.go.dev/github
 
 ### 1. Slice vs. Container/List
 
-`kcp.flush()` loops through the send queue for retransmission checking every 20 ms.
+The KCP flush path scans the in-flight send buffer to find segments that need transmission or retransmission. The ring-buffer representation supports sequential traversal with good locality; the scan cost depends on the number of in-flight segments and how often the session is updated.
 
 I wrote a benchmark comparing sequential loops through a *slice* and a *container/list* [here](https://gist.github.com/xtaci/ac2f13f0108494d874b25551134e4c9c):
 
@@ -84,11 +82,11 @@ BenchmarkLoopSlice-4   	2000000000	         0.39 ns/op
 BenchmarkLoopList-4    	100000000	        54.6 ns/op
 ```
 
-The list structure introduces **heavy cache misses** compared to the slice, which offers better **locality**. For 5,000 connections with a 32-window size and a 20 ms interval, using a slice costs 6 μs (0.03% CPU) per `kcp.flush()`, whereas using a list costs 8.7 ms (43.5% CPU).
+The list structure introduces **heavy cache misses** compared to the slice, which offers better **locality**. In the linked benchmark, for 5,000 connections with a 32-window size and a 20 ms update interval, using a slice costs 6 μs (0.03% CPU) per `kcp.flush()`, whereas using a list costs 8.7 ms (43.5% CPU). These figures are benchmark-specific; actual cost depends on workload and hardware.
 
-### 2. Timing Accuracy vs. Syscall clock_gettime
+### 2. Timing Accuracy and RTT Estimation
 
-Timing is **critical** for the **RTT estimator**. Inaccurate timing leads to false retransmissions in KCP, but calling `time.Now()` costs 42 cycles (10.5 ns on a 4 GHz CPU, 15.6 ns on my MacBook Pro 2.7 GHz).
+Timing is **critical** for the **RTT estimator**. Inaccurate timing can cause premature or delayed retransmissions. KCP uses `currentMs()`, which derives elapsed monotonic time from a package reference point. The `time.Now()` numbers below are measurements from a historical benchmark on the listed hardware, not portable performance guarantees.
 
 The benchmark for `time.Now()` is [here](https://gist.github.com/xtaci/f01503b9167f9b520b8896682b67e14d):
 
@@ -96,40 +94,42 @@ The benchmark for `time.Now()` is [here](https://gist.github.com/xtaci/f01503b91
 BenchmarkNow-4         	100000000	        15.6 ns/op
 ```
 
-In kcp-go, after each `kcp.output()` function call, the current clock time is updated upon return. For a single `kcp.flush()` operation, the current time is queried from the system once. For 5,000 connections, this costs 5000 × 15.6 ns = 78 μs (a fixed cost when no packets need to be sent). For 10 MB/s data transfer with a 1400 MTU, `kcp.output()` is called approximately 7,500 times, costing 117 μs for `time.Now()` per second.
+The number of clock reads varies with the flush path: KCP samples time while checking retransmission deadlines and when preparing transmissions. The `time.Now()` benchmark above is historical and should not be treated as a measurement of current `currentMs()` cost or as a per-flush cost estimate.
 
 ### 3. Memory Management
 
-Primary memory allocation is performed from a global buffer pool, `xmit.Buf`. In kcp-go, when bytes need to be allocated, they are obtained from this pool, which returns a fixed-capacity 1500 bytes (mtuLimit). The rx queue, tx queue, and FEC queue all receive bytes from this pool and return them after use to prevent unnecessary zeroing of bytes. The pool mechanism maintains a high watermark for slice objects, allowing these in-flight objects to survive periodic garbage collection while also being able to return memory to the runtime when idle.
+Many packet buffers are obtained from the package-wide `defaultBufferPool`, which provides buffers with a fixed capacity of 1500 bytes (`mtuLimit`). Buffers are returned to the pool when they are no longer needed, reducing repeated allocations. The pool uses `sync.Pool`, so the Go runtime may discard pooled buffers during garbage collection; reuse and retention are not guaranteed.
 
 ### 4. Information Security
 
-kcp-go ships with built-in packet encryption powered by various block encryption algorithms and operates in [Cipher Feedback Mode](https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Cipher_Feedback_(CFB)). For each packet to be sent, the encryption process begins by encrypting a [nonce](https://en.wikipedia.org/wiki/Cryptographic_nonce) from the [system entropy](https://en.wikipedia.org/wiki//dev/random), ensuring that encryption of the same plaintext never produces the same ciphertext.
+Applications commonly use TLS or a similar protocol to protect application data. That protection does not extend to the KCP and FEC headers added below the application layer. kcp-go's packet protection is a separate layer: it can encrypt and, when using AEAD, authenticate each UDP payload, including those transport headers.
 
-The contents of packets are completely anonymous with encryption, including the headers (FEC, KCP), checksums, and payload. Note that regardless of which encryption method you choose at the upper layer, if you disable encryption, the transmission will be insecure because the header is ***plaintext*** and susceptible to tampering, such as jamming the *sliding window size*, *round-trip time*, *FEC properties*, and *checksums*. `AES-128` is recommended for minimal encryption, as modern CPUs feature [AES-NI](https://en.wikipedia.org/wiki/AES_instruction_set) instructions and perform better than `salsa20` (see the table above).
+Packet integrity depends on the selected mode. When a non-AEAD `BlockCrypt` is configured, kcp-go adds a CRC-32 checksum; if an encryption cipher is enabled, the checksum is carried within the encrypted packet. CRC-32 can detect many accidental transmission errors, but it is not a message authentication code: it is unkeyed, and CRC-32's linearity combined with the malleability of modes such as CFB means an active attacker may be able to modify packets without detection. Do not rely on non-AEAD modes for cryptographic integrity or authentication. AEAD modes authenticate each packet's encrypted contents and are recommended when protection against deliberate packet modification is required. AEAD packet authentication proves possession of the configured key; it does not by itself establish a peer's identity, replace secure key management, or guarantee application-level replay protection.
+
+Packet encryption protects packet contents, including FEC and KCP headers, but does not hide traffic metadata such as endpoints, packet sizes, timing, or traffic volume. A random nonce for each packet helps prevent repeated encryption inputs from producing repeated ciphertext, but it does not conceal this metadata or provide anonymity. Without packet encryption, packet contents are transmitted in plaintext. Algorithm performance varies by hardware and workload, so benchmark the available options in your deployment rather than assuming one cipher is always faster.
 
 Other possible attacks on kcp-go include:
 
-- **[Traffic analysis](https://en.wikipedia.org/wiki/Traffic_analysis):** Data flow on specific websites may exhibit patterns during data exchange. This type of eavesdropping has been mitigated by adopting [smux](https://github.com/xtaci/smux) to mix data streams and introduce noise. While a perfect solution has not yet emerged, theoretically, shuffling/mixing messages on a larger-scale network may mitigate this problem.
-- **[Replay attack](https://en.wikipedia.org/wiki/Replay_attack):** Since asymmetric encryption has not been introduced into kcp-go, capturing packets and replaying them on a different machine is possible. Note that hijacking the session and decrypting the contents is still *impossible*. Upper layers should use an asymmetric encryption system to guarantee the authenticity of each message (to process each message exactly once), such as HTTPS/OpenSSL/LibreSSL. Signing requests with private keys can eliminate this type of attack.
+- **[Traffic analysis](https://en.wikipedia.org/wiki/Traffic_analysis):** Packet sizes, timing, and endpoints can reveal communication patterns even when packet contents are encrypted. Multiplexing streams with [smux](https://github.com/xtaci/smux) does not eliminate traffic analysis.
+- **[Replay attack](https://en.wikipedia.org/wiki/Replay_attack):** Packet encryption does not by itself establish peer identity or guarantee application messages are processed only once. Applications that need these properties should use an authenticated protocol and implement appropriate replay protection.
 
 ### 5. Packet Clocking
 
-1. **Immediate FastACK**: Send immediately after `fastack` is triggered, without waiting for the fixed `interval`.
-2. **Immediate ACK**: Send immediately after accumulating ACKs that fill a full MTU packet, also without waiting for the `interval`.
+1. **Immediate flush on window progress or fast retransmit**: Flush pending data when acknowledgments advance the send window or trigger fast retransmission, without waiting for the next periodic update.
+2. **ACK clocking**: Flush ACKs when the pending ACK list reaches approximately one MTU's worth of ACK segments, rather than waiting for the periodic update.
    In high-speed networks, this acts as a higher-frequency "clock signal," potentially boosting unidirectional transmission speed by approximately 6x. For instance, if a batch takes only 1.5ms to process on a high-speed link but still adheres to a fixed 10ms transmission cycle, the actual throughput would be limited to 1/6 of the potential.
-3. **Pacing Mechanism**: Introduced a pacing clock to prevent burst congestion where data piles up in the kernel when `snd_wnd` is large, causing the kernel to drop packets. While difficult to implement in user space, a usable version has been achieved, allowing user-space echo to stabilize above 100MB/s.
-4. **Data Structure Optimization**: Optimized data structures (e.g., `snd_buf` ringbuffer) to ensure good cache coherency. Queues must not be too long; otherwise, traversal costs introduce extra latency. In high-speed networks, the buffer corresponding to BDP should be kept smaller to minimize latency from data structures. Note that the current KCP structure has O(n) complexity for RTO; changing it to O(1) would require significant refactoring.
+3. **Packet batching**: The session packet-processing path batches outgoing packets and uses platform-specific batched I/O where available. This can reduce syscall overhead; it is not a packet pacing mechanism.
+4. **Data structures**: The `snd_buf` ring buffer supports cache-friendly sequential traversal. Retransmission checks are O(n) in the number of in-flight segments, so very large windows can increase per-update work.
 
 Ultimately, nothing is more critical in a transmission system than the clock (real-time performance).
 
 ### 6. FEC Design Characteristics
 
-- Reed-Solomon based encoder/decoder lives in the `postProcess`/`packetInput` path, so parity shards are generated and consumed without extra goroutines or lock contention.
-- Data/parity ratios are configurable per session, letting operators trade ~20–30% bandwidth overhead for lower tail latency on lossy or long-haul links.
-- Parity shards are produced from buffer-pool-backed slices, which avoids repeated allocations and keeps GC pressure flat even during multi-Gbps transfers.
-- Decoding favors single-pass recovery: as soon as enough shards arrive, the original packets are reconstructed and pushed into `KCP.Input`, minimizing reordering and retransmission storms.
-- When combined with encryption, FEC headers stay protected, preventing traffic shapers from inferring recovery patterns or downgrading throughput.
+- Reed-Solomon encoding and decoding are performed in the outgoing and incoming packet-processing paths.
+- Data/parity ratios are configurable per session. More parity can recover more packet loss, at the cost of additional bandwidth; the overhead depends on the configured ratio.
+- Encoder and decoder buffers are reused where possible to reduce allocations; actual memory use depends on traffic and configuration.
+- When enough shards arrive, the decoder attempts to reconstruct missing data packets and passes recovered packets to KCP for normal processing.
+- When packet encryption is enabled, FEC headers are included in the encrypted packet. AEAD authenticates packet contents; non-AEAD modes with CRC-32 do not provide cryptographic authentication.
 
 ## Specification
 
@@ -137,20 +137,23 @@ Ultimately, nothing is more critical in a transmission system than the clock (re
 
 ```
 NONCE:
-  16bytes cryptographically secure random number, nonce changes for every packet.
+  Per-packet nonce; its size depends on the encryption mode (16 bytes for
+  the legacy mode, or the configured AEAD nonce size).
   
 CRC32:
-  CRC-32 checksum of data using the IEEE polynomial
+  IEEE CRC-32 checksum used by non-AEAD modes; AEAD uses an authentication tag.
  
 FEC TYPE:
   typeData = 0xF1
   typeParity = 0xF2
   
 FEC SEQID:
-  monotonically increasing in range: [0, (0xffffffff/shardSize) * shardSize - 1]
+  Increments modulo (0xffffffff/shardSize) * shardSize; valid IDs are in
+  [0, (0xffffffff/shardSize) * shardSize - 1].
   
 SIZE:
-  The size of KCP frame plus 2
+  Number of bytes from the 2-byte SIZE field through the end of the packet:
+  the KCP frame plus 2 bytes. The payload after the SIZE field is SIZE-2 bytes.
 
 KCP Header
 +------------------------------+
@@ -359,17 +362,17 @@ Control messages like **SYN/FIN/RST** in TCP **are not defined** in KCP. You nee
 
 ## FAQ
 
-**Q: I'm handling >5K connections on my server, and the CPU utilization is very high.**
+**Q: I'm handling thousands of connections on my server, and CPU utilization is high.**
 
-**A:** A standalone `agent` or `gate` server for running kcp-go is recommended, not only to reduce CPU utilization but also to improve the **precision** of RTT measurements (timing), which indirectly affects retransmission. Increasing the update `interval` with `SetNoDelay`, such as `conn.SetNoDelay(1, 40, 1, 1)`, will dramatically reduce system load but may lower performance.
+**A:** Profile the workload and consider separating KCP traffic into a dedicated service. If the session is currently using a short update interval (for example, 10 ms), increasing it (for example, to 40 ms with `conn.SetNoDelay(1, 40, 1, 1)`) may reduce scheduling and update overhead, at the cost of response latency. The default KCP interval is 100 ms, so 40 ms is not an increase over the default.
 
 **Q: When should I enable FEC?**
 
-**A:** Forward error correction is critical for long-distance transmission because packet loss incurs a significant time penalty. In the complex packet routing networks of the modern world, round-trip time-based loss checks are not always efficient. The significant deviation of RTT samples over long distances typically leads to a larger RTO value in typical RTT estimators, which slows down transmission.
+**A:** FEC can recover some packet losses without waiting for retransmission, which may reduce latency on lossy links. It adds bandwidth and processing overhead and cannot recover losses beyond the configured parity capacity. Benchmark with representative loss patterns and tune the data/parity ratio for your workload.
 
 **Q: Should I enable encryption?**
 
-**A:** Yes, for the security of the protocol, even if the upper layer has encryption.
+**A:** If you need protection for KCP/FEC headers in addition to application data, configure packet encryption. Prefer AEAD when UDP-packet integrity and authentication are required. If the application already uses TLS, packet encryption is not a substitute for TLS; whether to enable the additional layer depends on your threat model and overhead requirements.
 
 ## Who is using this?
 

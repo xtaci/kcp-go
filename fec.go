@@ -55,7 +55,7 @@ const (
 	typeData           = 0xf1              // FEC packet type: data shard
 	typeParity         = 0xf2              // FEC packet type: parity shard
 	typeOOB            = 0xf3              // FEC packet type: out-of-band (unreliable)
-	maxShardSets       = 3                 // max concurrent shard sets before discarding old ones
+	maxShardSets       = 3                 // discard sets more than this many shard-set intervals behind the newest
 )
 
 // fecPacket is a decoded FEC packet
@@ -65,7 +65,7 @@ func (bts fecPacket) seqid() uint32 { return binary.LittleEndian.Uint32(bts) }
 func (bts fecPacket) flag() uint16  { return binary.LittleEndian.Uint16(bts[4:]) }
 func (bts fecPacket) data() []byte  { return bts[6:] }
 
-// shardHeap holds a set of related data shards from a peer.
+// shardHeap holds the FEC shards belonging to one shard set.
 type shardHeap struct {
 	elements []fecPacket
 	marks    map[uint32]struct{} // to avoid duplicates
@@ -115,8 +115,8 @@ type fecDecoder struct {
 	shardSet     map[uint32]*shardHeap // shardMap[initial shard id] = shardHeap
 	paws         uint32                // Protect Against Wrapped Sequence numbers
 
-	// record the latest recovered shard id
-	// the shards smaller than this one will be discarded
+	// newestShardId tracks the newest shard set observed; sufficiently older
+	// sets are discarded.
 	newestShardId uint32
 
 	// caches
@@ -166,7 +166,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		dec.autoTune.Sample(false, in.seqid())
 	}
 
-	// check seqid < paws to avoid invalid packets
+	// Reject sequence IDs at or beyond paws.
 	if in.seqid() >= dec.paws {
 		return nil
 	}
@@ -428,7 +428,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 		// Whether to generate parity depends on the interval between the
 		// latest two data packets.
 		//
-		// If the interval exceeds rto, treat the data as non-contiguous and
+		// If the interval is at least rto, treat the data as non-contiguous and
 		// skip parity generation to avoid unhelpful parity packets.
 		//
 		// Even when parity generation is skipped, advance seqid to preserve

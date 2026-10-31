@@ -39,7 +39,7 @@ type timedFunc struct {
 }
 
 // timedFuncHeap is a min-heap by deadline. It is typed rather than built on
-// container/heap, whose any-typed Push and Pop allocate for every task.
+// container/heap, whose any-typed Push and Pop can allocate for each task.
 type timedFuncHeap []timedFunc
 
 func (h timedFuncHeap) Len() int { return len(h) }

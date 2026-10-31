@@ -23,8 +23,8 @@
 package kcp
 
 const (
-	RINGBUFFER_MIN = 8    // minimum ring buffer capacity
-	RINGBUFFER_EXP = 1024 // growth threshold: below this, double; at or above this, grow by 10%
+	RINGBUFFER_MIN = 8    // minimum backing-slice length
+	RINGBUFFER_EXP = 1024 // backing-slice growth threshold: double below; add 10% at or above
 )
 
 // RingBuffer is a generic ring (circular) buffer that supports dynamic resizing.
@@ -35,8 +35,9 @@ type RingBuffer[T any] struct {
 	elements []T // Underlying slice storing elements in circular fashion
 }
 
-// NewRingBuffer creates a new ring buffer with the specified initial capacity.
-// If the provided size is <= 8, it defaults to 8.
+// NewRingBuffer creates a ring buffer with a backing slice of the specified
+// size. One slot is reserved to distinguish full from empty, so MaxLen is
+// size-1. Sizes of 8 or less use a backing slice of length 8.
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
 	if size <= RINGBUFFER_MIN {
 		size = RINGBUFFER_MIN // Ensure a minimum size
@@ -197,21 +198,23 @@ func (r *RingBuffer[T]) IsEmpty() bool {
 	return r.head == r.tail
 }
 
-// MaxLen returns the maximum capacity of the ring buffer.
+// MaxLen returns the maximum number of elements the ring can hold. One backing
+// slice slot is reserved to distinguish full from empty.
 func (r *RingBuffer[T]) MaxLen() int {
 	return len(r.elements) - 1
 }
 
-// IsFull returns true if the ring buffer is full (tail + 1 == head).
+// IsFull returns true if advancing tail by one slot modulo the backing-slice
+// length would make it equal to head.
 func (r *RingBuffer[T]) IsFull() bool {
 	return (r.tail+1)%len(r.elements) == r.head
 }
 
-// grow increases the ring buffer's capacity when full.
+// grow increases the ring buffer's backing-slice length when full.
 // Growth policy:
-//   - If current size < RINGBUFFER_MIN : grow to RINGBUFFER_MIN
-//   - If the size is below RINGBUFFER_EXP: double it
-//   - If the size is at or above RINGBUFFER_EXP: increase it by 10% (rounded up)
+//   - If the backing-slice length is below RINGBUFFER_MIN: grow to RINGBUFFER_MIN
+//   - If it is below RINGBUFFER_EXP: double it
+//   - If it is at or above RINGBUFFER_EXP: increase it by 10% (rounded up)
 func (r *RingBuffer[T]) grow() {
 	currentLength := r.Len()
 	currentSize := len(r.elements)

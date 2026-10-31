@@ -112,7 +112,7 @@ func (r *rngAES) updateSeed() {
 	r.count = 0
 }
 
-// Read fills p with random data using AES encryption.
+// Read returns up to 16 pseudorandom bytes generated with AES.
 func (r *rngAES) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil

@@ -29,13 +29,14 @@
 // KCP Output      (Reliable Transport Layer)     Reader/Listener (Reception Queue)
 //   |                                               |
 //   v                                               v
-// FEC Encoding    (Forward Error Correction)     Decryption      (Data Security)
+// FEC Encoding    (Forward Error Correction)     Decryption/authentication
 //   |                                               |
 //   v                                               v
-// CRC32 Checksum  (Error Detection)              CRC32 Checksum  (Error Detection)
+// CFB: CRC32      (Error Detection)              CFB: CRC32 verification
+// AEAD: authentication                           AEAD: authentication
 //   |                                               |
 //   v                                               v
-// Encryption      (Data Security)                FEC Decoding    (Forward Error Correction)
+// Encryption      (CFB or AEAD)                  FEC Decoding    (Forward Error Correction)
 //   |                                               |
 //   v                                               v
 // TxQueue         (Transmission Queue)           KCP Input       (Reliable Transport Layer)
@@ -63,13 +64,13 @@ import (
 
 // Session-layer constants
 const (
-	// 16-bytes nonce for each packet
+	// 16-byte nonce for each packet using a legacy block cipher
 	nonceSize = 16
 
-	// 4-bytes CRC32 checksum per packet
+	// 4-byte CRC32 checksum per packet using a legacy block cipher
 	crcSize = 4
 
-	// overall crypto header size: nonce + CRC32
+	// legacy block-cipher header size: nonce + CRC32
 	cryptHeaderSize = nonceSize + crcSize
 
 	// maximum packet size (Ethernet MTU)
@@ -81,12 +82,11 @@ const (
 	// accept backlog: max pending connections for Listener
 	acceptBacklog = 128
 
-	// devBacklog: channel buffer size for post-processing pipeline
+	// devBacklog: maximum queued requests in the post-processing pipeline
 	devBacklog = 2048
 
-	// max latency for consecutive FEC encoding (ms).
-	// If the interval between two data packets exceeds this,
-	// parity generation is skipped.
+	// Maximum interval between consecutive FEC data packets (ms) for parity
+	// generation. If the interval meets or exceeds this, parity is skipped.
 	maxFECEncodeLatency = 500
 
 	// max number of packets batched in a single sendmmsg/writev call
@@ -914,9 +914,10 @@ func (s *UDPSession) notifyWriteError(err error) {
 // -----------------------------------------------------------------------
 
 // packetInput is the entry point for incoming packets.
-// It handles decryption and CRC32 verification before passing data to kcpInput.
+// It handles decryption and integrity verification before passing data to
+// kcpInput. CFB mode uses CRC32; AEAD mode verifies its authentication tag.
 //
-// Pipeline: Network -> [Decrypt] -> [CRC32] -> kcpInput
+// Pipeline: Network -> [Decrypt and verify] -> kcpInput
 func (s *UDPSession) packetInput(data []byte) {
 	switch block := s.block.(type) {
 	case nil:

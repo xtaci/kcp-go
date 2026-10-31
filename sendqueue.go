@@ -24,9 +24,10 @@ package kcp
 
 import "sync"
 
-// sendQueue holds a session's packets waiting for post processing. It
-// allocates only while packets are queued, so an idle session costs nothing,
-// whereas a channel holding devBacklog requests costs 64 KB per session.
+// sendQueue holds a session's packets waiting for post processing. It allocates
+// its slice on demand and retains at most sendQueueKeep slots after draining,
+// whereas a channel holding devBacklog requests uses about 64 KB per session
+// on 64-bit platforms.
 // sendQueueKeep is the buffer a drained queue keeps for the next packets.
 const sendQueueKeep = 64
 

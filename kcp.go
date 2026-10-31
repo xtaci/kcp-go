@@ -53,10 +53,10 @@ const (
 	IKCP_MTU_DEF = 1400 // default MTU (bytes, not including UDP/IP header)
 
 	// Protocol parameters
-	IKCP_ACK_FAST    = 3      // fast retransmit trigger threshold (duplicate ACK count)
+	IKCP_ACK_FAST    = 3      // number of later ACKs needed to trigger fast retransmit
 	IKCP_INTERVAL    = 100    // default flush interval (ms)
 	IKCP_OVERHEAD    = 24     // per-segment header size: conv(4) + cmd(1) + frg(1) + wnd(2) + ts(4) + sn(4) + una(4) + len(4)
-	IKCP_DEADLINK    = 20     // max retransmissions before declaring dead link
+	IKCP_DEADLINK    = 20     // maximum transmissions before declaring the link dead
 	IKCP_THRESH_INIT = 2      // initial slow-start threshold (packets)
 	IKCP_THRESH_MIN  = 2      // minimum slow-start threshold (packets)
 	IKCP_PROBE_INIT  = 500    // initial window probe timeout (ms)
@@ -101,10 +101,10 @@ const (
 	IKCP_LOG_ALL        = IKCP_LOG_OUTPUT_ALL | IKCP_LOG_INPUT_ALL | IKCP_LOG_SEND | IKCP_LOG_RECV
 )
 
-// monotonic reference time point
+// refTime is the monotonic reference time point for KCP timestamps.
 var refTime time.Time = time.Now()
 
-// currentMs returns current elapsed monotonic milliseconds since program startup
+// currentMs returns elapsed monotonic milliseconds since package initialization.
 func currentMs() uint32 { return uint32(time.Since(refTime) / time.Millisecond) }
 
 // output_callback receives packet data emitted by KCP.
@@ -203,7 +203,7 @@ type KCP struct {
 	snd_nxt uint32 // next sequence number to send
 	rcv_nxt uint32 // next expected sequence number to receive
 
-	// Congestion control (RFC 5681 / RFC 6937)
+	// Congestion control
 	ssthresh           uint32 // slow-start threshold (packets)
 	rx_rttvar, rx_srtt int32  // RTT variance and smoothed RTT (ms), per RFC 6298
 	rx_rto, rx_minrto  uint32 // retransmission timeout and its lower bound (ms)
@@ -216,7 +216,7 @@ type KCP struct {
 	// Window probing
 	probe      uint32 // probe flags (IKCP_ASK_SEND / IKCP_ASK_TELL)
 	ts_probe   uint32 // timestamp for next window probe (ms)
-	probe_wait uint32 // current probe timeout (ms), doubles on each retry
+	probe_wait uint32 // current probe timeout (ms), increases on each retry
 
 	// Timers and scheduling
 	interval uint32 // flush interval (ms)
@@ -225,7 +225,7 @@ type KCP struct {
 	updated  uint32 // whether Update() has been called at least once
 
 	// Reliability
-	dead_link  uint32 // max retransmit count before link is considered dead
+	dead_link  uint32 // transmission count at which the link is considered dead
 	fastresend int32  // fast retransmit trigger count, 0 = disabled
 	nocwnd     int32  // 1 = disable congestion control
 	stream     int32  // 1 = stream mode (no message boundaries), 0 = message mode
@@ -451,7 +451,8 @@ func (kcp *KCP) Send(buffer []byte) int {
 }
 
 // update_ack updates the smoothed RTT and RTO based on a new RTT sample.
-// Algorithm follows RFC 6298: Computing TCP's Retransmission Timer.
+// The estimator is based on RFC 6298, with reduced weight for RTT samples well
+// below the current smoothed RTT.
 func (kcp *KCP) update_ack(rtt int32) {
 	var rto uint32
 	if kcp.rx_srtt == 0 {
@@ -976,8 +977,8 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 
 	// cwnd update
 	if kcp.nocwnd == 0 {
-		// Update ssthresh after fast retransmit.
-		// Rate halving per RFC 6937: ssthresh = inflight / 2
+		// Update ssthresh after fast or early retransmit.
+		// Reduce the slow-start threshold to half the inflight window.
 		if change > 0 {
 			inflight := kcp.snd_nxt - kcp.snd_una
 			kcp.ssthresh = max(inflight/2, IKCP_THRESH_MIN)
@@ -1021,9 +1022,9 @@ func (kcp *KCP) makeSpace(buffer, ptr []byte, space int) []byte {
 
 // (deprecated)
 //
-// Update advances the protocol state. Use Check to determine when to call it
-// again if Input or Send is not being called. Internal timestamps are in
-// milliseconds.
+// Update advances the protocol state and flushes pending data. Call it
+// periodically; use Check to determine when the next call is due. Internal
+// timestamps are in milliseconds.
 func (kcp *KCP) Update() {
 	var slap int32
 
@@ -1051,9 +1052,9 @@ func (kcp *KCP) Update() {
 
 // (deprecated)
 //
-// Check determines when to call Update if Input or Send is not being called.
-// Scheduling updates this way avoids unnecessary calls and can help manage
-// large numbers of KCP connections.
+// Check returns the elapsed-millisecond timestamp when Update should next be
+// called. Scheduling updates this way avoids unnecessary calls and can help
+// manage large numbers of KCP connections.
 func (kcp *KCP) Check() uint32 {
 	current := currentMs()
 	ts_flush := kcp.ts_flush

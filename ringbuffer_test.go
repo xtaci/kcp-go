@@ -180,12 +180,13 @@ func TestRingBufferGrow(t *testing.T) {
 		}
 	}
 
-	// Push to 1024
+	// The 1024th element grows the backing slice from 1024 to
+	// 1024+ceil(1024/10)=1127 slots, for a usable capacity of 1126.
 	for i := pushCount; i < 1024; i++ {
 		r.Push(i)
 	}
 
-	// Check that capacity grows by 10% after reaching 1024.
+	// Another push fits without further growth.
 	r.Push(1)
 	if r.MaxLen() != 1126 {
 		t.Errorf("expected capacity to be 1126, got %d", r.MaxLen())
