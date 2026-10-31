@@ -22,10 +22,12 @@
 
 //go:build !debug
 
-// if build tag debug is not set, debugLog is a no-op eliminated at compile time
+// When the debug build tag is not set, debugLog is a no-op and guarded calls
+// can be eliminated at compile time.
 package kcp
 
 func (kcp *KCP) debugLog(logtype KCPLogType, args ...any) {}
 
-// kcpTrace guards debugLog calls, so their arguments are not built when off.
+// kcpTrace lets callers skip debugLog and avoid building its arguments when
+// debug logging is disabled.
 const kcpTrace = false

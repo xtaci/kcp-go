@@ -42,18 +42,19 @@ import (
 )
 
 var (
-	// a defined initial vector
+	// A fixed initialization vector.
 	// https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation#Initialization_vector_.28IV.29
 	// https://en.wikipedia.org/wiki/Initialization_vector
-	// actually initial vector is not used in this package, we prepend a random nonce to each outgoing packets.
-	// though IV is fixed, the first 8 bytes of the encrypted data is always random.
+	// The CFB implementations use this fixed IV as their initial state. Each
+	// outgoing packet includes a random nonce, so its first 8 ciphertext bytes
+	// are randomized.
 	initialVector = []byte{167, 115, 79, 156, 18, 172, 27, 1, 164, 21, 242, 193, 252, 120, 230, 107}
 	saltxor       = `sH3CIVoF#rWLtJo6`
 )
 
 // BlockCrypt defines encryption/decryption methods for a given byte slice.
-// Notes on implementing: the data to be encrypted contains a builtin
-// nonce at the first 16 bytes
+// Notes on implementing: the data to be encrypted contains a built-in nonce
+// in its first 16 bytes.
 type BlockCrypt interface {
 	// Encrypt encrypts the whole block in src into dst.
 	// Dst and src may point at the same memory.
@@ -108,7 +109,7 @@ func NewAEADCrypt(aead cipher.AEAD) BlockCrypt {
 }
 
 // NewAESGCMCrypt creates an AEAD BlockCrypt instance using AES-GCM
-// key must be either 16, 24, or 32 bytes to select
+// The key must be 16, 24, or 32 bytes to select
 // AES-128, AES-192, or AES-256.
 func NewAESGCMCrypt(key []byte) (BlockCrypt, error) {
 	block, err := aes.NewCipher(key)
@@ -269,7 +270,7 @@ type simpleXORBlockCrypt struct {
 	xortbl []byte
 }
 
-// NewSimpleXORBlockCrypt simple xor with key expanding
+// NewSimpleXORBlockCrypt creates an XOR BlockCrypt using a PBKDF2-expanded key.
 func NewSimpleXORBlockCrypt(key []byte) (BlockCrypt, error) {
 	c := new(simpleXORBlockCrypt)
 	c.xortbl = pbkdf2.Key(key, []byte(saltxor), 32, mtuLimit, sha1.New)
@@ -291,7 +292,7 @@ func (c *simpleXORBlockCrypt) Decrypt(dst, src []byte) {
 
 type noneBlockCrypt struct{}
 
-// NewNoneBlockCrypt does nothing but copying
+// NewNoneBlockCrypt returns a BlockCrypt that copies data unchanged.
 func NewNoneBlockCrypt(key []byte) (BlockCrypt, error) {
 	return new(noneBlockCrypt), nil
 }

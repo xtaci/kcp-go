@@ -117,7 +117,7 @@ func (tune *autoTune) FindPeriod(bit bool) int {
 	for ; idx < len(sorted); idx++ {
 		if lastPulse.seq+1 == sorted[idx].seq { // continuous sequence
 			if lastPulse.bit != bit && sorted[idx].bit == bit { // edge found
-				leftEdge = idx // mark left edge(the changed bit position)
+				leftEdge = idx // mark the left edge (the position where the bit changed)
 				break
 			}
 		} else {

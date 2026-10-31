@@ -94,9 +94,9 @@ var testHookBeforeArm atomic.Pointer[func()]
 // Put pushes onto a shard's heap under its lock and wakes the shard only when
 // the new task is due before everything already queued there. A shard runs
 // all tasks due within schedSlack per wakeup, outside its lock, so a task may
-// Put itself again. Each Put used to pass through a feeder goroutine and an
-// unbuffered channel and reset a timer, several thread switches per task
-// where goroutines are threads.
+// Put itself again. Previously, each Put passed through a feeder goroutine
+// and an unbuffered channel and reset a timer, causing several scheduling
+// handoffs per task.
 type TimedSched struct {
 	shards []tsShard
 	next   atomic.Uint32

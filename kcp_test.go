@@ -190,7 +190,8 @@ func TestSegmentHeap(t *testing.T) {
 	}
 }
 
-// BenchmarkDebugLog test DebugLog cost time with build tags debug on/off
+// BenchmarkDebugLog measures DebugLog overhead with debug logging enabled or
+// disabled via build tags.
 // trace log on:
 //
 //	go test -benchmem -run=^$ -bench ^BenchmarkDebugLog$ -tags debug

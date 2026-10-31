@@ -49,7 +49,7 @@ func TestRingSize(t *testing.T) {
 }
 
 func TestRingSize2(t *testing.T) {
-	// emulate a condition where head = 32， tail=31, and Len() = 63
+	// Emulate a condition where head = 32, tail = 31, and Len() = 63.
 	r := NewRingBuffer[int](64)
 	for i := range 63 {
 		r.Push(i)
@@ -185,7 +185,7 @@ func TestRingBufferGrow(t *testing.T) {
 		r.Push(i)
 	}
 
-	// Make sure the growth is 10% increase after 4096
+	// Check that capacity grows by 10% after reaching 1024.
 	r.Push(1)
 	if r.MaxLen() != 1126 {
 		t.Errorf("expected capacity to be 1126, got %d", r.MaxLen())

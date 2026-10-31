@@ -34,7 +34,7 @@
 // Erasures:        |    | E1 |    |    |    | E2 |
 // Syndromes:       S1, S2, ...
 // Error Locator:   Λ(x) = ...
-// Correct Erasures:Determine values for E1 (M2) and E2 (P2).
+// Correct Erasures: Determine values for E1 (M2) and E2 (P2).
 // Corrected:       | M1 | M2 | M3 | M4 | P1 | P2 |
 
 package kcp
@@ -65,7 +65,7 @@ func (bts fecPacket) seqid() uint32 { return binary.LittleEndian.Uint32(bts) }
 func (bts fecPacket) flag() uint16  { return binary.LittleEndian.Uint16(bts[4:]) }
 func (bts fecPacket) data() []byte  { return bts[6:] }
 
-// shardHeap holds a corelated set of datashards from the peers
+// shardHeap holds a set of related data shards from a peer.
 type shardHeap struct {
 	elements []fecPacket
 	marks    map[uint32]struct{} // to avoid duplicates
@@ -105,7 +105,7 @@ func (h *shardHeap) Has(sn uint32) bool {
 	return exists
 }
 
-// fecDecoder for decoding incoming packets.
+// fecDecoder decodes incoming packets.
 // It collects shards grouped by shard ID and attempts Reed-Solomon recovery
 // when enough shards have been received.
 type fecDecoder struct {
@@ -358,8 +358,8 @@ type (
 		paws         uint32 // Protect Against Wrapped Sequence numbers
 		next         uint32 // next seqid
 
-		shardCount int // count the number of datashards collected
-		maxSize    int // track maximum data length in datashard
+		shardCount int // number of data shards collected
+		maxSize    int // maximum data shard length
 
 		headerOffset  int // FEC header offset
 		payloadOffset int // FEC payload offset
@@ -401,8 +401,8 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 	return enc
 }
 
-// encodes the packet, outputs parity shards if we have collected quorum datashards
-// notice: the contents of 'ps' will be re-written in successive calling
+// encode encodes a packet and may output parity shards once enough data shards
+// have been collected. The contents of ps are overwritten on subsequent calls.
 func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 	// The header format:
 	// | FEC SEQID(4B) | FEC TYPE(2B) | SIZE (2B) | PAYLOAD(SIZE-2) |
@@ -416,30 +416,29 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 	copy(enc.shardCache[enc.shardCount][enc.payloadOffset:], b[enc.payloadOffset:])
 	enc.shardCount++
 
-	// track max datashard length
+	// Track the maximum data shard length.
 	if sz > enc.maxSize {
 		enc.maxSize = sz
 	}
 
-	// Generation of Reed-Solomon Erasure Code when we have enough datashards
+	// Generate Reed-Solomon erasure codes once enough data shards are collected.
 	now := time.Now().UnixMilli()
 	if enc.shardCount == enc.dataShards {
-		// Generate the parity shards if we collect enough datashards,
-		// the continuity is determined by the time interval between
-		// the latest 2 data packets.
+		// Generate parity shards once enough data shards are collected.
+		// Whether to generate parity depends on the interval between the
+		// latest two data packets.
 		//
-		// If the interval is larger than rto, we consider the data is non-continuous,
-		// thus we skip this parity generation to avoid useless parity packets.
+		// If the interval exceeds rto, treat the data as non-contiguous and
+		// skip parity generation to avoid unhelpful parity packets.
 		//
-		// Note that, even we skip this parity generation, we still need to
-		// increase the seqid to keep the monotonic increasing property.
+		// Even when parity generation is skipped, advance seqid to preserve
+		// sequence-number progression.
 		// This is important for the receiver to detect lost packets.
-		// see fecEncoder.skipParity()
-		// also note that the rto is in milliseconds.
-		// see kcp.UDPSession.rto()
+		// See fecEncoder.skipParity(). The RTO is in milliseconds; see
+		// (*UDPSession).rto().
 		//
 		if now-enc.tsLatestPacket < int64(rto) {
-			// clear the tail of each datashard to make them equal-sized
+			// Clear the tail of each data shard to make them equal in size.
 			for i := 0; i < enc.dataShards; i++ {
 				shard := enc.shardCache[i]
 				slen := len(shard)
@@ -466,7 +465,8 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) (ps [][]byte) {
 			}
 		} else {
 			// Non-continuous data detected, skip this parity generation.
-			// Through we do not send non-continuous parity shard, we still need to increase seqid.
+			// Though no parity shard is sent for non-contiguous data, seqid
+			// must still advance.
 			enc.skipParity()
 		}
 

@@ -928,7 +928,7 @@ func TestUDPSessionNonOwnedPacketConn(t *testing.T) {
 	}
 }
 
-// this function test the data correctness with FEC and encryption enabled
+// TestReliability verifies data correctness with FEC and encryption enabled.
 func TestReliability(t *testing.T) {
 	port := nextPort()
 	block1, _ := NewSalsa20BlockCrypt(pass)
@@ -1157,7 +1157,7 @@ func newLoggerWithMilliseconds() *slog.Logger {
 	return slog.New(handler)
 }
 
-// TestSetLogger if want logging kcp trace need set build tags with debug
+// TestSetLogger requires the debug build tag to enable KCP trace logging.
 // trace log on:
 //
 //	go test -run ^TestSetLogger$ -tags debug

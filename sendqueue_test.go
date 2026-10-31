@@ -21,7 +21,7 @@ func TestSendQueue(t *testing.T) {
 			t.Fatalf("pop %d: got %v %v", i, r.buffer, ok)
 		}
 	}
-	// Room again, and order kept across the compaction on the next push.
+	// There is room again, and order is preserved across compaction on the next push.
 	if !sq.push(sendRequest{buffer: []byte{0xff}}) {
 		t.Fatal("push refused after pops")
 	}

@@ -22,7 +22,7 @@
 
 //go:build debug
 
-// only build tag debug is set, then debugLog will be enabled in compile time
+// When the debug build tag is set, the debugLog implementation is included.
 package kcp
 
 func (kcp *KCP) debugLog(logtype KCPLogType, args ...any) {
@@ -60,5 +60,5 @@ func (kcp *KCP) debugLog(logtype KCPLogType, args ...any) {
 	kcp.log(msg, args...)
 }
 
-// kcpTrace guards debugLog calls, so their arguments are not built when off.
+// kcpTrace enables debugLog calls when the debug build tag is set.
 const kcpTrace = true

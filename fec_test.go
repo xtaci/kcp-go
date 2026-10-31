@@ -73,8 +73,8 @@ func TestFECEncodeConsecutive(t *testing.T) {
 }
 
 func TestFECDecodeLoss(t *testing.T) {
-	// This function lose 3 random packet from 10 datashards and 3 parity shards.
-	// so each group of 13 packets should be able to recover from the loss.
+	// This test drops 3 random packets from each group of 10 data shards and
+	// 3 parity shards, so each group should be recoverable.
 	const dataShards = 10
 	const parityShards = 3
 	const groupSize = dataShards + parityShards

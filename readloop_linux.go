@@ -36,8 +36,8 @@ const (
 	batchSize = 256 // max packets per recvmmsg/sendmmsg call
 )
 
-// readLoop is the optimized read loop for Linux, utilizing the recvmmsg syscall
-// to batch-receive multiple UDP packets in a single system call.
+// readLoop is the optimized Linux read loop, using the recvmmsg syscall to
+// receive multiple UDP packets in a single system call.
 func (s *UDPSession) readLoop() {
 	// default version
 	if s.platform.batchConn == nil {
@@ -74,7 +74,7 @@ func (s *UDPSession) readLoop() {
 		for i := range count {
 			msg := &msgs[i]
 
-			// make sure the packet is from the same source
+			// Ensure the packet comes from the same source.
 			if src == nil && srcStr == "" { // set source address if nil
 				if udp, ok := msg.Addr.(*net.UDPAddr); ok {
 					src = udp
@@ -92,13 +92,13 @@ func (s *UDPSession) readLoop() {
 				continue
 			}
 
-			// source and size has validated
+			// The source and packet size have been validated.
 			s.packetInput(msg.Buffers[0][:msg.N])
 		}
 	}
 }
 
-// monitor is the optimized version of monitor for linux utilizing recvmmsg syscall
+// monitor is the optimized Linux listener loop, using the recvmmsg syscall.
 func (l *Listener) monitor() {
 	batchConn := newBatchConn(l.conn)
 

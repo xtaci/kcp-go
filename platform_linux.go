@@ -44,7 +44,7 @@ type (
 		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
 	}
 
-	// batchConn defines the interface used in batch IO
+	// batchConn defines the interface used for batch I/O.
 	batchConn interface {
 		WriteBatch(ms []ipv4.Message, flags int) (int, error)
 		ReadBatch(ms []ipv4.Message, flags int) (int, error)

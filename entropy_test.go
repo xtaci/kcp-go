@@ -66,7 +66,8 @@ func TestSetEntropy(t *testing.T) {
 	// Test fillRand with custom entropy
 	buf := make([]byte, 10)
 	fillRand(buf)
-	// We can't easily verify the content is from custom, but we can verify it didn't panic
+	// We can't easily verify that the custom source provided the data, but we
+	// can verify that the call did not panic.
 }
 
 func TestFillRand(t *testing.T) {

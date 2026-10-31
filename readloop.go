@@ -63,7 +63,7 @@ func (s *UDPSession) defaultReadLoop() {
 			return
 		}
 
-		// make sure the packet is from the same source
+		// Ensure the packet comes from the same source.
 		if src == nil && srcStr == "" { // set source address if nil
 			if udp, ok := addr.(*net.UDPAddr); ok {
 				src = udp

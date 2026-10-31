@@ -175,9 +175,9 @@ func testAEAD(t *testing.T, bc BlockCrypt) {
 	data := make([]byte, size)
 	io.ReadFull(rand.Reader, data)
 
-	// if the size of packet is cannot accommodate the AEAD overhead
-	// Open and Seal will allocate a new slice internally, we need to
-	// ensure that it does not happen for our MTU sized packets.
+	// If the packet cannot accommodate the AEAD overhead, Open and Seal will
+	// allocate a new slice internally. Ensure this does not happen for
+	// packets sized to the MTU.
 	packet := make([]byte, mtuLimit)
 
 	// Seal

@@ -24,7 +24,7 @@ package kcp
 
 const (
 	RINGBUFFER_MIN = 8    // minimum ring buffer capacity
-	RINGBUFFER_EXP = 1024 // growth threshold: below this, double; above this, grow by 25%
+	RINGBUFFER_EXP = 1024 // growth threshold: below this, double; at or above this, grow by 10%
 )
 
 // RingBuffer is a generic ring (circular) buffer that supports dynamic resizing.
@@ -35,7 +35,7 @@ type RingBuffer[T any] struct {
 	elements []T // Underlying slice storing elements in circular fashion
 }
 
-// NewRingBuffer creates a new Ring with a specified initial capacity.
+// NewRingBuffer creates a new ring buffer with the specified initial capacity.
 // If the provided size is <= 8, it defaults to 8.
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
 	if size <= RINGBUFFER_MIN {
@@ -172,7 +172,7 @@ func (r *RingBuffer[T]) ForEachReverse(fn func(*T) bool) {
 	}
 }
 
-// Clear resets the ring to an empty state and reinitializes the buffer.
+// Clear removes all elements and resets the ring to an empty state.
 func (r *RingBuffer[T]) Clear() {
 	var zero T
 	// Only clear elements that contain data to avoid retaining references
@@ -210,8 +210,8 @@ func (r *RingBuffer[T]) IsFull() bool {
 // grow increases the ring buffer's capacity when full.
 // Growth policy:
 //   - If current size < RINGBUFFER_MIN : grow to RINGBUFFER_MIN
-//   - If size < RINGBUFFER_EXP: double the size
-//   - If size > RINGBUFFER_EXP: increase by 10% (rounded up)
+//   - If the size is below RINGBUFFER_EXP: double it
+//   - If the size is at or above RINGBUFFER_EXP: increase it by 10% (rounded up)
 func (r *RingBuffer[T]) grow() {
 	currentLength := r.Len()
 	currentSize := len(r.elements)
@@ -243,8 +243,8 @@ func (r *RingBuffer[T]) grow() {
 	r.elements = newElements
 }
 
-// At returns the i-th element from the head. Index loops over it need no
-// closure, which TinyGo would allocate on every call.
+// At returns the i-th element from the head. It allows indexed iteration
+// without a closure, which TinyGo would allocate on every call.
 func (r *RingBuffer[T]) At(i int) *T {
 	j := r.head + i
 	if j >= len(r.elements) {

@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 )
 
-// Snmp defines network statistics indicator
+// Snmp contains network statistics.
 type Snmp struct {
-	BytesSent           uint64 // bytes sent from upper level
-	BytesReceived       uint64 // bytes received to upper level
+	BytesSent           uint64 // application bytes sent
+	BytesReceived       uint64 // application bytes received
 	MaxConn             uint64 // max number of connections ever reached
 	ActiveOpens         uint64 // accumulated active open connections
 	PassiveOpens        uint64 // accumulated passive open connections
@@ -49,10 +49,10 @@ type Snmp struct {
 	EarlyRetransSegs    uint64 // accumulated early retransmitted segments
 	LostSegs            uint64 // number of segs inferred as lost
 	RepeatSegs          uint64 // number of segs duplicated
-	FECFullShardSet     uint64 // number of FEC segments that are full
-	FECRecovered        uint64 // correct packets recovered from FEC
-	FECErrs             uint64 // incorrect packets recovered from FEC
-	FECParityShards     uint64 // FEC segments received
+	FECFullShardSet     uint64 // number of shard sets received with all data shards present
+	FECRecovered        uint64 // number of packets recovered by FEC
+	FECErrs             uint64 // number of FEC encoding or recovery errors
+	FECParityShards     uint64 // number of FEC parity shards received
 	FECShardSet         uint64 // number of shard sets that are not yet complete
 	FECShardMin         uint64 // minimum shard ID among active FEC shard sets
 	RingBufferSndQueue  uint64 // Len of segments in send queue ring buffer
@@ -65,7 +65,7 @@ func newSnmp() *Snmp {
 	return new(Snmp)
 }
 
-// Header returns all field names
+// Header returns the names of all fields.
 func (s *Snmp) Header() []string {
 	return []string{
 		"BytesSent",
@@ -101,7 +101,7 @@ func (s *Snmp) Header() []string {
 	}
 }
 
-// ToSlice returns current snmp info as slice
+// ToSlice returns the current SNMP information as a slice.
 func (s *Snmp) ToSlice() []string {
 	snmp := s.Copy()
 	return []string{
@@ -138,7 +138,7 @@ func (s *Snmp) ToSlice() []string {
 	}
 }
 
-// Copy make a copy of current snmp snapshot
+// Copy returns a copy of the current SNMP snapshot.
 func (s *Snmp) Copy() *Snmp {
 	d := newSnmp()
 	d.BytesSent = atomic.LoadUint64(&s.BytesSent)
@@ -174,7 +174,7 @@ func (s *Snmp) Copy() *Snmp {
 	return d
 }
 
-// Reset values to zero
+// Reset sets all statistics to zero.
 func (s *Snmp) Reset() {
 	atomic.StoreUint64(&s.BytesSent, 0)
 	atomic.StoreUint64(&s.BytesReceived, 0)

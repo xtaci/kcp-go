@@ -21,7 +21,7 @@ func main() {
 	}
 	defer listener.Close()
 
-	// spin-up the client
+	// Start the client.
 	go client()
 	for {
 		s, err := listener.AcceptKCP()
@@ -34,7 +34,7 @@ func main() {
 	}
 }
 
-// handleEcho send back everything it received
+// handleEcho sends back everything it receives.
 func handleEcho(conn *kcp.UDPSession) {
 	buf := make([]byte, 4096)
 	for {

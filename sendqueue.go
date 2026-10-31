@@ -26,7 +26,7 @@ import "sync"
 
 // sendQueue holds a session's packets waiting for post processing. It
 // allocates only while packets are queued, so an idle session costs nothing,
-// where a channel of devBacklog requests cost 64 KB per session.
+// whereas a channel holding devBacklog requests costs 64 KB per session.
 // sendQueueKeep is the buffer a drained queue keeps for the next packets.
 const sendQueueKeep = 64
 

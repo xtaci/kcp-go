@@ -81,8 +81,8 @@ var ppWorkers = sync.Pool{New: func() any {
 func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
 	if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
 		now := time.Now()
-		// A batch above the burst can never be allowed. WaitN failed on it
-		// and the batch was sent anyway, so it still is.
+		// A batch larger than the burst cannot be reserved, so it is sent
+		// immediately without rate limiting.
 		if r := limiter.ReserveN(now, bytesToSend); r.OK() {
 			if d := r.DelayFrom(now); d > 0 {
 				s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until = w, bytesToSend, now.Add(d)
