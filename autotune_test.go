@@ -23,6 +23,7 @@
 package kcp
 
 import (
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -173,17 +174,17 @@ func TestAutoTuneRingBufferWrapAround(t *testing.T) {
 	// Test with various periods after buffer wrap-around
 	testCases := []struct {
 		name           string
-		period         int  // period of the signal
-		totalSamples   int  // total samples to generate (should exceed maxAutoTuneSamples)
-		expectedPeriod int  // expected period shown in diagnostic output
-		bit            bool // which bit's period to find
+		period         int
+		totalSamples   int
+		expectedPeriod int
+		bit            bool
 	}{
-		{"Period3_2xBuffer", 3, maxAutoTuneSamples * 2, 3, true},
-		{"Period5_3xBuffer", 5, maxAutoTuneSamples * 3, 5, true},
-		{"Period7_4xBuffer", 7, maxAutoTuneSamples * 4, 7, true},
-		{"Period10_2xBuffer", 10, maxAutoTuneSamples * 2, 10, true},
-		{"Period3_2xBuffer_False", 3, maxAutoTuneSamples * 2, 3, false},
-		{"Period5_3xBuffer_False", 5, maxAutoTuneSamples * 3, 5, false},
+		{"Period3_2xBuffer", 3, maxAutoTuneSamples * 2, 1, true},
+		{"Period5_3xBuffer", 5, maxAutoTuneSamples * 3, 2, true},
+		{"Period7_4xBuffer", 7, maxAutoTuneSamples * 4, 3, true},
+		{"Period10_2xBuffer", 10, maxAutoTuneSamples * 2, 5, true},
+		{"Period3_2xBuffer_False", 3, maxAutoTuneSamples * 2, 2, false},
+		{"Period5_3xBuffer_False", 5, maxAutoTuneSamples * 3, 3, false},
 	}
 
 	for _, tc := range testCases {
@@ -210,9 +211,7 @@ func TestAutoTuneRingBufferWrapAround(t *testing.T) {
 			t.Logf("Period=%d, TotalSamples=%d, Found=%d, Expected=%d",
 				tc.period, tc.totalSamples, foundPeriod, tc.expectedPeriod)
 
-			// This test checks for a valid result; exact periods are checked by
-			// TestAutoTuneExactPeriodAfterWrap.
-			assert.True(t, foundPeriod > 0, "Should find a valid period")
+			assert.Equal(t, tc.expectedPeriod, foundPeriod)
 		})
 	}
 }
@@ -287,9 +286,8 @@ func TestAutoTuneVariousPeriodsFull(t *testing.T) {
 			t.Logf("Period=%d, TrueDuration=%d, FoundTrue=%d, FoundFalse=%d",
 				period, trueDuration, periodTrue, periodFalse)
 
-			// Should find valid periods
-			assert.True(t, periodTrue > 0 || periodFalse > 0,
-				"Should find at least one valid period")
+			assert.Equal(t, trueDuration, periodTrue)
+			assert.Equal(t, period-trueDuration, periodFalse)
 		})
 	}
 }
@@ -309,7 +307,7 @@ func TestAutoTuneContinuousOverwrite(t *testing.T) {
 
 	p1 := tune.FindPeriod(true)
 	t.Logf("Phase 1: Period 4 signal, found period=%d", p1)
-	assert.True(t, p1 > 0, "Should find period in phase 1")
+	assert.Equal(t, 2, p1, "Should find the data-shard width in phase 1")
 
 	// Second phase: continue with period 6 signal
 	// After enough samples, the old period 4 data should be overwritten
@@ -322,7 +320,7 @@ func TestAutoTuneContinuousOverwrite(t *testing.T) {
 
 	p2 := tune.FindPeriod(true)
 	t.Logf("Phase 2: Period 6 signal, found period=%d", p2)
-	assert.True(t, p2 > 0, "Should find period in phase 2")
+	assert.Equal(t, 3, p2, "Should find the data-shard width in phase 2")
 
 	// Third phase: continue with period 8 signal
 	period3 := 8
@@ -334,7 +332,7 @@ func TestAutoTuneContinuousOverwrite(t *testing.T) {
 
 	p3 := tune.FindPeriod(true)
 	t.Logf("Phase 3: Period 8 signal, found period=%d", p3)
-	assert.True(t, p3 > 0, "Should find period in phase 3")
+	assert.Equal(t, 4, p3, "Should find the data-shard width in phase 3")
 }
 
 // TestAutoTunePeriodChangeAfterOverwrite tests that when signal pattern changes,
@@ -571,12 +569,124 @@ func TestAutoTuneSequenceWrapAround(t *testing.T) {
 		tune.Sample(bit, startSeq+uint32(i))
 	}
 
-	// Note: With sequence wrap-around, FindPeriod might return -1
-	// because it checks for continuous sequences (lastPulse.seq+1 == sorted[idx].seq)
-	// This is expected behavior - the test documents this edge case
 	periodTrue := tune.FindPeriod(true)
 	periodFalse := tune.FindPeriod(false)
 
 	t.Logf("Sequence wrap-around test: FoundTrue=%d, FoundFalse=%d", periodTrue, periodFalse)
-	// We don't assert specific values here as this is an edge case documentation
+	assert.Equal(t, 2, periodTrue)
+	assert.Equal(t, 2, periodFalse)
+}
+
+func TestAutoTuneWithMissingAndDuplicateSamples(t *testing.T) {
+	tune := autoTune{}
+	for seq := uint32(0); seq < 20; seq++ {
+		if seq == 1 || seq == 6 || seq == 9 {
+			continue
+		}
+		bit := seq%5 < 3
+		tune.Sample(bit, seq)
+		if seq == 5 {
+			tune.Sample(bit, seq)
+		}
+	}
+
+	assert.Equal(t, 3, tune.FindPeriod(true))
+	assert.Equal(t, 2, tune.FindPeriod(false))
+}
+
+func TestAutoTuneFindsPulseAfterMissingBoundary(t *testing.T) {
+	tests := []struct {
+		name        string
+		missingSeqs []uint32
+		wantData    int
+		wantParity  int
+	}{
+		{
+			name:        "missing sample inside pulse",
+			missingSeqs: []uint32{1, 7},
+			wantData:    3,
+			wantParity:  2,
+		},
+		{
+			name:        "missing first pulse end boundary",
+			missingSeqs: []uint32{3},
+			wantData:    3,
+			wantParity:  2,
+		},
+		{
+			name:        "missing first pulse start boundary",
+			missingSeqs: []uint32{5},
+			wantData:    3,
+			wantParity:  2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tune := autoTune{}
+			for seq := uint32(0); seq < 30; seq++ {
+				missing := false
+				for _, missingSeq := range tt.missingSeqs {
+					if seq == missingSeq {
+						missing = true
+						break
+					}
+				}
+				if missing {
+					continue
+				}
+				tune.Sample(seq%5 < 3, seq)
+			}
+
+			assert.Equal(t, tt.wantData, tune.FindPeriod(true))
+			assert.Equal(t, tt.wantParity, tune.FindPeriod(false))
+		})
+	}
+}
+
+func TestAutoTuneDiscardsConflictingDuplicateSequence(t *testing.T) {
+	tune := autoTune{}
+	for seq := uint32(0); seq < 30; seq++ {
+		bit := seq%5 < 3
+		tune.Sample(bit, seq)
+		tune.Sample(bit, seq)
+		if seq == 5 || seq == 10 {
+			tune.Sample(!bit, seq)
+		}
+	}
+
+	assert.Equal(t, 3, tune.FindPeriod(true))
+	assert.Equal(t, 2, tune.FindPeriod(false))
+}
+
+func TestAutoTuneDoesNotInferPulseAcrossMissingBoundary(t *testing.T) {
+	tune := autoTune{}
+	for seq, bit := range []bool{false, true, true, false, false} {
+		if seq == 1 || seq == 4 {
+			continue
+		}
+		tune.Sample(bit, uint32(seq*2))
+	}
+
+	assert.Equal(t, -1, tune.FindPeriod(true))
+	assert.Equal(t, -1, tune.FindPeriod(false))
+}
+
+func TestAutoTuneSupports256Shards(t *testing.T) {
+	decoder := newFECDecoder(1, 1)
+	if decoder == nil {
+		t.Fatal("failed to create decoder")
+	}
+
+	for seq := uint32(0); seq < 257; seq++ {
+		decoder.autoTune.Sample(seq > 0 && seq < 256, seq)
+	}
+	packet := make([]byte, fecHeaderSize)
+	binary.LittleEndian.PutUint32(packet, 257)
+	binary.LittleEndian.PutUint16(packet[4:], typeData)
+	decoder.decode(packet)
+
+	assert.Equal(t, 255, decoder.dataShards)
+	assert.Equal(t, 1, decoder.parityShards)
+	assert.Equal(t, 256, decoder.shardSize)
 }

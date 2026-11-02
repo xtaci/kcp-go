@@ -23,6 +23,7 @@
 package kcp
 
 import (
+	"bytes"
 	"container/heap"
 	"io"
 	"log/slog"
@@ -33,119 +34,238 @@ import (
 	"github.com/xtaci/lossyconn"
 )
 
-const repeat = 16
+const (
+	lossyTestRepeat  = 8
+	lossyTestTimeout = 20 * time.Second
+)
 
-func TestLossyConn1(t *testing.T) {
-	t.Log("testing loss rate 10%, rtt 200ms")
-	t.Log("testing link with nodelay parameters:1 10 2 1")
-	client, err := lossyconn.NewLossyConn(0.1, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-
-	server, err := lossyconn.NewLossyConn(0.1, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-	testlink(t, client, server, 1, 10, 2, 1)
+type lossyTestCase struct {
+	name         string
+	config       lossyconn.Config
+	nc           int
+	outage       time.Duration
+	wantRandom   bool
+	wantBurst    bool
+	wantDup      bool
+	wantCorrupt  bool
+	wantReorder  bool
+	wantLinkDown bool
 }
 
-func TestLossyConn2(t *testing.T) {
-	t.Log("testing loss rate 20%, rtt 200ms")
-	t.Log("testing link with nodelay parameters:1 10 2 1")
-	client, err := lossyconn.NewLossyConn(0.2, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
+func TestLossyConn(t *testing.T) {
+	tests := []lossyTestCase{
+		{
+			name: "random loss",
+			config: lossyconn.Config{
+				Delay:          10 * time.Millisecond,
+				RandomLossRate: 0.1,
+				Seed:           1,
+			},
+			nc:         1,
+			wantRandom: true,
+		},
+		{
+			name: "burst loss and congestion control",
+			config: lossyconn.Config{
+				Delay:         5 * time.Millisecond,
+				BurstLossRate: 0.1,
+				BurstLength:   3,
+				Seed:          7,
+			},
+			nc:        0,
+			wantBurst: true,
+		},
+		{
+			name: "duplicate corrupt and reorder",
+			config: lossyconn.Config{
+				Delay:           5 * time.Millisecond,
+				DuplicateRate:   0.2,
+				CorruptionRate:  0.1,
+				ReorderRate:     0.3,
+				MaxReorderDelay: 20 * time.Millisecond,
+				Seed:            13,
+			},
+			nc:          1,
+			wantDup:     true,
+			wantCorrupt: true,
+			wantReorder: true,
+		},
+		{
+			name: "temporary link outage and recovery",
+			config: lossyconn.Config{
+				Delay: 5 * time.Millisecond,
+				Seed:  19,
+			},
+			outage:       250 * time.Millisecond,
+			wantLinkDown: true,
+		},
 	}
 
-	server, err := lossyconn.NewLossyConn(0.2, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-	testlink(t, client, server, 1, 10, 2, 1)
-}
-
-func TestLossyConn3(t *testing.T) {
-	t.Log("testing loss rate 30%, rtt 200ms")
-	t.Log("testing link with nodelay parameters:1 10 2 1")
-	client, err := lossyconn.NewLossyConn(0.3, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-
-	server, err := lossyconn.NewLossyConn(0.3, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-	testlink(t, client, server, 1, 10, 2, 1)
-}
-
-func TestLossyConn4(t *testing.T) {
-	t.Log("testing loss rate 10%, rtt 200ms")
-	t.Log("testing link with nodelay parameters:1 10 2 0")
-	client, err := lossyconn.NewLossyConn(0.1, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-
-	server, err := lossyconn.NewLossyConn(0.1, 100)
-	if err != nil {
-		t.Fatal(err)
-		return
-	}
-	testlink(t, client, server, 1, 10, 2, 0)
-}
-
-func testlink(t *testing.T, client *lossyconn.LossyConn, server *lossyconn.LossyConn, nodelay, interval, resend, nc int) {
-	t.Log("testing with nodelay parameters:", nodelay, interval, resend, nc)
-	sess, _ := NewConn2(server.LocalAddr(), nil, 0, 0, client)
-	listener, _ := ServeConn(nil, 0, 0, server)
-	echoServer := func(l *Listener) {
-		for {
-			conn, err := l.AcceptKCP()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientConfig, serverConfig := tt.config, tt.config
+			serverConfig.Seed++
+			client, err := lossyconn.NewWithConfig(clientConfig)
 			if err != nil {
+				t.Fatal(err)
+			}
+			server, err := lossyconn.NewWithConfig(serverConfig)
+			if err != nil {
+				_ = client.Close()
+				t.Fatal(err)
+			}
+			var block BlockCrypt
+			if tt.wantCorrupt {
+				block, err = NewAESGCMCrypt([]byte("kcp-lossy-test-key-32-bytes-long"))
+				if err != nil {
+					_ = client.Close()
+					_ = server.Close()
+					t.Fatal(err)
+				}
+			}
+			testlink(t, client, server, block, 1, 10, 2, tt.nc, tt)
+		})
+	}
+}
+
+func testlink(t *testing.T, client, server *lossyconn.LossyConn, block BlockCrypt, nodelay, interval, resend, nc int, tt lossyTestCase) {
+	t.Helper()
+	sess, err := NewConn2(server.LocalAddr(), block, 0, 0, client)
+	if err != nil {
+		_ = client.Close()
+		_ = server.Close()
+		t.Fatal(err)
+	}
+	listener, err := ServeConn(block, 0, 0, server)
+	if err != nil {
+		_ = sess.Close()
+		_ = client.Close()
+		_ = server.Close()
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	serverSessions := make(chan *UDPSession, 1)
+	go func() {
+		conn, err := listener.AcceptKCP()
+		if err != nil {
+			return
+		}
+		serverSessions <- conn
+		if err := conn.SetDeadline(time.Now().Add(lossyTestTimeout)); err != nil {
+			return
+		}
+		conn.SetNoDelay(nodelay, interval, resend, nc)
+		buf := make([]byte, 65536)
+		for {
+			n, err := conn.Read(buf)
+			if err != nil {
+				select {
+				case <-done:
+				default:
+					t.Errorf("echo server read: %v", err)
+				}
 				return
 			}
-			go func() {
-				conn.SetNoDelay(nodelay, interval, resend, nc)
-				buf := make([]byte, 65536)
-				for {
-					n, err := conn.Read(buf)
-					if err != nil {
-						return
-					}
-					conn.Write(buf[:n])
+			if _, err := conn.Write(buf[:n]); err != nil {
+				select {
+				case <-done:
+				default:
+					t.Errorf("echo server write: %v", err)
 				}
-			}()
+				return
+			}
+		}
+	}()
+
+	defer func() {
+		close(done)
+		select {
+		case conn := <-serverSessions:
+			_ = conn.Close()
+		default:
+		}
+		_ = listener.Close()
+		_ = sess.Close()
+		_ = client.Close()
+		_ = server.Close()
+	}()
+
+	if err := sess.SetDeadline(time.Now().Add(lossyTestTimeout)); err != nil {
+		t.Fatal(err)
+	}
+	sess.SetNoDelay(nodelay, interval, resend, nc)
+	payload := make([]byte, 4096)
+	response := make([]byte, len(payload))
+	var totalRTT time.Duration
+	for round := range lossyTestRepeat {
+		for i := range payload {
+			payload[i] = byte(i + round)
+		}
+		start := time.Now()
+		n, err := sess.Write(payload)
+		if err != nil {
+			t.Fatalf("write round %d: %v", round, err)
+		}
+		if n != len(payload) {
+			t.Fatalf("write round %d: wrote %d bytes, want %d", round, n, len(payload))
+		}
+		if _, err := io.ReadFull(sess, response); err != nil {
+			t.Fatalf("read round %d: %v", round, err)
+		}
+		if !bytes.Equal(response, payload) {
+			t.Fatalf("echo mismatch in round %d", round)
+		}
+		totalRTT += time.Since(start)
+	}
+
+	if tt.outage > 0 {
+		client.SetLinkState(false)
+		server.SetLinkState(false)
+		payload = bytes.Repeat([]byte("link outage recovery"), 256)
+		if _, err := sess.Write(payload); err != nil {
+			t.Fatalf("write during link outage: %v", err)
+		}
+		time.Sleep(tt.outage)
+		client.SetLinkState(true)
+		server.SetLinkState(true)
+		response = make([]byte, len(payload))
+		if _, err := io.ReadFull(sess, response); err != nil {
+			t.Fatalf("read after link recovery: %v", err)
+		}
+		if !bytes.Equal(response, payload) {
+			t.Fatal("echo mismatch after link recovery")
 		}
 	}
 
-	echoTester := func(s *UDPSession) {
-		s.SetNoDelay(nodelay, interval, resend, nc)
-		buf := make([]byte, 64)
-		var rtt time.Duration
-		for range repeat {
-			start := time.Now()
-			s.Write(buf)
-			io.ReadFull(s, buf)
-			rtt += time.Since(start)
-		}
+	serverStats := server.Stats()
+	clientStats := client.Stats()
+	t.Logf("client stats: %+v", clientStats)
+	t.Logf("server stats: %+v", serverStats)
+	t.Logf("average round trip: %v", totalRTT/lossyTestRepeat)
+	checkLossyStats(t, tt, clientStats, serverStats)
+}
 
-		t.Log("client:", client)
-		t.Log("server:", server)
-		t.Log("avg rtt:", rtt/repeat)
-		t.Logf("total time: %v for %v round trip:", rtt, repeat)
+func checkLossyStats(t *testing.T, tt lossyTestCase, client, server lossyconn.Stats) {
+	t.Helper()
+	if tt.wantRandom && client.DropRandom+server.DropRandom == 0 {
+		t.Error("random loss profile did not drop any packets")
 	}
-
-	go echoServer(listener)
-	echoTester(sess)
+	if tt.wantBurst && client.DropBurst+server.DropBurst == 0 {
+		t.Error("burst loss profile did not drop any packets")
+	}
+	if tt.wantDup && client.DuplicatedPackets+server.DuplicatedPackets == 0 {
+		t.Error("duplicate profile did not duplicate any packets")
+	}
+	if tt.wantCorrupt && client.CorruptedPackets+server.CorruptedPackets == 0 {
+		t.Error("corruption profile did not corrupt any packets")
+	}
+	if tt.wantReorder && client.Reordered+server.Reordered == 0 {
+		t.Error("reorder profile did not reorder any packets")
+	}
+	if tt.wantLinkDown && client.DropLinkDown+server.DropLinkDown == 0 {
+		t.Error("link outage did not drop any packets")
+	}
 }
 
 func BenchmarkFlush(b *testing.B) {

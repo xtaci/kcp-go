@@ -189,7 +189,7 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 		autoPS := dec.autoTune.FindPeriod(false) // detect parity shard period
 
 		// validate the auto-tuned parameters
-		if autoDS > 0 && autoPS > 0 && autoDS+autoPS < 256 {
+		if autoDS > 0 && autoPS > 0 && autoDS+autoPS <= 256 {
 			if autoDS != dec.dataShards || autoPS != dec.parityShards {
 				// apply the new FEC parameters
 				dec.dataShards = autoDS
@@ -210,6 +210,8 @@ func (dec *fecDecoder) decode(in fecPacket) (recovered [][]byte) {
 				dec.decodeCache = make([][]byte, dec.shardSize)
 				dec.flagCache = make([]bool, dec.shardSize)
 				dec.paws = 0xffffffff / uint32(dec.shardSize) * uint32(dec.shardSize)
+				dec.newestShardId = in.seqid() / uint32(dec.shardSize)
+				atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.newestShardId))
 				//log.Println("autotune to :", dec.dataShards, dec.parityShards)
 			}
 			// reset shouldTune flag regardless of whether parameters changed

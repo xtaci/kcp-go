@@ -140,6 +140,64 @@ func TestFECDecodeLoss(t *testing.T) {
 	t.Log("Total parity lost:", totalParityLost)
 }
 
+func TestFECDecoderAutoTuneResetsShardState(t *testing.T) {
+	const (
+		oldDataShards   = 2
+		oldParityShards = 1
+		newDataShards   = 10
+		newParityShards = 3
+	)
+	encoder := newFECEncoder(newDataShards, newParityShards, 0)
+	decoder := newFECDecoder(oldDataShards, oldParityShards)
+	if encoder == nil || decoder == nil {
+		t.Fatal("failed to create FEC encoder or decoder")
+	}
+
+	tuned := false
+	tunedAt := uint32(0)
+	checkPacket := func(packet []byte) {
+		t.Helper()
+		seq := binary.LittleEndian.Uint32(packet)
+		wasTuned := tuned
+		recovered := decoder.decode(fecPacket(packet))
+		for _, shard := range recovered {
+			defaultBufferPool.Put(shard)
+		}
+
+		if !wasTuned && decoder.dataShards == newDataShards && decoder.parityShards == newParityShards {
+			tuned = true
+			tunedAt = seq
+		}
+		if tuned && seq == tunedAt+1 {
+			shardID := decoder.getShardId(seq)
+			if decoder.newestShardId != shardID {
+				t.Errorf("newest shard id = %d, want %d after auto-tune", decoder.newestShardId, shardID)
+			}
+			if _, ok := decoder.shardSet[shardID]; !ok {
+				t.Errorf("new shard set %d was discarded after auto-tune", shardID)
+			}
+		}
+	}
+
+	for range 4 {
+		for range newDataShards {
+			packet := make([]byte, fecHeaderSizePlus2+32)
+			parity := encoder.encode(packet, ^uint32(0))
+			checkPacket(packet)
+			for _, shard := range parity {
+				checkPacket(shard)
+			}
+		}
+	}
+
+	if !tuned {
+		t.Fatal("decoder did not auto-tune to the sender's FEC parameters")
+	}
+	if tunedAt+1 >= uint32(4*(newDataShards+newParityShards)) {
+		t.Fatalf("auto-tune occurred too late: sequence %d", tunedAt)
+	}
+}
+
 func TestFECDecodeVariablePacketSizes(t *testing.T) {
 	const (
 		dataShards   = 8

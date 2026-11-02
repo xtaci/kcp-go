@@ -109,49 +109,42 @@ func (tune *autoTune) FindPeriod(bit bool) int {
 		return _itimediff(sorted[i].seq, sorted[j].seq) < 0
 	})
 
-	// left edge
-	leftEdge := -1
-	lastPulse := sorted[0]
-	idx := 1
+	// Collapse duplicate sequence numbers. Conflicting samples for the same
+	// sequence are unusable and are discarded.
+	unique := 0
+	for i := 0; i < len(sorted); {
+		end := i + 1
+		conflict := false
+		for end < len(sorted) && sorted[end].seq == sorted[i].seq {
+			conflict = conflict || sorted[end].bit != sorted[i].bit
+			end++
+		}
+		if !conflict {
+			sorted[unique] = sorted[i]
+			unique++
+		}
+		i = end
+	}
+	sorted = sorted[:unique]
 
-	for ; idx < len(sorted); idx++ {
-		if lastPulse.seq+1 == sorted[idx].seq { // continuous sequence
-			if lastPulse.bit != bit && sorted[idx].bit == bit { // edge found
-				leftEdge = idx // mark the left edge (the position where the bit changed)
+	// Find a complete pulse with observed, consecutive transition samples.
+	// Gaps inside a pulse are harmless; gaps at either edge make its width
+	// ambiguous, so keep looking for a later complete pulse.
+	for left := 1; left < len(sorted); left++ {
+		if sorted[left-1].bit == bit || sorted[left].bit != bit ||
+			sorted[left-1].seq+1 != sorted[left].seq {
+			continue
+		}
+
+		for right := left + 1; right < len(sorted); right++ {
+			if sorted[right].bit != bit {
+				if sorted[right-1].seq+1 == sorted[right].seq {
+					return int(_itimediff(sorted[right].seq, sorted[left].seq))
+				}
 				break
 			}
-		} else {
-			return -1
 		}
-		lastPulse = sorted[idx]
 	}
 
-	// no left edge found
-	if leftEdge == -1 {
-		return -1
-	}
-
-	// right edge
-	rightEdge := -1
-	lastPulse = sorted[leftEdge]
-	idx = leftEdge + 1
-
-	for ; idx < len(sorted); idx++ {
-		if lastPulse.seq+1 == sorted[idx].seq {
-			if lastPulse.bit == bit && sorted[idx].bit != bit {
-				rightEdge = idx
-				break
-			}
-		} else {
-			return -1
-		}
-		lastPulse = sorted[idx]
-	}
-
-	// no right edge found
-	if rightEdge == -1 {
-		return -1
-	}
-
-	return rightEdge - leftEdge
+	return -1
 }
