@@ -536,7 +536,7 @@ func (s *UDPSession) SetNoDelay(nodelay, interval, resend, nc int) {
 	s.mu.Unlock()
 }
 
-// SetDSCP sets the 6-bit DSCP field in the IPv4 header or the 8-bit Traffic
+// SetDSCP sets the 6-bit DSCP field in the IPv4 header or the 6-bit Traffic
 // Class field in the IPv6 header.
 //
 // If the underlying connection implements `SetDSCP(int) error`, SetDSCP invokes
@@ -556,11 +556,13 @@ func (s *UDPSession) SetDSCP(dscp int) error {
 	}
 
 	if nc, ok := s.conn.(net.Conn); ok {
+		val := dscp << 2
+
 		var succeed bool
-		if err := ipv4.NewConn(nc).SetTOS(dscp << 2); err == nil {
+		if err := ipv4.NewConn(nc).SetTOS(val); err == nil {
 			succeed = true
 		}
-		if err := ipv6.NewConn(nc).SetTrafficClass(dscp); err == nil {
+		if err := ipv6.NewConn(nc).SetTrafficClass(val); err == nil {
 			succeed = true
 		}
 
@@ -1262,7 +1264,7 @@ func (l *Listener) SetWriteBuffer(bytes int) error {
 	return errInvalidOperation
 }
 
-// SetDSCP sets the 6-bit DSCP field in the IPv4 header or the 8-bit Traffic
+// SetDSCP sets the 6-bit DSCP field in the IPv4 header or the 6-bit Traffic
 // Class field in the IPv6 header.
 //
 // If the underlying connection implements `SetDSCP(int) error`, SetDSCP invokes
@@ -1278,12 +1280,13 @@ func (l *Listener) SetDSCP(dscp int) error {
 		return errInvalidOperation
 	}
 
+	val := dscp << 2
 	var succeed bool
-	if err := ipv4.NewConn(conn).SetTOS(dscp << 2); err == nil {
+	if err := ipv4.NewConn(conn).SetTOS(val); err == nil {
 		succeed = true
 	}
 
-	if err := ipv6.NewConn(conn).SetTrafficClass(dscp); err == nil {
+	if err := ipv6.NewConn(conn).SetTrafficClass(val); err == nil {
 		succeed = true
 	}
 
