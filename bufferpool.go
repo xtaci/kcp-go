@@ -32,7 +32,7 @@ var errBufferSizeMismatch = errors.New("buffer size mismatch")
 
 // A system-wide packet buffer shared among sending, receiving and FEC
 // to mitigate high-frequency memory allocation of packets.
-var defaultBufferPool = newBufferPool(mtuLimit)
+var defaultBufferPool = newBufferPool(maxPacketSize)
 
 type bufferPool struct {
 	xmitBuf sync.Pool
@@ -56,8 +56,8 @@ func (bp *bufferPool) Get() []byte {
 
 // Put returns a buffer to the pool.
 func (bp *bufferPool) Put(buf []byte) error {
-	// Only put back buffers whose capacity matches mtuLimit.
-	if cap(buf) != mtuLimit {
+	// Only put back buffers whose capacity matches maxPacketSize.
+	if cap(buf) != maxPacketSize {
 		return errBufferSizeMismatch
 	}
 	bp.xmitBuf.Put(buf[:cap(buf)]) // reset slice length to full capacity

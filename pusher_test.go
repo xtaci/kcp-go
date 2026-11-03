@@ -62,7 +62,7 @@ func (c *pushConn) SetPacketReceiver(fn func([]byte, net.Addr, error)) {
 }
 
 func (c *pushConn) readLoop() {
-	buf := make([]byte, mtuLimit)
+	buf := make([]byte, maxPacketSize)
 	for {
 		n, addr, err := c.UDPConn.ReadFrom(buf)
 		if fn := c.receiver.Load(); fn != nil {

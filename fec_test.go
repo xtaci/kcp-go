@@ -33,7 +33,7 @@ import (
 func TestFECEncodeConsecutive(t *testing.T) {
 	const dataSize = 10
 	const paritySize = 3
-	const payLoad = 1500
+	const payloadSize = maxPacketSize
 
 	encoder := newFECEncoder(dataSize, paritySize, 0)
 	t.Logf("dataSize:%v, paritySize:%v", dataSize, paritySize)
@@ -44,7 +44,7 @@ func TestFECEncodeConsecutive(t *testing.T) {
 			group++
 		}
 
-		data := make([]byte, payLoad)
+		data := make([]byte, payloadSize)
 		duration := time.Duration(rand.Int()%300) * time.Millisecond
 		t.Logf("Sleep: %v, packet %v", duration, sent)
 		<-time.After(duration)
@@ -78,7 +78,7 @@ func TestFECDecodeLoss(t *testing.T) {
 	const dataShards = 10
 	const parityShards = 3
 	const groupSize = dataShards + parityShards
-	const payLoad = 1400
+	const payloadSize = 1400
 	decoder := newFECDecoder(dataShards, parityShards)
 	t.Logf("dataSize:%v, paritySize:%v", dataShards, parityShards)
 	sent := 0
@@ -115,7 +115,7 @@ func TestFECDecodeLoss(t *testing.T) {
 				continue
 			}
 
-			pkt := make([]byte, payLoad)
+			pkt := make([]byte, payloadSize)
 			binary.LittleEndian.PutUint32(pkt, uint32(groupSize*group+i))
 			if i%(dataShards+parityShards) >= dataShards {
 				binary.LittleEndian.PutUint16(pkt[4:], typeParity)
@@ -292,15 +292,15 @@ func TestFECDecodeVariablePacketSizes(t *testing.T) {
 func BenchmarkFECDecode(b *testing.B) {
 	const dataSize = 10
 	const paritySize = 3
-	const payLoad = 1500
+	const payloadSize = maxPacketSize
 	decoder := newFECDecoder(dataSize, paritySize)
 	b.ReportAllocs()
-	b.SetBytes(payLoad)
+	b.SetBytes(payloadSize)
 	for i := 0; b.Loop(); i++ {
 		if rand.Int()%(dataSize+paritySize) == 0 { // random loss
 			continue
 		}
-		pkt := make([]byte, payLoad)
+		pkt := make([]byte, payloadSize)
 		binary.LittleEndian.PutUint32(pkt, uint32(i))
 		if i%(dataSize+paritySize) >= dataSize {
 			binary.LittleEndian.PutUint16(pkt[4:], typeParity)
@@ -314,13 +314,13 @@ func BenchmarkFECDecode(b *testing.B) {
 func BenchmarkFECEncode(b *testing.B) {
 	const dataSize = 10
 	const paritySize = 3
-	const payLoad = 1500
+	const payloadSize = maxPacketSize
 
 	b.ReportAllocs()
-	b.SetBytes(payLoad)
+	b.SetBytes(payloadSize)
 	encoder := newFECEncoder(dataSize, paritySize, 0)
 	for b.Loop() {
-		data := make([]byte, payLoad)
+		data := make([]byte, payloadSize)
 		encoder.encode(data, 200)
 	}
 }
@@ -329,7 +329,7 @@ func TestFECPAWS(t *testing.T) {
 	const dataShards = 10
 	const parityShards = 3
 	const shardSize = dataShards + parityShards
-	const payLoad = 1500
+	const payloadSize = maxPacketSize
 
 	encoder := newFECEncoder(dataShards, parityShards, 0)
 	decoder := newFECDecoder(dataShards, parityShards)
@@ -349,7 +349,7 @@ func TestFECPAWS(t *testing.T) {
 	// Total 'shardSize' packets.
 	// Their seqids should be [paws-shardSize, ..., paws-1]
 	for i := range dataShards {
-		data := make([]byte, payLoad)
+		data := make([]byte, payloadSize)
 		// We can put some recognizable data
 		// Note: fecEncoder writes header at 0-6, and size at 6-8. Payload starts at 8.
 		binary.LittleEndian.PutUint32(data[8:], uint32(i))
@@ -383,7 +383,7 @@ func TestFECPAWS(t *testing.T) {
 	// Their seqids should be [0, ..., shardSize-1]
 	startIdx := len(packets)
 	for i := range dataShards {
-		data := make([]byte, payLoad)
+		data := make([]byte, payloadSize)
 		binary.LittleEndian.PutUint32(data[8:], uint32(i+100)) // Different data
 
 		ps := encoder.encode(data, 200)

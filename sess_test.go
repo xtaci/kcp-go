@@ -1478,7 +1478,7 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	}
 	defer l.Close()
 
-	counts := make([]atomic.Int32, mtuLimit)
+	counts := make([]atomic.Int32, maxPacketSize)
 	errCh := make(chan error, 1)
 
 	// Get OOB max payload size and initialize the shared counts slice.

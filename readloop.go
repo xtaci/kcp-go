@@ -41,7 +41,7 @@ func sameUDPAddr(a, b *net.UDPAddr) bool {
 
 // defaultReadLoop is the standard procedure for reading from a connection
 func (s *UDPSession) defaultReadLoop() {
-	buf := make([]byte, mtuLimit)
+	buf := make([]byte, maxPacketSize)
 
 	var src *net.UDPAddr
 	var srcStr string
@@ -87,7 +87,7 @@ func (s *UDPSession) defaultReadLoop() {
 
 // defaultReadLoop is the standard procedure for reading and accepting connections on a listener
 func (l *Listener) defaultMonitor() {
-	buf := make([]byte, mtuLimit)
+	buf := make([]byte, maxPacketSize)
 	for {
 		n, from, err := l.conn.ReadFrom(buf)
 		if err != nil {

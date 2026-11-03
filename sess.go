@@ -73,8 +73,8 @@ const (
 	// legacy block-cipher header size: nonce + CRC32
 	cryptHeaderSize = nonceSize + crcSize
 
-	// maximum packet size (Ethernet MTU)
-	mtuLimit = 1500
+	// maximum packet size (IPv4)
+	maxPacketSize = 1472
 
 	// conversation ID field size (bytes)
 	convSize = 4
@@ -210,7 +210,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.ownConn = ownConn
 	sess.l = l
 	sess.block = block
-	sess.recvbuf = make([]byte, mtuLimit)
+	sess.recvbuf = make([]byte, maxPacketSize)
 	sess.initPlatform()
 
 	// calculate additional header size introduced by encryption
@@ -488,7 +488,7 @@ func (s *UDPSession) SetWindowSize(sndwnd, rcvwnd int) {
 
 // SetMtu sets the maximum transmission unit, excluding the UDP header.
 func (s *UDPSession) SetMtu(mtu int) bool {
-	mtu = min(mtuLimit, mtu)
+	mtu = min(maxPacketSize, mtu)
 
 	mtu -= s.headerSize
 	if aead, ok := s.block.(*aeadCrypt); ok {
@@ -602,7 +602,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 func (s *UDPSession) SetRateLimit(bytesPerSecond uint32) {
 	var limiter *rate.Limiter
 	if bytesPerSecond > 0 {
-		limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), maxBatchSize*mtuLimit)
+		limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), maxBatchSize*maxPacketSize)
 	}
 
 	s.rateLimiter.Store(limiter)
