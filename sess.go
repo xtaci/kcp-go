@@ -173,7 +173,7 @@ type (
 		platform platform
 
 		// rate limiter (bytes per second)
-		rateLimiter atomic.Value
+		rateLimiter atomic.Pointer[rate.Limiter]
 
 		mu sync.Mutex
 
@@ -601,9 +601,7 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 // disables rate limiting.
 func (s *UDPSession) SetRateLimit(bytesPerSecond uint32) {
 	var limiter *rate.Limiter
-	if bytesPerSecond == 0 {
-		limiter = rate.NewLimiter(rate.Inf, maxBatchSize*mtuLimit)
-	} else {
+	if bytesPerSecond > 0 {
 		limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), maxBatchSize*mtuLimit)
 	}
 

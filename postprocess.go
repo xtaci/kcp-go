@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"golang.org/x/net/ipv4"
-	"golang.org/x/time/rate"
 )
 
 // ppBudget is how many packets a worker takes from one session before it
@@ -79,7 +78,7 @@ var ppWorkers = sync.Pool{New: func() any {
 // keeps the batch and flushTx reports true, so that no worker sleeps while
 // other sessions wait for it.
 func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
-	if limiter, ok := s.rateLimiter.Load().(*rate.Limiter); ok {
+	if limiter := s.rateLimiter.Load(); limiter != nil {
 		now := time.Now()
 		// A batch larger than the burst cannot be reserved, so it is sent
 		// immediately without rate limiting.
