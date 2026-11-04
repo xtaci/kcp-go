@@ -25,11 +25,8 @@ package kcp
 import (
 	"runtime"
 	"sync"
-	"sync/atomic"
-	"time"
 
 	"golang.org/x/net/ipv4"
-	"golang.org/x/time/rate"
 )
 
 // ppBudget is how many packets a worker takes from one session before it
@@ -55,13 +52,6 @@ type ppWorker struct {
 	bufs    [][]byte
 }
 
-// ppWake is the cancellable handle captured by a delayed scheduler task.
-// Clearing session releases the session before the task's deadline if the
-// held batch is sent or discarded first.
-type ppWake struct {
-	session atomic.Pointer[UDPSession]
-}
-
 // oneBuf appends b to the worker-owned slice and returns a one-element view
 // suitable for ipv4.Message.Buffers. recycle clears that view before reuse.
 func (w *ppWorker) oneBuf(b []byte) [][]byte {
@@ -81,9 +71,7 @@ func (w *ppWorker) recycle() {
 	w.bufs = w.bufs[:0]
 }
 
-// ppWorkers reuses batch storage. Usually a worker keeps its ppWorker; when a
-// session holds a batch for rate limiting, that worker obtains another one
-// until the held batch is sent or discarded.
+// ppWorkers reuses batch storage across post-processing workers.
 var ppWorkers = sync.Pool{New: func() any {
 	return &ppWorker{
 		txqueue: make([]ipv4.Message, 0, maxBatchSize),
@@ -91,32 +79,13 @@ var ppWorkers = sync.Pool{New: func() any {
 	}
 }}
 
-// flushTx sends w immediately or transfers ownership of it to s when the
-// session's byte rate limiter reserves a future send time. It returns true
-// when the caller must not reuse w: the batch was either held or discarded.
-// A worker never waits for limiter tokens, leaving it available to serve other
-// sessions.
+// flushTx sends a completed batch and reports whether the worker must discard
+// it because the session is closed.
 func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
 	if s.isClosed() {
 		w.recycle()
 		ppWorkers.Put(w)
 		return true
-	}
-	if limiter := s.rateLimiter.Load(); limiter != nil {
-		now := time.Now()
-		// A batch larger than the burst cannot be reserved, so it is sent
-		// immediately without rate limiting.
-		if r := limiter.ReserveN(now, bytesToSend); r.OK() {
-			if d := r.DelayFrom(now); d > 0 {
-				if s.setHeldPostProcess(w, bytesToSend, now.Add(d), r) {
-					return true
-				}
-				r.Cancel()
-				w.recycle()
-				ppWorkers.Put(w)
-				return true
-			}
-		}
 	}
 	s.sendTx(w, bytesToSend)
 	return false
@@ -159,7 +128,7 @@ func (s *UDPSession) claimPostProcess() bool {
 // finishPostProcess relinquishes the current worker claim. If the session is
 // still open and packets arrived during processing, it claims the session
 // again so the caller can enqueue another worker pass. Closed sessions instead
-// release any held batch and queued packet buffers.
+// release queued packet buffers.
 func (s *UDPSession) finishPostProcess() bool {
 	s.ppRunning.Store(false)
 	if s.isClosed() {
@@ -169,63 +138,10 @@ func (s *UDPSession) finishPostProcess() bool {
 	return s.postQueue.len() > 0 && s.claimPostProcess()
 }
 
-// setHeldPostProcess transfers ownership of a rate-limited batch and its
-// reservation to the session. It refuses the transfer if the session is
-// already marked closed.
-func (s *UDPSession) setHeldPostProcess(w *ppWorker, bytes int, until time.Time, reservation *rate.Reservation) bool {
-	s.ppHeldMu.Lock()
-	defer s.ppHeldMu.Unlock()
-	if s.isClosed() {
-		return false
-	}
-	s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until = w, bytes, until
-	s.ppHeld.reservation = reservation
-	s.ppHeld.wake = &ppWake{}
-	s.ppHeld.wake.session.Store(s)
-	return true
-}
-
-// takeHeldPostProcess atomically removes the session's held batch. It also
-// invalidates the associated wake handle so a pending timer no longer retains
-// the session.
-func (s *UDPSession) takeHeldPostProcess() (*ppWorker, int, *rate.Reservation, *ppWake) {
-	s.ppHeldMu.Lock()
-	w, bytes, reservation, wake := s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.reservation, s.ppHeld.wake
-	s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until, s.ppHeld.reservation, s.ppHeld.wake = nil, 0, time.Time{}, nil, nil
-	s.ppHeldMu.Unlock()
-	if wake != nil {
-		wake.session.Store(nil)
-	}
-	return w, bytes, reservation, wake
-}
-
-// heldPostProcessUntil snapshots the held batch's deadline and wake handle.
-// The held flag is false if Close or a worker has already taken the batch.
-func (s *UDPSession) heldPostProcessUntil() (time.Time, *ppWake, bool) {
-	s.ppHeldMu.Lock()
-	until, wake, held := s.ppHeld.until, s.ppHeld.wake, s.ppHeld.w != nil
-	s.ppHeldMu.Unlock()
-	return until, wake, held
-}
-
-// discardHeldPostProcess cancels an unconsumed rate reservation and recycles
-// its held batch. The lock-based take makes cleanup race safely with a worker
-// that is claiming the same batch.
-func (s *UDPSession) discardHeldPostProcess() {
-	if w, _, reservation, _ := s.takeHeldPostProcess(); w != nil {
-		if reservation != nil {
-			reservation.Cancel()
-		}
-		w.recycle()
-		ppWorkers.Put(w)
-	}
-}
-
-// discardPostProcess releases held and queued packet buffers after Close.
+// discardPostProcess releases queued packet buffers after Close.
 // Close serializes its final KCP flush and closes die while holding s.mu, so
 // the output callback cannot enqueue more packets after this drain completes.
 func (s *UDPSession) discardPostProcess() {
-	s.discardHeldPostProcess()
 	for {
 		req, ok := s.postQueue.pop()
 		if !ok {
@@ -267,10 +183,9 @@ func startPostProcessWorkers() {
 	}
 }
 
-// postProcessWorker repeatedly takes one claimed session from ppQueue. It
-// sends a previously held batch when its reservation is due, processes more
-// queued packets within the per-session budget, then either requeues the
-// session, schedules its held batch, or releases its worker claim.
+// postProcessWorker repeatedly takes one claimed session from ppQueue,
+// processes packets within the per-session budget, and requeues the session
+// when more packets remain.
 func postProcessWorker() {
 	w := ppWorkers.Get().(*ppWorker)
 	for {
@@ -293,45 +208,7 @@ func postProcessWorker() {
 			continue
 		}
 
-		// The scheduled wake is at or after the reservation time. Taking the
-		// batch invalidates any duplicate or stale wake before it can run.
-		if h, bytes, reservation, _ := s.takeHeldPostProcess(); h != nil {
-			if !s.sendTx(h, bytes) {
-				if reservation != nil {
-					reservation.Cancel()
-				}
-				ppWorkers.Put(h)
-				s.finishPostProcess()
-				continue
-			}
-			ppWorkers.Put(h)
-		}
-
-		more, held := s.postProcess(w)
-		if held {
-			// The session owns w now; this worker switches to fresh storage and
-			// leaves the session claimed until the scheduled wake re-enqueues it.
-			w = ppWorkers.Get().(*ppWorker)
-			until, wake, scheduled := s.heldPostProcessUntil()
-			if !scheduled {
-				s.finishPostProcess()
-				continue
-			}
-			// The scheduler may coalesce tasks by running up to schedSlack early.
-			// Add that slack here so the reservation is never used prematurely.
-			SystemTimedSched.Put(func() {
-				sess := wake.session.Load()
-				if sess == nil {
-					return
-				}
-				if sess.isClosed() {
-					sess.finishPostProcess()
-					return
-				}
-				ppEnqueue(sess)
-			}, until.Add(schedSlack))
-			continue
-		}
+		more := s.postProcess(w)
 		if more {
 			ppEnqueue(s)
 			continue

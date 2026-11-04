@@ -168,11 +168,11 @@ The number of clock reads varies with the flush path: KCP samples time while che
 
 Many packet buffers are obtained from the package-wide `defaultBufferPool`, which provides buffers with a fixed capacity of 1500 bytes (`mtuLimit`). Buffers are returned to the pool when they are no longer needed, reducing repeated allocations. The pool uses `sync.Pool`, so the Go runtime may discard pooled buffers during garbage collection; reuse and retention are not guaranteed.
 
-### 4. Per-session Outbound Rate Limiting
+### 4. Per-session Application Write Rate Limiting
 
-`UDPSession.SetRateLimit(bytesPerSecond)` configures an independent token-bucket rate limit for that session's outgoing traffic. The limit is measured in bytes per second and counts the UDP payload bytes actually queued for transmission, including KCP/FEC/encryption overhead and FEC parity packets; it does not include UDP or IP headers. Rate limiting is disabled by default, and passing `0` disables it.
+`UDPSession.SetRateLimit(bytesPerSecond)` configures an independent token-bucket rate limit for application data submitted through `Write` and `WriteBuffers`. The limit is measured in application bytes per second. It does not count KCP/FEC/encryption overhead, FEC parity, retransmissions, `SendOOB` traffic, or UDP/IP headers. Rate limiting is disabled by default, and passing `0` disables it. A throttled write waits for tokens while remaining interruptible by its write deadline, socket write errors, and session closure.
 
-The bucket allows an initial burst of up to `maxBatchSize * mtuLimit` bytes (currently 64 × 1500 = 96,000 bytes), then limits the average send rate to the configured value. Outgoing packets are sent in batches; if a batch must wait for tokens, it is held and rescheduled rather than making a shared packet-processing worker sleep. A batch larger than the bucket's burst capacity cannot be reserved and is sent immediately, so configure workloads to keep batches within that capacity if strict limiting is required.
+The bucket allows an initial burst of up to `maxBatchSize * mtuLimit` bytes (currently 64 × 1500 = 96,000 bytes), then limits the average rate at which writes are accepted. Writes larger than the burst capacity are admitted in rate-limited chunks. This controls application write throughput rather than the exact rate of UDP packets on the wire.
 
 ```go
 sess.SetRateLimit(256 * 1024) // limit this session to 256 KiB/s

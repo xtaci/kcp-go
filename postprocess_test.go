@@ -153,41 +153,103 @@ func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
 	}
 }
 
-func TestDiscardHeldPostProcessCancelsReservation(t *testing.T) {
-	s := &UDPSession{}
-	held := &ppWorker{
-		txqueue: []ipv4.Message{{Buffers: [][]byte{defaultBufferPool.Get()}}},
-		bufs:    make([][]byte, 1),
-	}
-	held.bufs[0] = held.txqueue[0].Buffers[0]
-	limiter := rate.NewLimiter(1, 1)
-	now := time.Now()
-	if !limiter.AllowN(now, 1) {
+func TestWriteRateLimitWaitsAndAcceptsLargeWrites(t *testing.T) {
+	limiter := rate.NewLimiter(100, 2)
+	if !limiter.AllowN(time.Now(), 2) {
 		t.Fatal("failed to consume initial burst")
 	}
-	reservation := limiter.ReserveN(now, 1)
-	if !reservation.OK() || reservation.DelayFrom(now) <= 0 {
-		t.Fatal("expected a delayed rate-limit reservation")
-	}
-	if !s.setHeldPostProcess(held, len(held.txqueue[0].Buffers[0]), now.Add(reservation.DelayFrom(now)), reservation) {
-		t.Fatal("failed to hold batch")
-	}
-	_, wake, scheduled := s.heldPostProcessUntil()
-	if !scheduled || wake.session.Load() != s {
-		t.Fatal("held batch did not retain its scheduled session")
-	}
+	s := newRateLimitTestSession(limiter)
 
-	s.discardHeldPostProcess()
+	start := time.Now()
+	n, err := s.Write([]byte("12345"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 5 {
+		t.Fatalf("Write returned %d bytes, want 5", n)
+	}
+	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
+		t.Fatalf("Write returned after %v, want it to wait for rate tokens", elapsed)
+	}
+}
 
-	if w, _, _, _ := s.takeHeldPostProcess(); w != nil {
-		t.Fatal("held batch was not released")
+func TestWriteRateLimitHonorsDeadline(t *testing.T) {
+	limiter := rate.NewLimiter(10, 1)
+	if !limiter.Allow() {
+		t.Fatal("failed to consume initial burst")
 	}
-	if wake.session.Load() != nil {
-		t.Fatal("discarded timer still retains the session")
+	s := newRateLimitTestSession(limiter)
+	s.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
+
+	n, err := s.Write([]byte("x"))
+	if n != 0 || err == nil {
+		t.Fatalf("Write returned (%d, %v), want a timeout without writing data", n, err)
 	}
-	if tokens := limiter.TokensAt(now); tokens < -0.01 {
-		t.Fatalf("cancelled reservation left %f tokens, want at least 0", tokens)
+	if got := s.kcp.WaitSnd(); got != 0 {
+		t.Fatalf("timed-out Write queued %d KCP segments", got)
 	}
+}
+
+func TestWriteRateLimitReturnsAcceptedPrefixOnDeadline(t *testing.T) {
+	limiter := rate.NewLimiter(20, 2)
+	s := newRateLimitTestSession(limiter)
+	s.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
+
+	n, err := s.Write([]byte("12345"))
+	if n != 2 || err == nil {
+		t.Fatalf("Write returned (%d, %v), want 2 accepted bytes and a timeout", n, err)
+	}
+	if got := s.kcp.WaitSnd(); got != 1 {
+		t.Fatalf("Write queued %d KCP segments, want 1 for the accepted prefix", got)
+	}
+}
+
+func TestWriteRateLimitInterruptedByClose(t *testing.T) {
+	limiter := rate.NewLimiter(1, 1)
+	if !limiter.Allow() {
+		t.Fatal("failed to consume initial burst")
+	}
+	s := newRateLimitTestSession(limiter)
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := s.Write([]byte("x"))
+		writeDone <- err
+	}()
+	waiting := time.After(time.Second)
+	for limiter.Tokens() >= 0 {
+		select {
+		case <-waiting:
+			t.Fatal("Write did not reserve rate-limit tokens")
+		case <-time.After(time.Millisecond):
+		}
+	}
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- s.Close() }()
+
+	select {
+	case err := <-writeDone:
+		if !errors.Is(err, io.ErrClosedPipe) {
+			t.Fatalf("Write returned %v, want ErrClosedPipe", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Write did not unblock after Close")
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newRateLimitTestSession(limiter *rate.Limiter) *UDPSession {
+	s := &UDPSession{
+		die:                make(chan struct{}),
+		writeGate:          make(chan struct{}, 1),
+		chWriteEvent:       make(chan struct{}, 1),
+		chSocketWriteError: make(chan struct{}),
+		kcp:                NewKCP(1, func([]byte, int) {}),
+	}
+	s.writeGate <- struct{}{}
+	s.rateLimiter.Store(limiter)
+	return s
 }
 
 func TestFinishClosedPostProcessDrainsQueue(t *testing.T) {
@@ -206,8 +268,8 @@ func TestFinishClosedPostProcessDrainsQueue(t *testing.T) {
 	}
 }
 
-// Rate limited sessions waiting for tokens must not hold the shared
-// postProcess workers from a session without a limit.
+// Writes waiting for application-rate tokens must not hold shared
+// postProcess workers from an unlimited session.
 func TestPostProcessRateLimitedMixed(t *testing.T) {
 	port := nextPort()
 	l := sinkServer(port)

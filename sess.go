@@ -165,14 +165,6 @@ type (
 		ppRunning atomic.Bool // queued for or served by a postProcess worker
 		ppSendMu  sync.Mutex
 		ppClosing bool
-		ppHeldMu  sync.Mutex
-		ppHeld    struct { // a batch waiting for the rate limiter
-			w           *ppWorker
-			bytes       int
-			until       time.Time
-			reservation *rate.Reservation
-			wake        *ppWake
-		}
 
 		// platform-dependent optimizations
 		platform platform
@@ -180,7 +172,8 @@ type (
 		// rate limiter (bytes per second)
 		rateLimiter atomic.Pointer[rate.Limiter]
 
-		mu sync.Mutex
+		writeGate chan struct{}
+		mu        sync.Mutex
 
 		// callbackForOOB is an optional callback for handling received out-of-band (OOB) data.
 		//
@@ -205,6 +198,8 @@ type (
 // newUDPSession creates a new UDP session for a client or server.
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
+	sess.writeGate = make(chan struct{}, 1)
+	sess.writeGate <- struct{}{}
 	sess.die = make(chan struct{})
 	sess.chReadEvent = make(chan struct{}, 1)
 	sess.chWriteEvent = make(chan struct{}, 1)
@@ -338,6 +333,11 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, nil
 		}
 	}
+	if err := s.acquireWriteGate(); err != nil {
+		return 0, err
+	}
+	defer s.releaseWriteGate()
+
 	// The deadline timer is armed only when the write has to wait.
 	var timeout *time.Timer
 	for {
@@ -355,6 +355,12 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		// Ensure writes do not exceed the maximum sliding window on either side.
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) {
+			limiter := s.rateLimiter.Load()
+			if limiter != nil {
+				s.mu.Unlock()
+				return s.writeRateLimited(v, limiter)
+			}
+
 			// Transmit data sequentially, keeping each packet within mss.
 			for _, b := range v {
 				n += len(b)
@@ -398,6 +404,188 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		case <-s.die:
 			stopTimer(timeout)
 			return 0, errors.WithStack(io.ErrClosedPipe)
+		}
+	}
+}
+
+// writeRateLimited admits application data in chunks no larger than the
+// limiter burst. Each chunk enters KCP only after its reservation is due, so
+// an interrupted write reports the prefix already accepted by KCP.
+func (s *UDPSession) writeRateLimited(v [][]byte, limiter *rate.Limiter) (n int, err error) {
+	burst := limiter.Burst()
+	if burst <= 0 {
+		return 0, errors.New("rate limiter has no burst capacity")
+	}
+	remaining := buffersLen(v)
+	bufferIndex, bufferOffset := 0, 0
+	for remaining > 0 {
+		chunk := min(remaining, burst)
+		reservation := limiter.ReserveN(time.Now(), chunk)
+		if !reservation.OK() {
+			return n, errors.New("rate limiter rejected a write chunk")
+		}
+		if err := s.waitRateReservation(reservation); err != nil {
+			return n, err
+		}
+
+		s.mu.Lock()
+		select {
+		case <-s.chSocketWriteError:
+			reservation.Cancel()
+			s.mu.Unlock()
+			return n, s.socketWriteError.Load().(error)
+		case <-s.die:
+			reservation.Cancel()
+			s.mu.Unlock()
+			return n, errors.WithStack(io.ErrClosedPipe)
+		default:
+		}
+		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() && !time.Now().Before(deadline) {
+			reservation.Cancel()
+			s.mu.Unlock()
+			return n, errors.WithStack(errTimeout)
+		}
+
+		chunkRemaining := chunk
+		for chunkRemaining > 0 {
+			for bufferIndex < len(v) && bufferOffset == len(v[bufferIndex]) {
+				bufferIndex++
+				bufferOffset = 0
+			}
+			b := v[bufferIndex][bufferOffset:]
+			part := min(chunkRemaining, len(b))
+			toSend := b[:part]
+			for len(toSend) > 0 {
+				mss := int(s.kcp.mss)
+				if len(toSend) <= mss {
+					s.kcp.Send(toSend)
+					break
+				}
+				s.kcp.Send(toSend[:mss])
+				toSend = toSend[mss:]
+			}
+			bufferOffset += part
+			chunkRemaining -= part
+		}
+		waitsnd := s.kcp.WaitSnd()
+		if waitsnd >= int(s.kcp.snd_wnd) || !s.writeDelay {
+			s.kcp.flush(IKCP_FLUSH_FULL)
+		}
+		s.mu.Unlock()
+
+		n += chunk
+		atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(chunk))
+		remaining -= chunk
+	}
+	return n, nil
+}
+
+// acquireWriteGate serializes non-empty writes while allowing a blocked caller
+// to observe its deadline, socket errors, and session closure.
+func (s *UDPSession) acquireWriteGate() error {
+	select {
+	case <-s.writeGate:
+		return nil
+	default:
+	}
+	return s.waitWriteGate()
+}
+
+// waitWriteGate handles the contended gate path, including deadline updates
+// signaled through chWriteEvent.
+func (s *UDPSession) waitWriteGate() error {
+	var timeout *time.Timer
+	defer func() { stopTimer(timeout) }()
+
+	for {
+		select {
+		case <-s.chSocketWriteError:
+			return s.socketWriteError.Load().(error)
+		case <-s.die:
+			return errors.WithStack(io.ErrClosedPipe)
+		default:
+		}
+
+		deadline := armDeadline(&timeout, &s.wd)
+		select {
+		case <-s.writeGate:
+			stopTimer(timeout)
+			return nil
+		case <-deadline:
+			stopTimer(timeout)
+			if d, ok := s.wd.Load().(time.Time); ok && !d.IsZero() && !time.Now().Before(d) {
+				return errors.WithStack(errTimeout)
+			}
+		case <-s.chWriteEvent:
+			stopTimer(timeout)
+		case <-s.chSocketWriteError:
+			stopTimer(timeout)
+			return s.socketWriteError.Load().(error)
+		case <-s.die:
+			stopTimer(timeout)
+			return errors.WithStack(io.ErrClosedPipe)
+		}
+	}
+}
+
+// releaseWriteGate makes the session available to the next waiting writer.
+func (s *UDPSession) releaseWriteGate() {
+	s.writeGate <- struct{}{}
+}
+
+// waitRateReservation waits until a reserved chunk is eligible for admission.
+// It cancels the reservation when a deadline, socket error, or Close interrupts
+// the wait.
+func (s *UDPSession) waitRateReservation(reservation *rate.Reservation) error {
+	var timer *time.Timer
+	defer func() { stopTimer(timer) }()
+
+	for {
+		select {
+		case <-s.chSocketWriteError:
+			reservation.Cancel()
+			return s.socketWriteError.Load().(error)
+		case <-s.die:
+			reservation.Cancel()
+			return errors.WithStack(io.ErrClosedPipe)
+		default:
+		}
+
+		now := time.Now()
+		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() {
+			if !now.Before(deadline) {
+				reservation.Cancel()
+				return errors.WithStack(errTimeout)
+			}
+		}
+		delay := reservation.DelayFrom(now)
+		if delay <= 0 {
+			return nil
+		}
+		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() {
+			if untilDeadline := time.Until(deadline); untilDeadline < delay {
+				delay = untilDeadline
+			}
+		}
+		if timer == nil {
+			timer = time.NewTimer(delay)
+		} else {
+			stopTimer(timer)
+			timer.Reset(delay)
+		}
+
+		select {
+		case <-timer.C:
+		case <-s.chWriteEvent:
+			stopTimer(timer)
+		case <-s.chSocketWriteError:
+			stopTimer(timer)
+			reservation.Cancel()
+			return s.socketWriteError.Load().(error)
+		case <-s.die:
+			stopTimer(timer)
+			reservation.Cancel()
+			return errors.WithStack(io.ErrClosedPipe)
 		}
 	}
 }
@@ -606,8 +794,9 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 	return errInvalidOperation
 }
 
-// SetRateLimit sets the session's rate limit in bytes per second. A value of 0
-// disables rate limiting.
+// SetRateLimit limits the rate at which Write and WriteBuffers accept
+// application bytes. Protocol overhead, retransmissions, and SendOOB traffic
+// are not counted. A value of 0 disables rate limiting.
 func (s *UDPSession) SetRateLimit(bytesPerSecond uint32) {
 	var limiter *rate.Limiter
 	if bytesPerSecond > 0 {
@@ -644,15 +833,13 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 //
 // Pipeline: KCP output -> postQueue -> [FEC] -> [Encrypt] -> TxQueue -> Network
 //
-// It returns once the queue is empty, after ppBudget packets, or when s keeps
-// a batch for the rate limiter. The second result reports that s took
-// ownership of w for a rate-limited batch.
-func (s *UDPSession) postProcess(w *ppWorker) (more, held bool) {
+// It returns once the queue is empty or after ppBudget packets.
+func (s *UDPSession) postProcess(w *ppWorker) (more bool) {
 	bytesToSend := 0
 	for n := 0; n < ppBudget; n++ {
 		req, ok := s.postQueue.pop()
 		if !ok {
-			return false, false
+			return false
 		}
 		buf := req.buffer
 		oob := req.oob
@@ -736,15 +923,15 @@ func (s *UDPSession) postProcess(w *ppWorker) (more, held bool) {
 		// transmit when postQueue is empty or we've reached max batch size
 		if s.postQueue.len() == 0 || len(w.txqueue) >= maxBatchSize {
 			if s.flushTx(w, bytesToSend) {
-				return true, true
+				return true
 			}
 			bytesToSend = 0
 		}
 	}
 	if len(w.txqueue) > 0 && s.flushTx(w, bytesToSend) {
-		return true, true
+		return true
 	}
-	return s.postQueue.len() > 0, false
+	return s.postQueue.len() > 0
 }
 
 // update advances the KCP protocol state.
@@ -1578,6 +1765,14 @@ func buffersEmpty(v [][]byte) bool {
 		}
 	}
 	return true
+}
+
+// buffersLen returns the number of application bytes in a vector write.
+func buffersLen(v [][]byte) (n int) {
+	for _, b := range v {
+		n += len(b)
+	}
+	return n
 }
 
 // readLocked copies data that is ready into b and reports whether there was
