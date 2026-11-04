@@ -25,7 +25,11 @@ func TestTryReadWithNotify(t *testing.T) {
 	})
 
 	want := bytes.Repeat([]byte("0123456789abcdef"), 4096)
-	go func() { _, _ = sess.Write(want) }()
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := sess.Write(want)
+		writeDone <- err
+	}()
 
 	var got []byte
 	buf := make([]byte, 1500)
@@ -47,6 +51,9 @@ func TestTryReadWithNotify(t *testing.T) {
 	}
 	if !bytes.Equal(got, want) {
 		t.Fatal("echo mismatch")
+	}
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
 	}
 
 	sess.Close()

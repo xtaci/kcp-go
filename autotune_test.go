@@ -25,6 +25,8 @@ package kcp
 import (
 	"encoding/binary"
 	"fmt"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +42,41 @@ import (
 //
 // The exhaustive matrices cover finite sample windows. They cannot enumerate
 // an unbounded packet stream, so focused tests cover long-running state changes.
+func logAutoTunePattern(t *testing.T, tune *autoTune) {
+	t.Helper()
+	if tune.count == 0 {
+		t.Log("pattern: <empty>")
+		return
+	}
+
+	samples := make([]pulse, tune.count)
+	for i := range tune.count {
+		samples[i] = tune.pulses[(tune.head+i)%maxAutoTuneSamples]
+	}
+	sort.Slice(samples, func(i, j int) bool {
+		return _itimediff(samples[i].seq, samples[j].seq) < 0
+	})
+
+	var pattern strings.Builder
+	for i, sample := range samples {
+		if i > 0 {
+			delta := _itimediff(sample.seq, samples[i-1].seq)
+			switch {
+			case delta == 0:
+				pattern.WriteByte('=')
+			case delta > 1:
+				pattern.WriteString(strings.Repeat(".", int(delta)-1))
+			}
+		}
+		if sample.bit {
+			pattern.WriteByte('#')
+		} else {
+			pattern.WriteByte('_')
+		}
+	}
+	t.Logf("pattern: %s (#=data/high, _=parity/low, .=missing, = duplicate sequence)", pattern.String())
+}
+
 func TestAutoTuneOverflow(t *testing.T) {
 	// minimal test
 	tune := autoTune{}
@@ -872,6 +909,16 @@ func completePulsePeriodForSamples(samples []pulse, bit bool) int {
 }
 
 func TestFECDecoderAutoTunesConfigurationMatrix(t *testing.T) {
+	scenarios := []struct {
+		name      string
+		missing   bool
+		duplicate bool
+	}{
+		{name: "clean"},
+		{name: "duplicate_data", duplicate: true},
+		{name: "missing_shard", missing: true},
+		{name: "missing_and_duplicate", missing: true, duplicate: true},
+	}
 	configurations := make([]struct {
 		dataShards   int
 		parityShards int
@@ -912,27 +959,54 @@ func TestFECDecoderAutoTunesConfigurationMatrix(t *testing.T) {
 	)
 
 	for _, tc := range configurations {
-		t.Run(
-			fmt.Sprintf("%d-data-%d-parity", tc.dataShards, tc.parityShards),
-			func(t *testing.T) {
-				encoder := newFECEncoder(tc.dataShards, tc.parityShards, 0)
-				decoder := newFECDecoder(2, 2)
-				if encoder == nil || decoder == nil {
-					t.Fatal("failed to create FEC encoder or decoder")
-				}
+		for _, scenario := range scenarios {
+			t.Run(
+				fmt.Sprintf("%d-data-%d-parity/%s", tc.dataShards, tc.parityShards, scenario.name),
+				func(t *testing.T) {
+					encoder := newFECEncoder(tc.dataShards, tc.parityShards, 0)
+					decoder := newFECDecoder(2, 2)
+					if encoder == nil || decoder == nil {
+						t.Fatal("failed to create FEC encoder or decoder")
+					}
+					t.Cleanup(func() {
+						logAutoTunePattern(t, &decoder.autoTune)
+					})
 
-				for range 2 {
+					dropDataShard, dropParityShard, duplicateDataShard := -1, -1, -1
+					if scenario.missing {
+						if tc.dataShards > 1 {
+							dropDataShard = 1
+						} else {
+							dropParityShard = min(1, tc.parityShards-1)
+						}
+					}
+					if scenario.duplicate {
+						duplicateDataShard = tc.dataShards - 1
+						if duplicateDataShard == dropDataShard {
+							duplicateDataShard = 0
+						}
+					}
+					feedFECGroupWithMutations(t, encoder, decoder, dropDataShard, dropParityShard, duplicateDataShard)
+					if scenario.missing || scenario.duplicate {
+						t.Log("pattern after injected anomalies:")
+						logAutoTunePattern(t, &decoder.autoTune)
+					}
 					feedFECGroup(t, encoder, decoder, -1)
-				}
+					if scenario.missing {
+						// A 1-data/1-parity configuration needs another data
+						// edge after the recovered parity pulse.
+						feedFECGroup(t, encoder, decoder, -1)
+					}
 
-				if decoder.dataShards != tc.dataShards || decoder.parityShards != tc.parityShards {
-					t.Fatalf(
-						"auto-tuned to %d data/%d parity, want %d data/%d parity",
-						decoder.dataShards, decoder.parityShards, tc.dataShards, tc.parityShards,
-					)
-				}
-			},
-		)
+					if decoder.dataShards != tc.dataShards || decoder.parityShards != tc.parityShards {
+						t.Fatalf(
+							"auto-tuned to %d data/%d parity, want %d data/%d parity",
+							decoder.dataShards, decoder.parityShards, tc.dataShards, tc.parityShards,
+						)
+					}
+				},
+			)
+		}
 	}
 }
 
@@ -982,6 +1056,14 @@ func TestFECDecoderRejectsAutoTuneConfigurationOverShardLimit(t *testing.T) {
 }
 
 func feedFECGroup(t *testing.T, encoder *fecEncoder, decoder *fecDecoder, dropDataShard int) {
+	feedFECGroupWithMutations(t, encoder, decoder, dropDataShard, -1, -1)
+}
+
+func feedFECGroupWithDuplicate(t *testing.T, encoder *fecEncoder, decoder *fecDecoder, dropDataShard, duplicateDataShard int) {
+	feedFECGroupWithMutations(t, encoder, decoder, dropDataShard, -1, duplicateDataShard)
+}
+
+func feedFECGroupWithMutations(t *testing.T, encoder *fecEncoder, decoder *fecDecoder, dropDataShard, dropParityShard, duplicateDataShard int) {
 	t.Helper()
 	encoder.tsLatestPacket = time.Now().UnixMilli()
 	for dataShard := range encoder.dataShards {
@@ -989,8 +1071,14 @@ func feedFECGroup(t *testing.T, encoder *fecEncoder, decoder *fecDecoder, dropDa
 		parity := encoder.encode(packet, ^uint32(0))
 		if dataShard != dropDataShard {
 			recycleRecoveredShards(decoder.decode(packet))
+			if dataShard == duplicateDataShard {
+				recycleRecoveredShards(decoder.decode(packet))
+			}
 		}
-		for _, shard := range parity {
+		for parityShard, shard := range parity {
+			if parityShard == dropParityShard {
+				continue
+			}
 			recycleRecoveredShards(decoder.decode(fecPacket(shard)))
 		}
 	}

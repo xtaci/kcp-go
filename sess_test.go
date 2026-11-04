@@ -275,13 +275,14 @@ func TestTimeout(t *testing.T) {
 
 	buf := make([]byte, 10)
 
-	// timeout
-	cli.SetDeadline(time.Now().Add(time.Second))
-	<-time.After(2 * time.Second)
+	// A past deadline must reject reads immediately.
+	cli.SetDeadline(time.Now().Add(-time.Millisecond))
 	n, err := cli.Read(buf)
 	if n != 0 || err == nil {
-		t.Fail()
-		return
+		t.Fatalf("Read() = %d, %v, want 0 and a timeout error", n, err)
+	}
+	if errors.Cause(err) != errTimeout {
+		t.Fatalf("Read() error = %v, want a timeout error", err)
 	}
 }
 
@@ -799,11 +800,35 @@ func sink_tester(cli *UDPSession, msglen, msgcount int) error {
 }
 
 func TestSNMP(t *testing.T) {
-	t.Log(DefaultSnmp.Copy())
-	t.Log(DefaultSnmp.Header())
-	t.Log(DefaultSnmp.ToSlice())
-	DefaultSnmp.Reset()
-	t.Log(DefaultSnmp.ToSlice())
+	snmp := newSnmp()
+	snmp.BytesSent = 123
+	snmp.FECRecovered = 45
+	snmp.OOBPackets = 6
+
+	header := snmp.Header()
+	values := snmp.ToSlice()
+	if len(header) != len(values) {
+		t.Fatalf("Header() has %d values, ToSlice() has %d", len(header), len(values))
+	}
+	if header[0] != "BytesSent" || values[0] != "123" {
+		t.Fatalf("BytesSent = %q:%q, want %q:%q", header[0], values[0], "BytesSent", "123")
+	}
+
+	snapshot := snmp.Copy()
+	snmp.BytesSent = 999
+	if snapshot.BytesSent != 123 {
+		t.Fatalf("Copy().BytesSent = %d, want 123", snapshot.BytesSent)
+	}
+
+	snmp.Reset()
+	if got := snmp.Copy(); *got != (Snmp{}) {
+		t.Fatalf("Reset() = %+v, want zero Snmp", got)
+	}
+	for i, value := range snmp.ToSlice() {
+		if value != "0" {
+			t.Fatalf("ToSlice()[%d] = %q after Reset, want %q", i, value, "0")
+		}
+	}
 }
 
 func TestListenerClose(t *testing.T) {
@@ -814,13 +839,11 @@ func TestListenerClose(t *testing.T) {
 		return
 	}
 	defer l.Close()
-	l.SetReadDeadline(time.Now().Add(time.Second))
-	l.SetWriteDeadline(time.Now().Add(time.Second))
-	l.SetDeadline(time.Now().Add(time.Second))
-	time.Sleep(2 * time.Second)
+	l.SetReadDeadline(time.Now().Add(-time.Millisecond))
+	l.SetWriteDeadline(time.Now().Add(-time.Millisecond))
+	l.SetDeadline(time.Now().Add(-time.Millisecond))
 	if _, err := l.Accept(); err == nil {
-		t.Fail()
-		return
+		t.Fatal("Accept succeeded with an expired deadline")
 	}
 
 	l.Close()
@@ -992,8 +1015,15 @@ func TestControl(t *testing.T) {
 }
 
 func TestSessionReadAfterClosed(t *testing.T) {
-	us, _ := net.ListenPacket("udp", "127.0.0.1:0")
-	uc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	us, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	uc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		_ = us.Close()
+		t.Fatal(err)
+	}
 	defer us.Close()
 	defer uc.Close()
 
@@ -1012,39 +1042,41 @@ func TestSessionReadAfterClosed(t *testing.T) {
 	}
 
 	check := func(c1, c2 *UDPSession) {
-		done := make(chan struct{}, 1)
+		done := make(chan error, 1)
 		go func() {
 			rid, err := knockDoor(c2, "4321")
-			done <- struct{}{}
 			if err != nil {
-				panic(err)
+				done <- err
+				return
 			}
-
 			if rid != "1234" {
-				panic("mismatch id")
+				done <- fmt.Errorf("server received %q, want %q", rid, "1234")
+				return
 			}
+			done <- nil
 		}()
 
 		rid, err := knockDoor(c1, "1234")
 		if err != nil {
-			panic(err)
+			t.Fatal(err)
 		}
-
 		if rid != "4321" {
-			panic("mismatch id")
+			t.Fatalf("client received %q, want %q", rid, "4321")
 		}
-		<-done
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	c1, err := NewConn3(0, uc.LocalAddr(), nil, 0, 0, us)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	defer c1.Close()
 
 	c2, err := NewConn3(0, us.LocalAddr(), nil, 0, 0, uc)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	defer c2.Close()
 
@@ -1055,13 +1087,13 @@ func TestSessionReadAfterClosed(t *testing.T) {
 
 	c1, err = NewConn3(4321, uc.LocalAddr(), nil, 0, 0, us)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	defer c1.Close()
 
 	c2, err = NewConn3(4321, us.LocalAddr(), nil, 0, 0, uc)
 	if err != nil {
-		panic(err)
+		t.Fatal(err)
 	}
 	defer c2.Close()
 
@@ -1337,11 +1369,16 @@ func TestListenDial(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("Dialed")
-	conn.Write([]byte("hello"))
+	if _, err := conn.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
 	t.Log("Wrote data")
-	time.Sleep(100 * time.Millisecond)
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("server did not accept the connection")
+	}
 	conn.Close()
-	<-ch
 }
 
 // TestOOB verifies the end-to-end transmission and reception of OOB (Out-Of-Band) data:
