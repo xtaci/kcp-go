@@ -337,9 +337,6 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		return 0, err
 	}
 	defer s.releaseWriteGate()
-	if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() && !time.Now().Before(deadline) {
-		return 0, errors.WithStack(errTimeout)
-	}
 
 	// The deadline timer is armed only when the write has to wait.
 	var timeout *time.Timer
@@ -351,6 +348,10 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		case <-s.die:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
+		}
+		// Check the deadline after waits before attempting the write again.
+		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() && !time.Now().Before(deadline) {
+			return n, errors.WithStack(errTimeout)
 		}
 
 		s.mu.Lock()
@@ -448,7 +449,6 @@ func (s *UDPSession) writeRateLimited(v [][]byte, limiter *rate.Limiter) (n int,
 			s.mu.Unlock()
 			return n, errors.WithStack(errTimeout)
 		}
-
 		chunkRemaining := chunk
 		for chunkRemaining > 0 {
 			for bufferIndex < len(v) && bufferOffset == len(v[bufferIndex]) {

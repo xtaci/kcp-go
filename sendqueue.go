@@ -24,20 +24,18 @@ package kcp
 
 import "sync"
 
-// sendQueue holds a session's packets waiting for post processing. It allocates
-// its slice on demand and retains at most sendQueueKeep slots after draining,
-// whereas a channel holding devBacklog requests uses about 64 KB per session
-// on 64-bit platforms.
-// sendQueueKeep is the buffer a drained queue keeps for the next packets.
+// sendQueueKeep is the maximum slice capacity retained after the queue drains.
 const sendQueueKeep = 64
 
+// sendQueue is a bounded FIFO of packets awaiting post-processing. It grows
+// its backing slice on demand and drops oversized storage after draining.
 type sendQueue struct {
 	mu   sync.Mutex
 	q    []sendRequest
 	head int
 }
 
-// push queues r, or reports false when devBacklog packets are already waiting.
+// push appends r unless devBacklog requests are already queued.
 func (sq *sendQueue) push(r sendRequest) bool {
 	sq.mu.Lock()
 	defer sq.mu.Unlock()
@@ -53,8 +51,8 @@ func (sq *sendQueue) push(r sendRequest) bool {
 	return true
 }
 
-// pop takes the oldest packet. A drained queue keeps a buffer only up to
-// sendQueueKeep packets, so a burst does not stay allocated.
+// pop removes the oldest packet and releases the backing slice after draining
+// if its capacity exceeds sendQueueKeep.
 func (sq *sendQueue) pop() (sendRequest, bool) {
 	sq.mu.Lock()
 	defer sq.mu.Unlock()
