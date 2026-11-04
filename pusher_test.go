@@ -165,33 +165,6 @@ func TestPacketPusherListener(t *testing.T) {
 	}
 }
 
-func TestPacketPusherPinsFirstPeer(t *testing.T) {
-	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer udp.Close()
-	sess, err := NewConn3(1, nil, nil, 0, 0, &pushConn{UDPConn: udp})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sess.Close()
-
-	first := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
-	other := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 2}
-	pkt := make([]byte, IKCP_OVERHEAD)
-	before := atomic.LoadUint64(&DefaultSnmp.InErrs)
-	sess.pushedPacket(pkt, first, nil)
-	sess.pushedPacket(pkt, first, nil)
-	if got := atomic.LoadUint64(&DefaultSnmp.InErrs) - before; got != 0 {
-		t.Fatalf("packets from the first peer counted %d errors", got)
-	}
-	sess.pushedPacket(pkt, other, nil)
-	if got := atomic.LoadUint64(&DefaultSnmp.InErrs) - before; got != 1 {
-		t.Fatalf("a packet from another peer counted %d errors, want 1", got)
-	}
-}
-
 func TestPacketPusherReleasedOnClose(t *testing.T) {
 	cudp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {

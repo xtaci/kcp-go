@@ -211,7 +211,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 				dec.flagCache = make([]bool, dec.shardSize)
 				dec.paws = 0xffffffff / uint32(dec.shardSize) * uint32(dec.shardSize)
 				dec.newestShardId = in.seqid() / uint32(dec.shardSize)
-				atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.newestShardId))
+				DefaultSnmp.storeFECShardMin(dec.newestShardId)
 				//log.Println("autotune to :", dec.dataShards, dec.parityShards)
 			}
 			// reset shouldTune flag regardless of whether parameters changed
@@ -227,7 +227,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 	if !ok {
 		shard = newShardHeap()
 		dec.shardSet[shardId] = shard
-		atomic.AddUint64(&DefaultSnmp.FECShardSet, 1)
+		DefaultSnmp.increaseFECShardSet()
 	}
 
 	// ignore duplicate packets
@@ -237,7 +237,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 
 	// update statistics for parity shards
 	if in.flag() == typeParity {
-		atomic.AddUint64(&DefaultSnmp.FECParityShards, 1)
+		DefaultSnmp.increaseFECParityShards()
 	}
 
 	// push the packet into the shard heap
@@ -248,7 +248,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 	// update the newest shard id
 	if _itimediff(shardId*uint32(dec.shardSize), dec.newestShardId*uint32(dec.shardSize)) > 0 {
 		dec.newestShardId = shardId
-		atomic.StoreUint64(&DefaultSnmp.FECShardMin, uint64(dec.newestShardId))
+		DefaultSnmp.storeFECShardMin(dec.newestShardId)
 	}
 
 	// try to discard shard sets that are too old
@@ -288,7 +288,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 
 	// case 1: all data shards are present
 	if numDataShard == dec.dataShards {
-		atomic.AddUint64(&DefaultSnmp.FECFullShardSet, 1)
+		DefaultSnmp.increaseFECFullShardSet()
 		return nil
 	}
 
@@ -315,7 +315,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 	err := dec.codec.ReconstructData(shards)
 	if err != nil {
 		// recovery failed, record the error
-		atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
+		DefaultSnmp.increaseFECErrs()
 		// recycle new buffers if failed
 		// NOTE: if success, these buffers are returned in 'recovered' and will be recycled by the caller
 		defaultBufferPool.Puts(newBuffers)
@@ -330,7 +330,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 	}
 
 	// record the number of recovered packets
-	atomic.AddUint64(&DefaultSnmp.FECRecovered, uint64(len(recovered)))
+	DefaultSnmp.addFECRecovered(len(recovered))
 	return recovered
 }
 
@@ -352,7 +352,7 @@ func (dec *fecDecoder) discardShards() {
 		}
 	}
 
-	atomic.StoreUint64(&DefaultSnmp.FECShardSet, uint64(len(dec.shardSet)))
+	DefaultSnmp.storeFECShardSet(len(dec.shardSet))
 }
 
 type (
@@ -479,7 +479,7 @@ func (enc *fecEncoder) encode(b []byte, rto uint32) [][]byte {
 	err := enc.codec.Encode(cache)
 	if err != nil {
 		// encoding failed, record the error but keep the seqid monotonic increasing
-		atomic.AddUint64(&DefaultSnmp.FECErrs, 1)
+		DefaultSnmp.increaseFECErrs()
 		enc.skipParity()
 		return nil
 	}

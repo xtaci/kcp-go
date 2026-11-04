@@ -23,8 +23,6 @@
 package kcp
 
 import (
-	"sync/atomic"
-
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 )
@@ -43,6 +41,6 @@ func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
 		nbytes += n
 		npkts++
 	}
-	atomic.AddUint64(&DefaultSnmp.OutPkts, uint64(npkts))
-	atomic.AddUint64(&DefaultSnmp.OutBytes, uint64(nbytes))
+	DefaultSnmp.addOutPkts(npkts)
+	DefaultSnmp.addOutBytes(nbytes)
 }

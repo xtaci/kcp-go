@@ -25,7 +25,6 @@ package kcp
 import (
 	"container/heap"
 	"encoding/binary"
-	"sync/atomic"
 	"time"
 )
 
@@ -145,7 +144,7 @@ func (seg *segment) encode(ptr []byte) []byte {
 	binary.LittleEndian.PutUint32(ptr[12:], seg.sn)
 	binary.LittleEndian.PutUint32(ptr[16:], seg.una)
 	binary.LittleEndian.PutUint32(ptr[20:], uint32(len(seg.data)))
-	atomic.AddUint64(&DefaultSnmp.OutSegs, 1)
+	DefaultSnmp.increaseOutSegs()
 	return ptr[IKCP_OVERHEAD:]
 }
 
@@ -676,7 +675,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 				}
 			}
 			if pktType == IKCP_PACKET_REGULAR && repeat {
-				atomic.AddUint64(&DefaultSnmp.RepeatSegs, 1)
+				DefaultSnmp.increaseRepeatSegs()
 			}
 			if kcpTrace {
 				kcp.debugLog(IKCP_LOG_IN_PUSH, "conv", conv, "sn", sn, "una", una, "ts", ts, "packettype", pktType, "repeat", repeat)
@@ -699,7 +698,7 @@ func (kcp *KCP) Input(data []byte, pktType PacketType, ackNoDelay bool) int {
 		inSegs++
 		data = data[length:]
 	}
-	atomic.AddUint64(&DefaultSnmp.InSegs, inSegs)
+	DefaultSnmp.addInSegs(inSegs)
 
 	// update rtt with the latest ts
 	// ignore the FEC packet
@@ -961,18 +960,18 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 	// --- Phase 6: Update SNMP counters and congestion window ---
 	sum := lostSegs
 	if lostSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.LostSegs, lostSegs)
+		DefaultSnmp.addLostSegs(lostSegs)
 	}
 	if fastRetransSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.FastRetransSegs, fastRetransSegs)
+		DefaultSnmp.addFastRetransSegs(fastRetransSegs)
 		sum += fastRetransSegs
 	}
 	if earlyRetransSegs > 0 {
-		atomic.AddUint64(&DefaultSnmp.EarlyRetransSegs, earlyRetransSegs)
+		DefaultSnmp.addEarlyRetransSegs(earlyRetransSegs)
 		sum += earlyRetransSegs
 	}
 	if sum > 0 {
-		atomic.AddUint64(&DefaultSnmp.RetransSegs, sum)
+		DefaultSnmp.addRetransSegs(sum)
 	}
 
 	// cwnd update
@@ -1003,9 +1002,10 @@ func (kcp *KCP) flush(flushType FlushType) (nextUpdate uint32) {
 	if size := len(buffer) - len(ptr); size > 0 {
 		kcp.output(buffer, size)
 	}
-	atomic.StoreUint64(&DefaultSnmp.RingBufferSndQueue, uint64(kcp.snd_queue.Len()))
-	atomic.StoreUint64(&DefaultSnmp.RingBufferRcvQueue, uint64(kcp.rcv_queue.Len()))
-	atomic.StoreUint64(&DefaultSnmp.RingBufferSndBuffer, uint64(kcp.snd_buf.Len()))
+
+	DefaultSnmp.storeRingBufferSndQueue(kcp.snd_queue.Len())
+	DefaultSnmp.storeRingBufferRcvQueue(kcp.rcv_queue.Len())
+	DefaultSnmp.storeRingBufferSndBuffer(kcp.snd_buf.Len())
 	return nextUpdate
 }
 

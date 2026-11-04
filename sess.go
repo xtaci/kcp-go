@@ -270,20 +270,16 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		} else {
 			go sess.readLoop()
 		}
-		atomic.AddUint64(&DefaultSnmp.ActiveOpens, 1)
+		DefaultSnmp.increaseActiveOpens()
 	} else {
-		atomic.AddUint64(&DefaultSnmp.PassiveOpens, 1)
+		DefaultSnmp.increasePassiveOpens()
 	}
 
 	// start per-session updater
 	sess.updateFn = sess.update
 	SystemTimedSched.Put(sess.updateFn, time.Now())
 
-	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
-	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
-	if currestab > maxconn {
-		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
-	}
+	DefaultSnmp.increaseCurrEstab()
 
 	return sess
 }
@@ -338,7 +334,7 @@ func (s *UDPSession) read(b []byte) (n int, ok bool) {
 		return
 	}
 
-	atomic.AddUint64(&DefaultSnmp.BytesReceived, uint64(n))
+	DefaultSnmp.addBytesReceived(n)
 	return
 }
 
@@ -404,7 +400,7 @@ func (s *UDPSession) writeBuffers(v [][]byte) (n int, ok bool) {
 		return
 	}
 
-	atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
+	DefaultSnmp.addBytesSent(n)
 	s.writeWait(n)
 	return
 }
@@ -533,7 +529,7 @@ func (s *UDPSession) Close() error {
 		s.ppClosing = true
 		s.ppSendMu.Unlock()
 
-		atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+		DefaultSnmp.decreaseCurrEstab()
 		s.callReadNotify()
 		s.discardPostProcess()
 
@@ -1049,7 +1045,7 @@ func (s *UDPSession) packetInput(data []byte) {
 
 		plaintext, err := block.Open(ciphertext[:0], nonce, ciphertext, nil)
 		if err != nil {
-			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+			DefaultSnmp.increaseInCsumErrors()
 			return
 		}
 
@@ -1065,7 +1061,7 @@ func (s *UDPSession) packetInput(data []byte) {
 
 		checksum := crc32.ChecksumIEEE(data[crcSize:])
 		if checksum != binary.LittleEndian.Uint32(data) {
-			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+			DefaultSnmp.increaseInCsumErrors()
 			return
 		}
 
@@ -1075,7 +1071,7 @@ func (s *UDPSession) packetInput(data []byte) {
 	// basic check for minimum packet size
 	// NOTE: OOB allows sending small packets and even empty packets.
 	if len(data) < min(IKCP_OVERHEAD, fecHeaderSizePlus2+convSize) {
-		atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+		DefaultSnmp.addKCPInErrors(1)
 		return
 	}
 
@@ -1093,8 +1089,8 @@ func (s *UDPSession) packetInput(data []byte) {
 // Note: KCP cmd values [81-84] with frg [0-255] do not collide with
 // FEC type markers 0x00f1/0x00f2/0x00f3 in little-endian.
 func (s *UDPSession) kcpInput(data []byte) {
-	atomic.AddUint64(&DefaultSnmp.InPkts, 1)
-	atomic.AddUint64(&DefaultSnmp.InBytes, uint64(len(data)))
+	DefaultSnmp.increaseInPkts()
+	DefaultSnmp.addInBytes(len(data))
 
 	// The 16-bit KCP cmd/frg field (cmd 81-84, frg 0-255) cannot match the FEC
 	// type markers 0x00f1-0x00f3.
@@ -1103,7 +1099,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 	switch fecFlag {
 	case typeData, typeParity: // packet with FEC
 		if len(data) < fecHeaderSizePlus2 {
-			atomic.AddUint64(&DefaultSnmp.InErrs, 1)
+			DefaultSnmp.increaseInErrs()
 			return
 		}
 
@@ -1158,11 +1154,11 @@ func (s *UDPSession) kcpInput(data []byte) {
 		}
 
 		if kcpInErrors > 0 {
-			atomic.AddUint64(&DefaultSnmp.KCPInErrors, kcpInErrors)
+			DefaultSnmp.addKCPInErrors(kcpInErrors)
 		}
 	case typeOOB:
 		// Count received OOB packet
-		atomic.AddUint64(&DefaultSnmp.OOBPackets, 1)
+		DefaultSnmp.increaseOOBPackets()
 		// If an OOB callback is registered, invoke it synchronously.
 		// The callback is responsible for ensuring non-blocking behavior.
 		if callback := s.callbackForOOB.Load(); callback != nil {
@@ -1174,7 +1170,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		defer s.mu.Unlock()
 
 		if ret := s.kcp.Input(data, IKCP_PACKET_REGULAR, s.ackNoDelay); ret != 0 {
-			atomic.AddUint64(&DefaultSnmp.KCPInErrors, 1)
+			DefaultSnmp.addKCPInErrors(1)
 		}
 
 		if n := s.kcp.PeekSize(); n > 0 {
@@ -1235,7 +1231,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 
 		plaintext, err := block.Open(ciphertext[:0], nonce, ciphertext, nil)
 		if err != nil {
-			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+			DefaultSnmp.increaseInCsumErrors()
 			return
 		}
 
@@ -1251,7 +1247,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 
 		checksum := crc32.ChecksumIEEE(data[crcSize:])
 		if checksum != binary.LittleEndian.Uint32(data) {
-			atomic.AddUint64(&DefaultSnmp.InCsumErrors, 1)
+			DefaultSnmp.increaseInCsumErrors()
 			return
 		}
 

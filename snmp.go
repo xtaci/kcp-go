@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+//go:build !kcp_no_snmp
+
 package kcp
 
 import (
@@ -209,8 +211,4 @@ func (s *Snmp) Reset() {
 }
 
 // DefaultSnmp is the global KCP connection statistics collector
-var DefaultSnmp *Snmp
-
-func init() {
-	DefaultSnmp = newSnmp()
-}
+var DefaultSnmp *Snmp = newSnmp()
