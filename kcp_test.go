@@ -25,6 +25,7 @@ package kcp
 import (
 	"bytes"
 	"container/heap"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -145,14 +146,18 @@ func testlink(t *testing.T, client, server *lossyconn.LossyConn, block BlockCryp
 	}
 
 	done := make(chan struct{})
+	serverDone := make(chan struct{})
+	serverErr := make(chan error, 1)
 	serverSessions := make(chan *UDPSession, 1)
 	go func() {
+		defer close(serverDone)
 		conn, err := listener.AcceptKCP()
 		if err != nil {
 			return
 		}
 		serverSessions <- conn
 		if err := conn.SetDeadline(time.Now().Add(lossyTestTimeout)); err != nil {
+			serverErr <- fmt.Errorf("set echo server deadline: %w", err)
 			return
 		}
 		conn.SetNoDelay(nodelay, interval, resend, nc)
@@ -163,7 +168,7 @@ func testlink(t *testing.T, client, server *lossyconn.LossyConn, block BlockCryp
 				select {
 				case <-done:
 				default:
-					t.Errorf("echo server read: %v", err)
+					serverErr <- fmt.Errorf("echo server read: %w", err)
 				}
 				return
 			}
@@ -171,7 +176,7 @@ func testlink(t *testing.T, client, server *lossyconn.LossyConn, block BlockCryp
 				select {
 				case <-done:
 				default:
-					t.Errorf("echo server write: %v", err)
+					serverErr <- fmt.Errorf("echo server write: %w", err)
 				}
 				return
 			}
@@ -180,15 +185,28 @@ func testlink(t *testing.T, client, server *lossyconn.LossyConn, block BlockCryp
 
 	defer func() {
 		close(done)
+		var conn *UDPSession
 		select {
-		case conn := <-serverSessions:
-			_ = conn.Close()
+		case conn = <-serverSessions:
 		default:
+		}
+		if conn != nil {
+			_ = conn.Close()
 		}
 		_ = listener.Close()
 		_ = sess.Close()
 		_ = client.Close()
 		_ = server.Close()
+		select {
+		case <-serverDone:
+		case <-time.After(time.Second):
+			t.Error("echo server did not stop")
+		}
+		select {
+		case err := <-serverErr:
+			t.Error(err)
+		default:
+		}
 	}()
 
 	if err := sess.SetDeadline(time.Now().Add(lossyTestTimeout)); err != nil {

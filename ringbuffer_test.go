@@ -25,19 +25,19 @@ func TestRingSize(t *testing.T) {
 		r.Push(i)
 	}
 
+	rng := rand.New(rand.NewSource(1))
 	for {
-		use := rand.Int() % (left + 1)
+		use := rng.Intn(left + 1)
 		left -= use
 		for range use {
 			if _, ok := r.Pop(); !ok {
-				t.Errorf("Expected to pop value, but got none")
+				t.Fatal("expected to pop value, but got none")
 			}
 		}
 		if r.Len() != left {
-			t.Errorf("Expected length %d after popping, got %d", left, r.Len())
+			t.Fatalf("expected length %d after popping, got %d", left, r.Len())
 		}
 
-		t.Log("use", use, "left", left, "head", r.head, "tail", r.tail, "len", r.Len(), "maxlen", r.MaxLen())
 		if left == 0 {
 			break
 		}

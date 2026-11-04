@@ -54,6 +54,7 @@ func TestPostProcessRateLimitedMixed(t *testing.T) {
 	// limit lets out.
 	stop := make(chan struct{})
 	defer close(stop)
+	limited := make([]*UDPSession, 0, 16)
 	for i := 0; i < 16; i++ {
 		s, err := dialSink(port)
 		if err != nil {
@@ -61,6 +62,7 @@ func TestPostProcessRateLimitedMixed(t *testing.T) {
 		}
 		defer s.Close()
 		s.SetRateLimit(32 * 1024)
+		limited = append(limited, s)
 		go func() {
 			buf := make([]byte, 64*1024)
 			for {
@@ -75,8 +77,7 @@ func TestPostProcessRateLimitedMixed(t *testing.T) {
 			}
 		}()
 	}
-	// Let the limiters spend their bursts.
-	time.Sleep(time.Second)
+	waitForRateLimiters(t, limited)
 
 	eport := nextPort()
 	el := echoServer(eport, nil)
@@ -97,5 +98,32 @@ func TestPostProcessRateLimitedMixed(t *testing.T) {
 	t.Logf("unlimited session echoed 256 KiB in %v", took)
 	if took > 2*time.Second {
 		t.Fatalf("unlimited session took %v behind rate limited ones", took)
+	}
+}
+
+func waitForRateLimiters(t *testing.T, sessions []*UDPSession) {
+	t.Helper()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		waiting := true
+		for _, session := range sessions {
+			limiter := session.rateLimiter.Load()
+			if limiter == nil || limiter.Tokens() >= 0 {
+				waiting = false
+				break
+			}
+		}
+		if waiting {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatal("rate limited sessions did not exhaust their bursts")
+		}
 	}
 }
