@@ -676,6 +676,10 @@ func TestPlainTextSendRecv(t *testing.T) {
 }
 
 func Test1GBEcho(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s in short mode.", t.Name())
+	}
+
 	port := nextPort()
 	l := echoServer(port, nil)
 	defer l.Close()
@@ -690,6 +694,10 @@ func Test1GBEcho(t *testing.T) {
 }
 
 func Test6GBEcho(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s in short mode.", t.Name())
+	}
+
 	port := nextPort()
 	l := echoServer(port, nil)
 	defer l.Close()
