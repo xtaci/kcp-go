@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	mrand "math/rand"
 	"net"
 	"os"
@@ -336,6 +337,152 @@ func TestWriteRateLimitReturnsAcceptedPrefixOnDeadline(t *testing.T) {
 	if got := s.kcp.WaitSnd(); got != 1 {
 		t.Fatalf("Write queued %d KCP segments, want 1 for the accepted prefix", got)
 	}
+}
+
+func TestWriteRateLimitEndToEndThroughput(t *testing.T) {
+	const (
+		targetRate  = 1_000_000
+		duration    = 12 * time.Second
+		warmupTicks = 2
+	)
+
+	l, err := listenSink(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	var received int64
+	accepted := make(chan error, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		conn, err := l.Accept()
+		if err != nil {
+			accepted <- err
+			return
+		}
+
+		sess := conn.(*UDPSession)
+		sess.SetStreamMode(true)
+		sess.SetWindowSize(1024, 1024)
+		sess.SetNoDelay(1, 10, 2, 1)
+		sess.SetReadDeadline(time.Now().Add(30 * time.Second))
+		accepted <- nil
+
+		buf := make([]byte, 64*1024)
+		for {
+			n, err := sess.Read(buf)
+			if n > 0 {
+				atomic.AddInt64(&received, int64(n))
+			}
+			if err != nil {
+				readErr <- err
+				return
+			}
+		}
+	}()
+
+	client, err := DialWithOptions(l.Addr().String(), nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetStreamMode(true)
+	client.SetWindowSize(1024, 1024)
+	client.SetNoDelay(1, 10, 2, 1)
+	client.SetMtu(1400)
+	client.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	client.SetRateLimit(targetRate)
+
+	stopWriter := make(chan struct{})
+	writerDone := make(chan struct{})
+	writerErr := make(chan error, 1)
+	go func() {
+		defer close(writerDone)
+		payload := make([]byte, 64*1024)
+		for {
+			select {
+			case <-stopWriter:
+				return
+			default:
+			}
+			if _, err := client.Write(payload); err != nil {
+				select {
+				case <-stopWriter:
+					return
+				default:
+					writerErr <- err
+					return
+				}
+			}
+		}
+	}()
+	defer func() {
+		close(stopWriter)
+		_ = client.Close()
+		<-writerDone
+	}()
+
+	select {
+	case err := <-accepted:
+		if err != nil {
+			t.Fatalf("listener Accept failed: %v", err)
+		}
+	case err := <-writerErr:
+		t.Fatalf("limited Write failed before the receiver accepted: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("receiver did not accept the KCP session")
+	}
+
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	var samples []float64
+	lastAt := time.Now()
+	lastBytes := atomic.LoadInt64(&received)
+	for tick := 0; tick < int(duration/time.Second); tick++ {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			currentBytes := atomic.LoadInt64(&received)
+			rate := float64(currentBytes-lastBytes) / now.Sub(lastAt).Seconds()
+			lastAt, lastBytes = now, currentBytes
+			if tick >= warmupTicks {
+				samples = append(samples, rate)
+			}
+		case err := <-writerErr:
+			t.Fatalf("limited Write failed: %v", err)
+		case err := <-readErr:
+			t.Fatalf("receiver Read failed: %v", err)
+		}
+	}
+
+	var mean float64
+	for _, sample := range samples {
+		mean += sample
+	}
+	mean /= float64(len(samples))
+	if mean < targetRate*0.9 || mean > targetRate*1.1 {
+		t.Fatalf("mean receive rate = %.0f B/s, want %d ±10%%; samples: %v", mean, targetRate, samples)
+	}
+
+	var squaredDiffs float64
+	for _, sample := range samples {
+		diff := sample - mean
+		squaredDiffs += diff * diff
+	}
+	stddev := math.Sqrt(squaredDiffs / float64(len(samples)-1))
+	inRange := 0
+	for _, sample := range samples {
+		if sample >= mean-2*stddev && sample <= mean+2*stddev {
+			inRange++
+		}
+	}
+	requiredInRange := int(math.Ceil(0.95 * float64(len(samples))))
+	if inRange < requiredInRange {
+		t.Fatalf("%d/%d receive-rate samples fell within mean ±2σ (mean %.0f, σ %.0f); samples: %v",
+			inRange, len(samples), mean, stddev, samples)
+	}
+	t.Logf("receive rate: mean %.0f B/s, σ %.0f B/s; %d/%d samples within mean ±2σ",
+		mean, stddev, inRange, len(samples))
 }
 
 func TestWriteRateLimitInterruptedByClose(t *testing.T) {
