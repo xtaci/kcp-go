@@ -1,6 +1,7 @@
 module github.com/xtaci/kcp-go/v5
 
 require (
+	github.com/juju/ratelimit v1.0.2
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.6.1
@@ -9,7 +10,6 @@ require (
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.61.0
 	golang.org/x/sys v0.49.0
-	golang.org/x/time v0.16.0
 )
 
 require (
