@@ -163,10 +163,15 @@ type (
 		// packets waiting to be sent on wire
 		postQueue sendQueue
 		ppRunning atomic.Bool // queued for or served by a postProcess worker
-		ppHeld    struct {    // a batch waiting for the rate limiter
-			w     *ppWorker
-			bytes int
-			until time.Time
+		ppSendMu  sync.Mutex
+		ppClosing bool
+		ppHeldMu  sync.Mutex
+		ppHeld    struct { // a batch waiting for the rate limiter
+			w           *ppWorker
+			bytes       int
+			until       time.Time
+			reservation *rate.Reservation
+			wake        *ppWake
 		}
 
 		// platform-dependent optimizations
@@ -408,38 +413,42 @@ func (s *UDPSession) isClosed() bool {
 
 // Close closes the connection.
 func (s *UDPSession) Close() error {
+	var retErr error
 	var once bool
 	s.dieOnce.Do(func() {
-		close(s.die)
 		once = true
-	})
 
+		// try best to send all queued messages especially the data in txqueue
+		s.mu.Lock()
+		s.kcp.flush((IKCP_FLUSH_FULL))
+		close(s.die)
+		s.mu.Unlock()
+
+		s.ppSendMu.Lock()
+		s.ppClosing = true
+		s.ppSendMu.Unlock()
+
+		atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
+		s.callReadNotify()
+		s.discardPostProcess()
+
+		if s.l != nil { // belongs to listener
+			s.l.closeSession(s.remote)
+			return
+		}
+
+		if pp, ok := s.conn.(PacketPusher); ok {
+			pp.SetPacketReceiver(nil)
+		}
+
+		if s.ownConn { // client socket close
+			retErr = s.conn.Close()
+		}
+	})
 	if !once {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-
-	atomic.AddUint64(&DefaultSnmp.CurrEstab, ^uint64(0))
-	s.callReadNotify()
-
-	// try best to send all queued messages especially the data in txqueue
-	s.mu.Lock()
-	s.kcp.flush((IKCP_FLUSH_FULL))
-	s.mu.Unlock()
-
-	if s.l != nil { // belongs to listener
-		s.l.closeSession(s.remote)
-		return nil
-	}
-
-	if pp, ok := s.conn.(PacketPusher); ok {
-		pp.SetPacketReceiver(nil)
-	}
-
-	if s.ownConn { // client socket close
-		return s.conn.Close()
-	}
-
-	return nil
+	return retErr
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
@@ -636,13 +645,14 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 // Pipeline: KCP output -> postQueue -> [FEC] -> [Encrypt] -> TxQueue -> Network
 //
 // It returns once the queue is empty, after ppBudget packets, or when s keeps
-// a batch for the rate limiter, and reports whether s needs serving again.
-func (s *UDPSession) postProcess(w *ppWorker) bool {
+// a batch for the rate limiter. The second result reports that s took
+// ownership of w for a rate-limited batch.
+func (s *UDPSession) postProcess(w *ppWorker) (more, held bool) {
 	bytesToSend := 0
 	for n := 0; n < ppBudget; n++ {
 		req, ok := s.postQueue.pop()
 		if !ok {
-			return false
+			return false, false
 		}
 		buf := req.buffer
 		oob := req.oob
@@ -726,15 +736,15 @@ func (s *UDPSession) postProcess(w *ppWorker) bool {
 		// transmit when postQueue is empty or we've reached max batch size
 		if s.postQueue.len() == 0 || len(w.txqueue) >= maxBatchSize {
 			if s.flushTx(w, bytesToSend) {
-				return true
+				return true, true
 			}
 			bytesToSend = 0
 		}
 	}
 	if len(w.txqueue) > 0 && s.flushTx(w, bytesToSend) {
-		return true
+		return true, true
 	}
-	return s.postQueue.len() > 0
+	return s.postQueue.len() > 0, false
 }
 
 // update advances the KCP protocol state.

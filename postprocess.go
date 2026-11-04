@@ -25,9 +25,11 @@ package kcp
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/ipv4"
+	"golang.org/x/time/rate"
 )
 
 // ppBudget is how many packets a worker takes from one session before it
@@ -36,6 +38,8 @@ const ppBudget = 4 * maxBatchSize
 
 // ppQueue holds the sessions with packets waiting for postProcess. A fixed
 // set of workers serves every session, so an idle session holds no goroutine.
+// ppRunning ensures that a session appears at most once in this queue or is
+// being handled by a worker. head avoids shifting entries after each dequeue.
 var ppQueue struct {
 	once sync.Once
 	mu   sync.Mutex
@@ -44,18 +48,29 @@ var ppQueue struct {
 	head int
 }
 
-// ppWorker holds the TX batch of one worker, reused for every session it serves.
+// ppWorker owns a batch while a worker transforms queued packets into UDP
+// datagrams. Its slices are reused between sessions to reduce allocations.
 type ppWorker struct {
 	txqueue []ipv4.Message
 	bufs    [][]byte
 }
 
-// oneBuf returns a one-element Buffers slice for b, backed by w.bufs.
+// ppWake is the cancellable handle captured by a delayed scheduler task.
+// Clearing session releases the session before the task's deadline if the
+// held batch is sent or discarded first.
+type ppWake struct {
+	session atomic.Pointer[UDPSession]
+}
+
+// oneBuf appends b to the worker-owned slice and returns a one-element view
+// suitable for ipv4.Message.Buffers. recycle clears that view before reuse.
 func (w *ppWorker) oneBuf(b []byte) [][]byte {
 	w.bufs = append(w.bufs, b)
 	return w.bufs[len(w.bufs)-1 : len(w.bufs) : len(w.bufs)]
 }
 
+// recycle returns every datagram buffer to the shared pool and clears
+// references held by the worker's message and slice arrays.
 func (w *ppWorker) recycle() {
 	for k := range w.txqueue {
 		defaultBufferPool.Put(w.txqueue[k].Buffers[0])
@@ -66,7 +81,9 @@ func (w *ppWorker) recycle() {
 	w.bufs = w.bufs[:0]
 }
 
-// ppWorkers recycles batches handed to a rate limited session and back.
+// ppWorkers reuses batch storage. Usually a worker keeps its ppWorker; when a
+// session holds a batch for rate limiting, that worker obtains another one
+// until the held batch is sent or discarded.
 var ppWorkers = sync.Pool{New: func() any {
 	return &ppWorker{
 		txqueue: make([]ipv4.Message, 0, maxBatchSize),
@@ -74,17 +91,29 @@ var ppWorkers = sync.Pool{New: func() any {
 	}
 }}
 
-// flushTx sends the batch in w. When the rate limiter needs time first, s
-// keeps the batch and flushTx reports true, so that no worker sleeps while
-// other sessions wait for it.
+// flushTx sends w immediately or transfers ownership of it to s when the
+// session's byte rate limiter reserves a future send time. It returns true
+// when the caller must not reuse w: the batch was either held or discarded.
+// A worker never waits for limiter tokens, leaving it available to serve other
+// sessions.
 func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
+	if s.isClosed() {
+		w.recycle()
+		ppWorkers.Put(w)
+		return true
+	}
 	if limiter := s.rateLimiter.Load(); limiter != nil {
 		now := time.Now()
 		// A batch larger than the burst cannot be reserved, so it is sent
 		// immediately without rate limiting.
 		if r := limiter.ReserveN(now, bytesToSend); r.OK() {
 			if d := r.DelayFrom(now); d > 0 {
-				s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until = w, bytesToSend, now.Add(d)
+				if s.setHeldPostProcess(w, bytesToSend, now.Add(d), r) {
+					return true
+				}
+				r.Cancel()
+				w.recycle()
+				ppWorkers.Put(w)
 				return true
 			}
 		}
@@ -93,7 +122,17 @@ func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
 	return false
 }
 
-func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) {
+// sendTx performs the platform-specific send for a completed batch, emits a
+// trace record when enabled, and recycles the batch buffers. ppSendMu keeps
+// Close from returning while a send is in progress and rejects sends after
+// Close has shut the gate.
+func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) bool {
+	s.ppSendMu.Lock()
+	defer s.ppSendMu.Unlock()
+	if s.ppClosing {
+		w.recycle()
+		return false
+	}
 	s.tx(w.txqueue)
 	if kcpTrace {
 		s.mu.Lock()
@@ -101,25 +140,104 @@ func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) {
 		s.mu.Unlock()
 	}
 	w.recycle()
+	return true
 }
 
-// kickPostProcess queues s for a worker unless it is already queued or being
-// served. Callers queue their packet first.
+// kickPostProcess schedules s after its caller enqueues a packet. The atomic
+// claim prevents concurrent producers from queueing the same session twice.
 func (s *UDPSession) kickPostProcess() {
 	if s.claimPostProcess() {
 		ppEnqueue(s)
 	}
 }
 
+// claimPostProcess changes the session from idle to queued-or-running.
 func (s *UDPSession) claimPostProcess() bool {
 	return s.ppRunning.CompareAndSwap(false, true)
 }
 
+// finishPostProcess relinquishes the current worker claim. If the session is
+// still open and packets arrived during processing, it claims the session
+// again so the caller can enqueue another worker pass. Closed sessions instead
+// release any held batch and queued packet buffers.
 func (s *UDPSession) finishPostProcess() bool {
 	s.ppRunning.Store(false)
+	if s.isClosed() {
+		s.discardPostProcess()
+		return false
+	}
 	return s.postQueue.len() > 0 && s.claimPostProcess()
 }
 
+// setHeldPostProcess transfers ownership of a rate-limited batch and its
+// reservation to the session. It refuses the transfer if the session is
+// already marked closed.
+func (s *UDPSession) setHeldPostProcess(w *ppWorker, bytes int, until time.Time, reservation *rate.Reservation) bool {
+	s.ppHeldMu.Lock()
+	defer s.ppHeldMu.Unlock()
+	if s.isClosed() {
+		return false
+	}
+	s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until = w, bytes, until
+	s.ppHeld.reservation = reservation
+	s.ppHeld.wake = &ppWake{}
+	s.ppHeld.wake.session.Store(s)
+	return true
+}
+
+// takeHeldPostProcess atomically removes the session's held batch. It also
+// invalidates the associated wake handle so a pending timer no longer retains
+// the session.
+func (s *UDPSession) takeHeldPostProcess() (*ppWorker, int, *rate.Reservation, *ppWake) {
+	s.ppHeldMu.Lock()
+	w, bytes, reservation, wake := s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.reservation, s.ppHeld.wake
+	s.ppHeld.w, s.ppHeld.bytes, s.ppHeld.until, s.ppHeld.reservation, s.ppHeld.wake = nil, 0, time.Time{}, nil, nil
+	s.ppHeldMu.Unlock()
+	if wake != nil {
+		wake.session.Store(nil)
+	}
+	return w, bytes, reservation, wake
+}
+
+// heldPostProcessUntil snapshots the held batch's deadline and wake handle.
+// The held flag is false if Close or a worker has already taken the batch.
+func (s *UDPSession) heldPostProcessUntil() (time.Time, *ppWake, bool) {
+	s.ppHeldMu.Lock()
+	until, wake, held := s.ppHeld.until, s.ppHeld.wake, s.ppHeld.w != nil
+	s.ppHeldMu.Unlock()
+	return until, wake, held
+}
+
+// discardHeldPostProcess cancels an unconsumed rate reservation and recycles
+// its held batch. The lock-based take makes cleanup race safely with a worker
+// that is claiming the same batch.
+func (s *UDPSession) discardHeldPostProcess() {
+	if w, _, reservation, _ := s.takeHeldPostProcess(); w != nil {
+		if reservation != nil {
+			reservation.Cancel()
+		}
+		w.recycle()
+		ppWorkers.Put(w)
+	}
+}
+
+// discardPostProcess releases held and queued packet buffers after Close.
+// Close serializes its final KCP flush and closes die while holding s.mu, so
+// the output callback cannot enqueue more packets after this drain completes.
+func (s *UDPSession) discardPostProcess() {
+	s.discardHeldPostProcess()
+	for {
+		req, ok := s.postQueue.pop()
+		if !ok {
+			return
+		}
+		defaultBufferPool.Put(req.buffer)
+	}
+}
+
+// ppEnqueue appends a claimed session to the shared worker queue and wakes one
+// worker. Queue compaction drops consumed references without shifting on every
+// dequeue.
 func ppEnqueue(s *UDPSession) {
 	ppQueue.once.Do(startPostProcessWorkers)
 	ppQueue.mu.Lock()
@@ -133,6 +251,8 @@ func ppEnqueue(s *UDPSession) {
 	ppQueue.cond.Signal()
 }
 
+// startPostProcessWorkers initializes the queue condition variable and starts
+// a bounded process-wide pool. It is called exactly once by ppQueue.once.
 func startPostProcessWorkers() {
 	ppQueue.cond = sync.NewCond(&ppQueue.mu)
 	n := runtime.NumCPU()
@@ -147,6 +267,10 @@ func startPostProcessWorkers() {
 	}
 }
 
+// postProcessWorker repeatedly takes one claimed session from ppQueue. It
+// sends a previously held batch when its reservation is due, processes more
+// queued packets within the per-session budget, then either requeues the
+// session, schedules its held batch, or releases its worker claim.
 func postProcessWorker() {
 	w := ppWorkers.Get().(*ppWorker)
 	for {
@@ -162,18 +286,50 @@ func postProcessWorker() {
 		}
 		ppQueue.mu.Unlock()
 
-		// The limiter allowed a held batch when it was held, so send it now.
-		if h := s.ppHeld.w; h != nil {
-			s.ppHeld.w = nil
-			s.sendTx(h, s.ppHeld.bytes)
+		if s.isClosed() {
+			// Close may leave a queue entry behind after draining its buffers.
+			// finishPostProcess clears the claim and performs an idempotent drain.
+			s.finishPostProcess()
+			continue
+		}
+
+		// The scheduled wake is at or after the reservation time. Taking the
+		// batch invalidates any duplicate or stale wake before it can run.
+		if h, bytes, reservation, _ := s.takeHeldPostProcess(); h != nil {
+			if !s.sendTx(h, bytes) {
+				if reservation != nil {
+					reservation.Cancel()
+				}
+				ppWorkers.Put(h)
+				s.finishPostProcess()
+				continue
+			}
 			ppWorkers.Put(h)
 		}
 
-		more := s.postProcess(w)
-		if s.ppHeld.w == w {
-			// s keeps the batch, and stays queued, until the limiter allows it.
+		more, held := s.postProcess(w)
+		if held {
+			// The session owns w now; this worker switches to fresh storage and
+			// leaves the session claimed until the scheduled wake re-enqueues it.
 			w = ppWorkers.Get().(*ppWorker)
-			SystemTimedSched.Put(func() { ppEnqueue(s) }, s.ppHeld.until)
+			until, wake, scheduled := s.heldPostProcessUntil()
+			if !scheduled {
+				s.finishPostProcess()
+				continue
+			}
+			// The scheduler may coalesce tasks by running up to schedSlack early.
+			// Add that slack here so the reservation is never used prematurely.
+			SystemTimedSched.Put(func() {
+				sess := wake.session.Load()
+				if sess == nil {
+					return
+				}
+				if sess.isClosed() {
+					sess.finishPostProcess()
+					return
+				}
+				ppEnqueue(sess)
+			}, until.Add(schedSlack))
 			continue
 		}
 		if more {
