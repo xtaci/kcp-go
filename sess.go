@@ -337,6 +337,9 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		return 0, err
 	}
 	defer s.releaseWriteGate()
+	if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() && !time.Now().Before(deadline) {
+		return 0, errors.WithStack(errTimeout)
+	}
 
 	// The deadline timer is armed only when the write has to wait.
 	var timeout *time.Timer

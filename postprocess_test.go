@@ -239,6 +239,33 @@ func TestWriteRateLimitInterruptedByClose(t *testing.T) {
 	}
 }
 
+func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
+	s := newRateLimitTestSession(nil)
+	<-s.writeGate
+	deadline := time.Now().Add(20 * time.Millisecond)
+	s.SetWriteDeadline(deadline)
+
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := s.Write([]byte("x"))
+		writeDone <- err
+	}()
+
+	time.Sleep(time.Until(deadline))
+	s.writeGate <- struct{}{}
+	select {
+	case err := <-writeDone:
+		if !errors.Is(err, errTimeout) {
+			t.Fatalf("Write returned %v, want timeout", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Write did not unblock after the gate was released")
+	}
+	if got := s.kcp.WaitSnd(); got != 0 {
+		t.Fatalf("expired Write queued %d KCP segments", got)
+	}
+}
+
 func newRateLimitTestSession(limiter *rate.Limiter) *UDPSession {
 	s := &UDPSession{
 		die:                make(chan struct{}),
