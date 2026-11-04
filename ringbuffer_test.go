@@ -269,6 +269,29 @@ func TestRingBufferDiscardBoundary(t *testing.T) {
 	}
 }
 
+func TestRingBufferDiscardNegativeNoop(t *testing.T) {
+	r := NewRingBuffer[int](8)
+	r.Push(1)
+	r.Push(2)
+
+	if got := r.Discard(-1); got != 0 {
+		t.Fatalf("Discard(-1) = %d, want 0", got)
+	}
+	if r.Len() != 2 {
+		t.Fatalf("Len() = %d, want 2", r.Len())
+	}
+	for _, want := range []int{1, 2} {
+		got, ok := r.Pop()
+		if !ok || got != want {
+			t.Fatalf("Pop() = %d, %t, want %d, true", got, ok, want)
+		}
+	}
+
+	if got := r.Discard(-1); got != 0 {
+		t.Fatalf("Discard(-1) on an empty ring = %d, want 0", got)
+	}
+}
+
 func TestRingForEachReverse(t *testing.T) {
 	r := NewRingBuffer[int](10)
 	for i := range 10 {

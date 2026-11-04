@@ -92,8 +92,12 @@ func (r *RingBuffer[T]) Peek() (*T, bool) {
 }
 
 // Discard discards the first N elements from the ring buffer.
-// Returns the number of elements that are actually discarded (<= n).
+// Returns the number of elements that are actually discarded (<= n). A
+// non-positive N does not discard anything.
 func (r *RingBuffer[T]) Discard(n int) int {
+	if n <= 0 {
+		return 0
+	}
 	currentLen := r.Len()
 	n = min(n, currentLen)
 	if n == currentLen {
