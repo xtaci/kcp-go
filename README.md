@@ -172,7 +172,7 @@ Many packet buffers are obtained from the package-wide `defaultBufferPool`, whic
 
 `UDPSession.SetRateLimit(bytesPerSecond)` configures an independent token-bucket rate limit for application data submitted through `Write` and `WriteBuffers`. The limit is measured in application bytes per second. It does not count KCP/FEC/encryption overhead, FEC parity, retransmissions, `SendOOB` traffic, or UDP/IP headers. Rate limiting is disabled by default, and passing `0` disables it. A throttled write waits for tokens while remaining interruptible by its write deadline, socket write errors, and session closure.
 
-The bucket allows an initial burst of up to `maxBatchSize * mtuLimit` bytes (currently 64 × 1500 = 96,000 bytes), then limits the average rate at which writes are accepted. Writes larger than the burst capacity are admitted in rate-limited chunks. This controls application write throughput rather than the exact rate of UDP packets on the wire.
+The bucket allows an initial burst of up to `maxBatchSize * maxPacketSize` bytes (currently 64 × 1472 = 94,208 bytes), then limits the average rate at which writes are accepted. Writes larger than the burst capacity are admitted in rate-limited chunks. This controls application write throughput rather than the exact rate of UDP packets on the wire.
 
 ```go
 sess.SetRateLimit(256 * 1024) // limit this session to 256 KiB/s
