@@ -127,9 +127,9 @@ func (tune *autoTune) FindPeriod(bit bool) int {
 	}
 	sorted = sorted[:unique]
 
-	// Find a complete pulse with observed, consecutive transition samples.
-	// Gaps inside a pulse are harmless; gaps at either edge make its width
-	// ambiguous, so keep looking for a later complete pulse.
+	// Find a complete pulse with consecutive samples from the entering edge
+	// through the exiting edge. A gap can hide a signal transition, making
+	// the pulse width ambiguous.
 	for left := 1; left < len(sorted); left++ {
 		if sorted[left-1].bit == bit || sorted[left].bit != bit ||
 			sorted[left-1].seq+1 != sorted[left].seq {
@@ -137,11 +137,11 @@ func (tune *autoTune) FindPeriod(bit bool) int {
 		}
 
 		for right := left + 1; right < len(sorted); right++ {
-			if sorted[right].bit != bit {
-				if sorted[right-1].seq+1 == sorted[right].seq {
-					return int(_itimediff(sorted[right].seq, sorted[left].seq))
-				}
+			if sorted[right-1].seq+1 != sorted[right].seq {
 				break
+			}
+			if sorted[right].bit != bit {
+				return int(_itimediff(sorted[right].seq, sorted[left].seq))
 			}
 		}
 	}
