@@ -398,7 +398,7 @@ func newFECEncoder(dataShards, parityShards, offset int) *fecEncoder {
 	enc.encodeCache = make([][]byte, enc.shardSize)
 	enc.shardCache = make([][]byte, enc.shardSize)
 	for k := range enc.shardCache {
-		enc.shardCache[k] = make([]byte, mtuLimit)
+		enc.shardCache[k] = make([]byte, maxPacketSize)
 	}
 	return enc
 }

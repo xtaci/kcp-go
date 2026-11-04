@@ -135,10 +135,10 @@ func TestSalsa20(t *testing.T) {
 }
 
 func cryptTest(t *testing.T, bc BlockCrypt) {
-	data := make([]byte, mtuLimit)
+	data := make([]byte, maxPacketSize)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
+	dec := make([]byte, maxPacketSize)
+	enc := make([]byte, maxPacketSize)
 	bc.Encrypt(enc, data)
 	bc.Decrypt(dec, enc)
 	if !bytes.Equal(data, dec) {
@@ -171,14 +171,14 @@ func testAEAD(t *testing.T, bc BlockCrypt) {
 
 	nonceSize := aead.NonceSize()
 
-	size := mtuLimit - cryptHeaderSize - aead.Overhead()
+	size := maxPacketSize - cryptHeaderSize - aead.Overhead()
 	data := make([]byte, size)
 	io.ReadFull(rand.Reader, data)
 
 	// If the packet cannot accommodate the AEAD overhead, Open and Seal will
 	// allocate a new slice internally. Ensure this does not happen for
 	// packets sized to the MTU.
-	packet := make([]byte, mtuLimit)
+	packet := make([]byte, maxPacketSize)
 
 	// Seal
 	dst := packet[:nonceSize]
@@ -332,10 +332,10 @@ func BenchmarkSalsa20(b *testing.B) {
 }
 
 func benchCrypt(b *testing.B, bc BlockCrypt) {
-	data := make([]byte, mtuLimit)
+	data := make([]byte, maxPacketSize)
 	io.ReadFull(rand.Reader, data)
-	dec := make([]byte, mtuLimit)
-	enc := make([]byte, mtuLimit)
+	dec := make([]byte, maxPacketSize)
+	enc := make([]byte, maxPacketSize)
 
 	b.ReportAllocs()
 	b.SetBytes(int64(len(enc) * 2))
@@ -361,7 +361,7 @@ func BenchmarkCFB_AES_128_CRC32(b *testing.B) {
 		return
 	}
 
-	data := make([]byte, 1400, mtuLimit)
+	data := make([]byte, 1400, maxPacketSize)
 	b.SetBytes(1400)
 
 	for b.Loop() {
@@ -382,7 +382,7 @@ func BenchmarkAEAD_AES_128_GCM(b *testing.B) {
 		panic(err)
 	}
 
-	data := make([]byte, 1400, mtuLimit)
+	data := make([]byte, 1400, maxPacketSize)
 	b.SetBytes(1400)
 
 	nonce := data[:aead.NonceSize()]
@@ -400,7 +400,7 @@ func BenchmarkCFB_Salsa20_CRC32(b *testing.B) {
 		return
 	}
 
-	data := make([]byte, 1400, mtuLimit)
+	data := make([]byte, 1400, maxPacketSize)
 	b.SetBytes(1400)
 
 	for b.Loop() {
@@ -416,7 +416,7 @@ func BenchmarkAEAD_Chacha20_Poly1035(b *testing.B) {
 		panic(err)
 	}
 
-	data := make([]byte, 1400, mtuLimit)
+	data := make([]byte, 1400, maxPacketSize)
 	b.SetBytes(1400)
 
 	nonce := data[:aead.NonceSize()]

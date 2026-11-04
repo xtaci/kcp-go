@@ -57,7 +57,7 @@ func (s *UDPSession) readLoop() {
 	}
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
 	}
 
 	for {
@@ -111,7 +111,7 @@ func (l *Listener) monitor() {
 	// x/net version
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
-		msgs[k].Buffers = [][]byte{make([]byte, mtuLimit)}
+		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
 	}
 
 	for {

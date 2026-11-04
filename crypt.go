@@ -273,7 +273,7 @@ type simpleXORBlockCrypt struct {
 // NewSimpleXORBlockCrypt creates an XOR BlockCrypt using a PBKDF2-expanded key.
 func NewSimpleXORBlockCrypt(key []byte) (BlockCrypt, error) {
 	c := new(simpleXORBlockCrypt)
-	c.xortbl = pbkdf2.Key(key, []byte(saltxor), 32, mtuLimit, sha1.New)
+	c.xortbl = pbkdf2.Key(key, []byte(saltxor), 32, maxPacketSize, sha1.New)
 	return c, nil
 }
 
