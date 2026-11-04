@@ -483,10 +483,11 @@ func randomEchoVectorTest(t *testing.T, cli *UDPSession) {
 	// Writer goroutine
 	go func() {
 		r := mrand.New(writerSrc)
+		lenRand := mrand.New(mrand.NewSource(seed + 1))
 		lastPrint := 0
 		v := make([][]byte, 2)
 		for bytesSent < N {
-			length1 := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			length1 := lenRand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 			if bytesSent+int64(length1) > N {
 				length1 = int(N - bytesSent)
 			}
@@ -496,7 +497,7 @@ func randomEchoVectorTest(t *testing.T, cli *UDPSession) {
 				sndbuf1[i] = byte(r.Int())
 			}
 
-			length2 := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+			length2 := lenRand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 			if bytesSent+int64(length2) > N {
 				length2 = int(N - bytesSent)
 			}
@@ -530,9 +531,10 @@ func randomEchoVectorTest(t *testing.T, cli *UDPSession) {
 
 	// Reader goroutine
 	r := mrand.New(readerSrc)
+	lenRand := mrand.New(mrand.NewSource(seed + 2))
 	lastPrint := 0
 	for bytesReceived < N {
-		length := mrand.Intn(1<<20) + 1 // Random length between 1 and 1MB
+		length := lenRand.Intn(1<<20) + 1 // Random length between 1 and 1MB
 		if bytesReceived+int64(length) > N {
 			length = int(N - bytesReceived)
 		}
@@ -960,8 +962,12 @@ func TestReliability(t *testing.T) {
 	msg := make([]byte, 128)
 
 	for range N {
-		io.ReadFull(rand.Reader, msg)
-		cli.Write([]byte(msg))
+		if _, err := io.ReadFull(rand.Reader, msg); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := cli.Write(msg); err != nil {
+			t.Fatal(err)
+		}
 
 		n, err := io.ReadFull(cli, buf)
 		if err != nil {
@@ -1148,8 +1154,12 @@ func TestSetMTU(t *testing.T) {
 	cli.SetLogger(IKCP_LOG_ALL, newLoggerWithMilliseconds().Info)
 
 	sendBytes := make([]byte, 1500)
-	rand.Read(sendBytes)
-	cli.Write(sendBytes)
+	if _, err := rand.Read(sendBytes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cli.Write(sendBytes); err != nil {
+		t.Fatal(err)
+	}
 
 	buf := make([]byte, 1500)
 
@@ -1436,19 +1446,23 @@ func TestOOB(t *testing.T) {
 
 	sizePlus1 := size + 1
 	counts := make([]atomic.Int32, sizePlus1)
+	receivedLengths := make(chan int, sizePlus1)
+	errCh := make(chan error, 1)
 
 	// Client registers OOB callback to validate echoed OOB data content and length
 	cli.SetOOBHandler(func(buf []byte) {
 		for i, b := range buf {
 			if b != byte(i) {
-				t.Fatalf(
-					"OOB echo payload mismatch at offset %d: expected %d, got %d",
-					i, byte(i), b,
-				)
-				break
+				select {
+				case errCh <- fmt.Errorf("OOB echo payload mismatch at offset %d: expected %d, got %d", i, byte(i), b):
+				default:
+				}
+				return
 			}
 		}
-		counts[len(buf)].Add(1)
+		if counts[len(buf)].Add(1) == 1 {
+			receivedLengths <- len(buf)
+		}
 	})
 
 	var wg sync.WaitGroup
@@ -1478,13 +1492,7 @@ func TestOOB(t *testing.T) {
 	}()
 
 	wg.Wait()
-
-	// Check that all lengths of OOB data are correctly echoed back
-	for i := range counts {
-		if counts[i].Load() == 0 {
-			t.Errorf("missing OOB echo for payload length %d", i)
-		}
-	}
+	waitForOOBLengths(t, receivedLengths, errCh, sizePlus1)
 }
 
 // TestOOB_OneSideHandler verifies that OOB data can be received and processed
@@ -1505,6 +1513,7 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	defer l.Close()
 
 	counts := make([]atomic.Int32, maxPacketSize)
+	receivedLengths := make(chan int, maxPacketSize)
 	errCh := make(chan error, 1)
 
 	// Get OOB max payload size and initialize the shared counts slice.
@@ -1534,7 +1543,9 @@ func TestOOB_OneSideHandler(t *testing.T) {
 						}
 					}
 				}
-				counts[len(buf)].Add(1)
+				if counts[len(buf)].Add(1) == 1 {
+					receivedLengths <- len(buf)
+				}
 			})
 			go handleEcho(sess)
 		}
@@ -1572,20 +1583,31 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	}()
 
 	wg.Wait()
+	waitForOOBLengths(t, receivedLengths, errCh, sizePlus1)
+}
 
-	// Give the server time to process incoming OOB packets.
-	time.Sleep(500 * time.Millisecond)
+func waitForOOBLengths(t *testing.T, receivedLengths <-chan int, errCh <-chan error, count int) {
+	t.Helper()
 
-	select {
-	case err := <-errCh:
-		t.Fatalf("%v", err)
-	default:
-	}
+	received := make([]bool, count)
+	timeout := time.NewTimer(10 * time.Second)
+	defer timeout.Stop()
 
-	// Check that all lengths of OOB data are received by the server.
-	for i := range counts[:sizePlus1] {
-		if counts[i].Load() == 0 {
-			t.Errorf("server missing OOB for payload length %d", i)
+	for remaining := count; remaining > 0; {
+		select {
+		case err := <-errCh:
+			t.Fatal(err)
+		case length := <-receivedLengths:
+			if !received[length] {
+				received[length] = true
+				remaining--
+			}
+		case <-timeout.C:
+			for length, seen := range received {
+				if !seen {
+					t.Fatalf("missing OOB echo for payload length %d", length)
+				}
+			}
 		}
 	}
 }
