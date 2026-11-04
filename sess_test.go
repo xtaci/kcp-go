@@ -30,12 +30,9 @@ import (
 	"crypto/sha1"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	mrand "math/rand"
 	"net"
-	"net/http"
-	_ "net/http/pprof"
 	"os"
 	"reflect"
 	"runtime"
@@ -53,14 +50,6 @@ var (
 	key      = []byte("testkey")
 	pass     = pbkdf2.Key(key, []byte("testsalt"), 4096, 32, sha1.New)
 )
-
-func init() {
-	go func() {
-		log.Println(http.ListenAndServe("0.0.0.0:6060", nil))
-	}()
-
-	log.Println("beginning tests, encryption:salsa20, fec:10/3")
-}
 
 func nextPort() int {
 	port := int(atomic.AddUint32(&baseport, 1))

@@ -1,7 +1,6 @@
 package kcp
 
 import (
-	"math/rand"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -20,7 +19,7 @@ func TestTimedSchedRunsEachTaskOnTime(t *testing.T) {
 	for g := 0; g < 8; g++ {
 		go func() {
 			for i := 0; i < n/8; i++ {
-				deadline := time.Now().Add(time.Duration(rand.Intn(50)) * time.Millisecond)
+				deadline := time.Now().Add(time.Duration(i%50) * time.Millisecond)
 				ts.Put(func() {
 					d := time.Since(deadline)
 					if d < -schedSlack {
@@ -34,8 +33,16 @@ func TestTimedSchedRunsEachTaskOnTime(t *testing.T) {
 			}
 		}()
 	}
-	wg.Wait()
-	time.Sleep(20 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatalf("only %d of %d tasks ran", runs.Load(), n)
+	}
 	if runs.Load() != n || early.Load() != 0 || late.Load() != 0 {
 		t.Fatalf("runs %d of %d, %d early, %d late", runs.Load(), n, early.Load(), late.Load())
 	}
@@ -46,15 +53,19 @@ func TestTimedSchedSelfReschedule(t *testing.T) {
 	ts := NewTimedSched(1)
 	defer ts.Close()
 
+	const (
+		ticks    = 50
+		interval = 2 * schedSlack
+	)
 	var count atomic.Int64
 	done := make(chan struct{})
 	var tick func()
 	tick = func() {
-		if count.Add(1) == 50 {
+		if count.Add(1) == ticks {
 			close(done)
 			return
 		}
-		ts.Put(tick, time.Now().Add(2*time.Millisecond))
+		ts.Put(tick, time.Now().Add(interval))
 	}
 	start := time.Now()
 	ts.Put(tick, time.Now())
@@ -63,8 +74,8 @@ func TestTimedSchedSelfReschedule(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatalf("only %d runs", count.Load())
 	}
-	if el := time.Since(start); el < 50*2*time.Millisecond-50*schedSlack {
-		t.Fatalf("50 ticks of 2ms took only %v", el)
+	if elapsed := time.Since(start); elapsed < (ticks-1)*(interval-schedSlack) {
+		t.Fatalf("%d ticks of %v took only %v", ticks, interval, elapsed)
 	}
 }
 
@@ -113,7 +124,7 @@ func TestTimedFuncHeapOrder(t *testing.T) {
 	var h timedFuncHeap
 	var want []time.Time
 	for i := 0; i < 1000; i++ {
-		ts := base.Add(time.Duration(rand.Intn(500)) * time.Millisecond)
+		ts := base.Add(time.Duration((i*37)%500) * time.Millisecond)
 		want = append(want, ts)
 		h.push(timedFunc{func() {}, ts})
 		if i%7 == 0 {
@@ -144,7 +155,7 @@ func BenchmarkTimedFuncHeap(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		x := h.pop()
 		x.ts = x.ts.Add(time.Millisecond)
 		h.push(x)

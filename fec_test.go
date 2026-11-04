@@ -31,43 +31,33 @@ import (
 )
 
 func TestFECEncodeConsecutive(t *testing.T) {
-	const dataSize = 10
-	const paritySize = 3
-	const payloadSize = maxPacketSize
+	const (
+		dataShards   = 10
+		parityShards = 3
+		groups       = 10
+		payloadSize  = maxPacketSize
+	)
 
-	encoder := newFECEncoder(dataSize, paritySize, 0)
-	t.Logf("dataSize:%v, paritySize:%v", dataSize, paritySize)
-	group := 0
-	sent := 0
-	for i := range 100 {
-		if i%dataSize == 0 {
-			group++
-		}
-
+	encoder := newFECEncoder(dataShards, parityShards, 0)
+	for i := range groups * dataShards {
 		data := make([]byte, payloadSize)
-		duration := time.Duration(rand.Int()%300) * time.Millisecond
-		t.Logf("Sleep: %v, packet %v", duration, sent)
-		<-time.After(duration)
-
 		ps := encoder.encode(data, 200)
-		sent++
 
-		if len(ps) > 0 {
-			t.Log("has parity:", len(ps))
-			for idx, p := range ps {
-				seqid := binary.LittleEndian.Uint32(p)
-				expected := uint32((group-1)*(dataSize+paritySize) + dataSize + idx)
-				if seqid != expected {
-					t.Fatalf("expected parity shard:%v actual seqid %v", expected, seqid)
-					return
-				}
+		if (i+1)%dataShards != 0 {
+			if len(ps) != 0 {
+				t.Fatalf("data shard %d produced %d parity shards before its group completed", i, len(ps))
 			}
 			continue
 		}
-
-		if sent%dataSize == 0 {
-			t.Log("no parity:", len(ps))
-			continue
+		if len(ps) != parityShards {
+			t.Fatalf("completed group %d produced %d parity shards, want %d", i/dataShards, len(ps), parityShards)
+		}
+		for idx, p := range ps {
+			seqid := binary.LittleEndian.Uint32(p)
+			expected := uint32((i/dataShards)*(dataShards+parityShards) + dataShards + idx)
+			if seqid != expected {
+				t.Fatalf("parity shard %d of group %d has sequence %d, want %d", idx, i/dataShards, seqid, expected)
+			}
 		}
 	}
 }
@@ -84,6 +74,7 @@ func TestFECDecodeLoss(t *testing.T) {
 	sent := 0
 	totalRecovered := 0
 	totalParityLost := 0
+	rnd := rand.New(rand.NewSource(1))
 
 	for group := range 100 {
 		losses := make(map[int]bool)
@@ -91,7 +82,7 @@ func TestFECDecodeLoss(t *testing.T) {
 		lost := 0
 		parityLost := 0
 		for lost < parityShards {
-			pos := rand.Intn(dataShards + parityShards)
+			pos := rnd.Intn(dataShards + parityShards)
 			if !losses[pos] {
 				losses[pos] = true
 				if pos >= dataShards {
