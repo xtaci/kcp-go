@@ -1,10 +1,12 @@
 <img src="assets/kcp-go.png" alt="kcp-go" height="100px" />
 
 
-[![GoDoc][1]][2] [![MIT licensed][11]][12] [![Coverage Status][7]][8]
+[![GoDoc][1]][2] [![Created At][3]][4] [![MIT licensed][11]][12] [![Coverage Status][7]][8]
 
 [1]: https://godoc.org/github.com/xtaci/kcp-go?status.svg
 [2]: https://pkg.go.dev/github.com/xtaci/kcp-go/v5
+[3]: https://img.shields.io/github/created-at/xtaci/kcp-go
+[4]: https://github.com/xtaci/kcp-go
 [7]: https://codecov.io/gh/xtaci/kcp-go/branch/master/graph/badge.svg
 [8]: https://codecov.io/gh/xtaci/kcp-go
 [11]: https://img.shields.io/badge/license-MIT-blue.svg

@@ -27,7 +27,6 @@ import (
 	"math"
 	"math/rand"
 	"testing"
-	"time"
 )
 
 func TestFECEncodeConsecutive(t *testing.T) {
@@ -501,7 +500,7 @@ func TestFECRTOAndSkipParity(t *testing.T) {
 	}
 
 	// --- Scenario 2: Timeout case (Time > RTO) ---
-	// Send 2 packets quickly, then sleep, then send 3rd
+	// Send 2 packets quickly, then simulate time passing before the third.
 	t.Log("--- Scenario 2: Timeout case (Time > RTO) ---")
 
 	// Packet 3 (Next data seq should be 5)
@@ -524,8 +523,8 @@ func TestFECRTOAndSkipParity(t *testing.T) {
 		t.Fatalf("Expected seq 6, got %d", seq)
 	}
 
-	// Sleep longer than RTO
-	time.Sleep(time.Duration(rto+20) * time.Millisecond)
+	// Simulate an interval longer than the RTO without waiting in real time.
+	enc.tsLatestPacket -= int64(rto) + 1
 
 	// Packet 5 (Trigger parity check -> should skip)
 	p5 := make([]byte, 100)
@@ -552,6 +551,9 @@ func TestFECRTOAndSkipParity(t *testing.T) {
 
 	p6 := make([]byte, 100)
 	ps = enc.encode(p6, rto)
+	if len(ps) != 0 {
+		t.Fatalf("Expected no parity shards at the start of a new group, got %d", len(ps))
+	}
 	if seq := getSeq(p6); seq != 10 {
 		t.Fatalf("Expected seq 10 after skipped parity, got %d", seq)
 	}
