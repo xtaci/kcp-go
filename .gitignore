@@ -3,6 +3,9 @@
 *.a
 *.so
 
+# PATCH
+*.patch
+
 # Folders
 _obj
 _test
