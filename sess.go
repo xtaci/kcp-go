@@ -53,6 +53,7 @@ import (
 	"hash/crc32"
 	"io"
 	"net"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -207,14 +208,20 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chSocketReadError = make(chan struct{})
 	sess.chSocketWriteError = make(chan struct{})
 	sess.remote = remote
-	sess.readDeadline = deadline.New()
-	sess.writeDeadline = deadline.New()
 	sess.conn = conn
 	sess.ownConn = ownConn
 	sess.l = l
 	sess.block = block
 	sess.recvbuf = make([]byte, maxPacketSize)
 	sess.initPlatform()
+
+	sess.readDeadline = deadline.New()
+	sess.writeDeadline = deadline.New()
+
+	// Stop pending timers so closed sessions do not retain deadline resources
+	// until their deadlines expire.
+	runtime.AddCleanup(sess, freeDeadline, sess.readDeadline)
+	runtime.AddCleanup(sess, freeDeadline, sess.writeDeadline)
 
 	// calculate additional header size introduced by encryption
 	switch block := sess.block.(type) {
@@ -524,11 +531,6 @@ func (s *UDPSession) Close() error {
 		s.kcp.flush((IKCP_FLUSH_FULL))
 		close(s.die)
 		s.mu.Unlock()
-
-		// Stop pending timers so closed sessions do not retain deadline resources
-		// until their deadlines expire.
-		s.readDeadline.Set(time.Time{})
-		s.writeDeadline.Set(time.Time{})
 
 		s.ppSendMu.Lock()
 		s.ppClosing = true
@@ -1230,7 +1232,7 @@ type (
 		chSocketReadError   chan struct{}
 		socketReadErrorOnce sync.Once
 
-		readDeadline *deadline.Deadline // read deadline for Accept()
+		acceptDeadline *deadline.Deadline
 	}
 )
 
@@ -1436,7 +1438,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	select {
-	case <-l.readDeadline.Done():
+	case <-l.acceptDeadline.Done():
 		return nil, errors.WithStack(errTimeout)
 	case c := <-l.chAccepts:
 		return c, nil
@@ -1449,14 +1451,12 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 
 // SetDeadline sets the deadline associated with the listener. A zero time value disables the deadline.
 func (l *Listener) SetDeadline(t time.Time) error {
-	l.SetReadDeadline(t)
-	l.SetWriteDeadline(t)
-	return nil
+	return l.SetReadDeadline(t)
 }
 
 // SetReadDeadline implements the Conn SetReadDeadline method.
 func (l *Listener) SetReadDeadline(t time.Time) error {
-	l.readDeadline.Set(t)
+	l.acceptDeadline.Set(t)
 	return nil
 }
 
@@ -1479,8 +1479,6 @@ func (l *Listener) Close() error {
 		l.sessionLock.Unlock()
 		return errors.WithStack(io.ErrClosedPipe)
 	}
-	// Stop the Accept deadline timer when the listener is closed.
-	l.readDeadline.Set(time.Time{})
 
 	pp := l.releasePusherLocked()
 	l.sessionLock.Unlock()
@@ -1592,7 +1590,12 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.parityShards = parityShards
 	l.block = block
 	l.chSocketReadError = make(chan struct{})
-	l.readDeadline = deadline.New()
+
+	l.acceptDeadline = deadline.New()
+
+	// Stop the Accept deadline timer when the listener is closed.
+	runtime.AddCleanup(l, freeDeadline, l.acceptDeadline)
+
 	if pp, ok := conn.(PacketPusher); ok {
 		pp.SetPacketReceiver(l.pushedPacket)
 	} else {

@@ -41,6 +41,7 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+	"weak"
 
 	"github.com/juju/ratelimit"
 	"github.com/pion/transport/v4/deadline"
@@ -533,6 +534,21 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 	}
 }
 
+// runtimeGC forces a garbage collection and waits for the GC done.
+func runtimeGC() {
+	done := make(chan struct{})
+
+	// use large object to avoid GC batching delay in the runtime.
+	ptr := new([32]byte)
+	runtime.AddCleanup(ptr, func(done chan struct{}) {
+		close(done)
+	}, done)
+	ptr = nil
+
+	runtime.GC()
+	<-done
+}
+
 func TestCloseStopsSessionDeadlineTimers(t *testing.T) {
 	s, err := DialWithOptions("127.0.0.1:9", nil, 0, 0)
 	if err != nil {
@@ -541,18 +557,30 @@ func TestCloseStopsSessionDeadlineTimers(t *testing.T) {
 	if err := s.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	rd := weak.Make(s.readDeadline)
 	if err := s.SetWriteDeadline(time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	wd := weak.Make(s.writeDeadline)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
+	s = nil
 
-	if _, ok := s.readDeadline.Deadline(); ok {
-		t.Fatal("read deadline remains set after session close")
+	// 1st GC free *UDPSession, and call Cleanup callbacks.
+	runtimeGC()
+
+	// 2nd GC free *time.Timer of *deadline.Deadline from GC Roots.
+	runtimeGC()
+
+	// 3rd GC free *deadline.Deadline
+	runtimeGC()
+
+	if rd.Value() != nil {
+		t.Fatal("read deadline reachable after object unreachable")
 	}
-	if _, ok := s.writeDeadline.Deadline(); ok {
-		t.Fatal("write deadline remains set after session close")
+	if wd.Value() != nil {
+		t.Fatal("write deadline reachable after object unreachable")
 	}
 }
 
@@ -564,12 +592,23 @@ func TestCloseStopsListenerDeadlineTimer(t *testing.T) {
 	if err := l.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
+	deadline := weak.Make(l.acceptDeadline)
 	if err := l.Close(); err != nil {
 		t.Fatal(err)
 	}
+	l = nil
 
-	if _, ok := l.readDeadline.Deadline(); ok {
-		t.Fatal("read deadline remains set after listener close")
+	// 1st GC free *Listener, and call Cleanup callbacks.
+	runtimeGC()
+
+	// 2nd GC free *time.Timer of *deadline.Deadline from GC Roots.
+	runtimeGC()
+
+	// 3rd GC free *deadline.Deadline
+	runtimeGC()
+
+	if deadline.Value() != nil {
+		t.Fatal("accept deadline reachable after object unreachable")
 	}
 }
 
