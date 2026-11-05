@@ -202,7 +202,7 @@ func TestPostProcessRateLimitedMixed(t *testing.T) {
 	stop := make(chan struct{})
 	defer close(stop)
 	limited := make([]*UDPSession, 0, 16)
-	for i := 0; i < 16; i++ {
+	for range 16 {
 		s, err := dialSink(port)
 		if err != nil {
 			t.Fatal(err)
@@ -258,8 +258,8 @@ func waitForRateLimiters(t *testing.T, sessions []*UDPSession) {
 	for {
 		waiting := true
 		for _, session := range sessions {
-			limiter := session.rateLimiter.Load()
-			if limiter == nil || limiter.Tokens() >= 0 {
+			bucket := session.bucket.Load()
+			if bucket == nil || bucket.Available() >= 0 {
 				waiting = false
 				break
 			}

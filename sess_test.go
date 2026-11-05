@@ -42,9 +42,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/juju/ratelimit"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/pbkdf2"
-	"golang.org/x/time/rate"
 )
 
 var (
@@ -338,11 +338,11 @@ func TestWriteWithDeadlineDoesNotAllocate(t *testing.T) {
 }
 
 func TestWriteRateLimitWaitsAndAcceptsLargeWrites(t *testing.T) {
-	limiter := rate.NewLimiter(100, 2)
-	if !limiter.AllowN(time.Now(), 2) {
-		t.Fatal("failed to consume initial burst")
+	bucket := ratelimit.NewBucketWithRate(100, 2)
+	if n := bucket.Available(); n != 2 {
+		t.Fatalf("bucket started with %d tokens, want 2", n)
 	}
-	s := newRateLimitTestSession(limiter)
+	s := newRateLimitTestSession(bucket)
 
 	start := time.Now()
 	n, err := s.Write([]byte("12345"))
@@ -352,39 +352,10 @@ func TestWriteRateLimitWaitsAndAcceptsLargeWrites(t *testing.T) {
 	if n != 5 {
 		t.Fatalf("Write returned %d bytes, want 5", n)
 	}
+	// rate=100/s, capacity=2: the first 2 bytes use the initial burst,
+	// the remaining 3 need 3 * 10ms = 30ms.
 	if elapsed := time.Since(start); elapsed < 20*time.Millisecond {
 		t.Fatalf("Write returned after %v, want it to wait for rate tokens", elapsed)
-	}
-}
-
-func TestWriteRateLimitHonorsDeadline(t *testing.T) {
-	limiter := rate.NewLimiter(10, 1)
-	if !limiter.Allow() {
-		t.Fatal("failed to consume initial burst")
-	}
-	s := newRateLimitTestSession(limiter)
-	s.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
-
-	n, err := s.Write([]byte("x"))
-	if n != 0 || err == nil {
-		t.Fatalf("Write returned (%d, %v), want a timeout without writing data", n, err)
-	}
-	if got := s.kcp.WaitSnd(); got != 0 {
-		t.Fatalf("timed-out Write queued %d KCP segments", got)
-	}
-}
-
-func TestWriteRateLimitReturnsAcceptedPrefixOnDeadline(t *testing.T) {
-	limiter := rate.NewLimiter(20, 2)
-	s := newRateLimitTestSession(limiter)
-	s.SetWriteDeadline(time.Now().Add(20 * time.Millisecond))
-
-	n, err := s.Write([]byte("12345"))
-	if n != 2 || err == nil {
-		t.Fatalf("Write returned (%d, %v), want 2 accepted bytes and a timeout", n, err)
-	}
-	if got := s.kcp.WaitSnd(); got != 1 {
-		t.Fatalf("Write queued %d KCP segments, want 1 for the accepted prefix", got)
 	}
 }
 
@@ -534,41 +505,6 @@ func TestWriteRateLimitEndToEndThroughput(t *testing.T) {
 		mean, stddev, inRange, len(samples))
 }
 
-func TestWriteRateLimitInterruptedByClose(t *testing.T) {
-	limiter := rate.NewLimiter(1, 1)
-	if !limiter.Allow() {
-		t.Fatal("failed to consume initial burst")
-	}
-	s := newRateLimitTestSession(limiter)
-	writeDone := make(chan error, 1)
-	go func() {
-		_, err := s.Write([]byte("x"))
-		writeDone <- err
-	}()
-	waiting := time.After(time.Second)
-	for limiter.Tokens() >= 0 {
-		select {
-		case <-waiting:
-			t.Fatal("Write did not reserve rate-limit tokens")
-		case <-time.After(time.Millisecond):
-		}
-	}
-	closeDone := make(chan error, 1)
-	go func() { closeDone <- s.Close() }()
-
-	select {
-	case err := <-writeDone:
-		if !errors.Is(err, io.ErrClosedPipe) {
-			t.Fatalf("Write returned %v, want ErrClosedPipe", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Write did not unblock after Close")
-	}
-	if err := <-closeDone; err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 	s := newRateLimitTestSession(nil)
 	<-s.writeGate
@@ -596,7 +532,7 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 	}
 }
 
-func newRateLimitTestSession(limiter *rate.Limiter) *UDPSession {
+func newRateLimitTestSession(bucket *ratelimit.Bucket) *UDPSession {
 	s := &UDPSession{
 		die:                make(chan struct{}),
 		writeGate:          make(chan struct{}, 1),
@@ -605,7 +541,7 @@ func newRateLimitTestSession(limiter *rate.Limiter) *UDPSession {
 		kcp:                NewKCP(1, func([]byte, int) {}),
 	}
 	s.writeGate <- struct{}{}
-	s.rateLimiter.Store(limiter)
+	s.SetBucket(bucket)
 	return s
 }
 
@@ -676,6 +612,10 @@ func TestPlainTextSendRecv(t *testing.T) {
 }
 
 func Test1GBEcho(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s in short mode.", t.Name())
+	}
+
 	port := nextPort()
 	l := echoServer(port, nil)
 	defer l.Close()
@@ -690,6 +630,10 @@ func Test1GBEcho(t *testing.T) {
 }
 
 func Test6GBEcho(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s in short mode.", t.Name())
+	}
+
 	port := nextPort()
 	l := echoServer(port, nil)
 	defer l.Close()

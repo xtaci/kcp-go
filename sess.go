@@ -56,10 +56,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/juju/ratelimit"
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
-	"golang.org/x/time/rate"
 )
 
 // Session-layer constants
@@ -169,8 +169,8 @@ type (
 		// platform-dependent optimizations
 		platform platform
 
-		// rate limiter (bytes per second)
-		rateLimiter atomic.Pointer[rate.Limiter]
+		// ratelimit buckets
+		bucket atomic.Pointer[ratelimit.Bucket]
 
 		writeGate chan struct{}
 		mu        sync.Mutex
@@ -316,9 +316,6 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	}
 }
 
-// Write implements net.Conn
-func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers([][]byte{b}) }
-
 // WriteBuffers writes a vector of byte slices to the underlying connection.
 func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	// An empty write only reports the conn's state. It used to run a full
@@ -359,12 +356,6 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		// Ensure writes do not exceed the maximum sliding window on either side.
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) {
-			limiter := s.rateLimiter.Load()
-			if limiter != nil {
-				s.mu.Unlock()
-				return s.writeRateLimited(v, limiter)
-			}
-
 			// Transmit data sequentially, keeping each packet within mss.
 			for _, b := range v {
 				n += len(b)
@@ -389,6 +380,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			}
 			s.mu.Unlock()
 			atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(n))
+			s.writeWait(n)
 			return n, nil
 		}
 
@@ -412,75 +404,19 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	}
 }
 
-// writeRateLimited admits application data in chunks no larger than the
-// limiter burst. Each chunk enters KCP only after its reservation is due, so
-// an interrupted write reports the prefix already accepted by KCP.
-func (s *UDPSession) writeRateLimited(v [][]byte, limiter *rate.Limiter) (n int, err error) {
-	burst := limiter.Burst()
-	if burst <= 0 {
-		return 0, errors.New("rate limiter has no burst capacity")
-	}
-	remaining := buffersLen(v)
-	bufferIndex, bufferOffset := 0, 0
-	for remaining > 0 {
-		chunk := min(remaining, burst)
-		reservation := limiter.ReserveN(time.Now(), chunk)
-		if !reservation.OK() {
-			return n, errors.New("rate limiter rejected a write chunk")
-		}
-		if err := s.waitRateReservation(reservation); err != nil {
-			return n, err
-		}
+// Write implements net.Conn
+func (s *UDPSession) Write(b []byte) (n int, err error) { return s.WriteBuffers([][]byte{b}) }
 
-		s.mu.Lock()
-		select {
-		case <-s.chSocketWriteError:
-			reservation.Cancel()
-			s.mu.Unlock()
-			return n, s.socketWriteError.Load().(error)
-		case <-s.die:
-			reservation.Cancel()
-			s.mu.Unlock()
-			return n, errors.WithStack(io.ErrClosedPipe)
-		default:
-		}
-		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() && !time.Now().Before(deadline) {
-			reservation.Cancel()
-			s.mu.Unlock()
-			return n, errors.WithStack(errTimeout)
-		}
-		chunkRemaining := chunk
-		for chunkRemaining > 0 {
-			for bufferIndex < len(v) && bufferOffset == len(v[bufferIndex]) {
-				bufferIndex++
-				bufferOffset = 0
-			}
-			b := v[bufferIndex][bufferOffset:]
-			part := min(chunkRemaining, len(b))
-			toSend := b[:part]
-			for len(toSend) > 0 {
-				mss := int(s.kcp.mss)
-				if len(toSend) <= mss {
-					s.kcp.Send(toSend)
-					break
-				}
-				s.kcp.Send(toSend[:mss])
-				toSend = toSend[mss:]
-			}
-			bufferOffset += part
-			chunkRemaining -= part
-		}
-		waitsnd := s.kcp.WaitSnd()
-		if waitsnd >= int(s.kcp.snd_wnd) || !s.writeDelay {
-			s.kcp.flush(IKCP_FLUSH_FULL)
-		}
-		s.mu.Unlock()
-
-		n += chunk
-		atomic.AddUint64(&DefaultSnmp.BytesSent, uint64(chunk))
-		remaining -= chunk
+// writeWait paces outgoing bytes against the configured rate bucket.
+// The data is already in KCP and accounted for when this runs; only the
+// wait is left.
+func (s *UDPSession) writeWait(n int) {
+	bucket := s.bucket.Load()
+	if bucket == nil {
+		return
 	}
-	return n, nil
+
+	bucket.Wait(int64(n))
 }
 
 // acquireWriteGate serializes non-empty writes while allowing a blocked caller
@@ -534,63 +470,6 @@ func (s *UDPSession) waitWriteGate() error {
 // releaseWriteGate makes the session available to the next waiting writer.
 func (s *UDPSession) releaseWriteGate() {
 	s.writeGate <- struct{}{}
-}
-
-// waitRateReservation waits until a reserved chunk is eligible for admission.
-// It cancels the reservation when a deadline, socket error, or Close interrupts
-// the wait.
-func (s *UDPSession) waitRateReservation(reservation *rate.Reservation) error {
-	var timer *time.Timer
-	defer func() { stopTimer(timer) }()
-
-	for {
-		select {
-		case <-s.chSocketWriteError:
-			reservation.Cancel()
-			return s.socketWriteError.Load().(error)
-		case <-s.die:
-			reservation.Cancel()
-			return errors.WithStack(io.ErrClosedPipe)
-		default:
-		}
-
-		now := time.Now()
-		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() {
-			if !now.Before(deadline) {
-				reservation.Cancel()
-				return errors.WithStack(errTimeout)
-			}
-		}
-		delay := reservation.DelayFrom(now)
-		if delay <= 0 {
-			return nil
-		}
-		if deadline, ok := s.wd.Load().(time.Time); ok && !deadline.IsZero() {
-			if untilDeadline := time.Until(deadline); untilDeadline < delay {
-				delay = untilDeadline
-			}
-		}
-		if timer == nil {
-			timer = time.NewTimer(delay)
-		} else {
-			stopTimer(timer)
-			timer.Reset(delay)
-		}
-
-		select {
-		case <-timer.C:
-		case <-s.chWriteEvent:
-			stopTimer(timer)
-		case <-s.chSocketWriteError:
-			stopTimer(timer)
-			reservation.Cancel()
-			return s.socketWriteError.Load().(error)
-		case <-s.die:
-			stopTimer(timer)
-			reservation.Cancel()
-			return errors.WithStack(io.ErrClosedPipe)
-		}
-	}
 }
 
 func (s *UDPSession) isClosed() bool {
@@ -800,13 +679,20 @@ func (s *UDPSession) SetWriteBuffer(bytes int) error {
 // SetRateLimit limits the rate at which Write and WriteBuffers accept
 // application bytes. Protocol overhead, retransmissions, and SendOOB traffic
 // are not counted. A value of 0 disables rate limiting.
-func (s *UDPSession) SetRateLimit(bytesPerSecond uint32) {
-	var limiter *rate.Limiter
-	if bytesPerSecond > 0 {
-		limiter = rate.NewLimiter(rate.Limit(bytesPerSecond), maxBatchSize*maxPacketSize)
+func (s *UDPSession) SetRateLimit(bps uint32) {
+	var bucket *ratelimit.Bucket
+	if bps > 0 {
+		bucket = ratelimit.NewBucketWithRate(float64(bps), int64(bps))
 	}
 
-	s.rateLimiter.Store(limiter)
+	s.bucket.Store(bucket)
+}
+
+// SetBucket limits the rate at which Write and WriteBuffers accept
+// application bytes. Protocol overhead, retransmissions, and SendOOB traffic
+// are not counted. A value of nil disables rate limiting.
+func (s *UDPSession) SetBucket(bucket *ratelimit.Bucket) {
+	s.bucket.Store(bucket)
 }
 
 // SetLogger configures the kcp trace logger
@@ -1768,14 +1654,6 @@ func buffersEmpty(v [][]byte) bool {
 		}
 	}
 	return true
-}
-
-// buffersLen returns the number of application bytes in a vector write.
-func buffersLen(v [][]byte) (n int) {
-	for _, b := range v {
-		n += len(b)
-	}
-	return n
 }
 
 // readLocked copies data that is ready into b and reports whether there was
