@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pion/transport/v4/deadline"
 	"golang.org/x/net/ipv4"
 )
 
@@ -60,7 +61,10 @@ func (c *blockingPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestPostProcessWorkerHandoff(t *testing.T) {
 	for i := range 1000 {
-		s := &UDPSession{}
+		s := &UDPSession{
+			readDeadline:  deadline.New(),
+			writeDeadline: deadline.New(),
+		}
 		s.postQueue.push(sendRequest{})
 		s.ppRunning.Store(true)
 
@@ -100,9 +104,11 @@ func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	s := &UDPSession{
-		conn: conn,
-		die:  make(chan struct{}),
-		kcp:  NewKCP(1, nil),
+		conn:          conn,
+		die:           make(chan struct{}),
+		kcp:           NewKCP(1, nil),
+		readDeadline:  deadline.New(),
+		writeDeadline: deadline.New(),
 	}
 	w := &ppWorker{
 		txqueue: []ipv4.Message{{
@@ -175,7 +181,11 @@ func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
 }
 
 func TestFinishClosedPostProcessDrainsQueue(t *testing.T) {
-	s := &UDPSession{die: make(chan struct{})}
+	s := &UDPSession{
+		die:           make(chan struct{}),
+		readDeadline:  deadline.New(),
+		writeDeadline: deadline.New(),
+	}
 	close(s.die)
 	s.ppRunning.Store(true)
 	if !s.postQueue.push(sendRequest{buffer: defaultBufferPool.Get()}) {

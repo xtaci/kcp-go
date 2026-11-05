@@ -437,13 +437,6 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		default:
 		}
 
-		// The timer callback may not run immediately at the deadline. Check the
-		// absolute deadline too, so a simultaneously released write gate cannot
-		// let an expired write proceed.
-		if deadline, ok := s.writeDeadline.Deadline(); ok && !time.Now().Before(deadline) {
-			return 0, errors.WithStack(errTimeout)
-		}
-
 		n, ok := s.writeBuffers(v)
 		if ok {
 			return n, nil
@@ -534,12 +527,8 @@ func (s *UDPSession) Close() error {
 
 		// Stop pending timers so closed sessions do not retain deadline resources
 		// until their deadlines expire.
-		if s.readDeadline != nil {
-			s.readDeadline.Set(time.Time{})
-		}
-		if s.writeDeadline != nil {
-			s.writeDeadline.Set(time.Time{})
-		}
+		s.readDeadline.Set(time.Time{})
+		s.writeDeadline.Set(time.Time{})
 
 		s.ppSendMu.Lock()
 		s.ppClosing = true
@@ -1476,9 +1465,7 @@ func (l *Listener) Close() error {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 	// Stop the Accept deadline timer when the listener is closed.
-	if l.readDeadline != nil {
-		l.readDeadline.Set(time.Time{})
-	}
+	l.readDeadline.Set(time.Time{})
 
 	pp := l.releasePusherLocked()
 	l.sessionLock.Unlock()

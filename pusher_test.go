@@ -29,6 +29,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/pion/transport/v4/deadline"
 )
 
 // pushConn reads its UDP socket on one goroutine and hands every packet to
@@ -413,11 +415,13 @@ func TestPacketPusherLastSessionUnregisterOutsideListenerLock(t *testing.T) {
 
 	remote := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}
 	s := &UDPSession{
-		conn:   pc,
-		kcp:    NewKCP(1, nil),
-		l:      l,
-		remote: remote,
-		die:    make(chan struct{}),
+		conn:          pc,
+		kcp:           NewKCP(1, nil),
+		l:             l,
+		remote:        remote,
+		die:           make(chan struct{}),
+		readDeadline:  deadline.New(),
+		writeDeadline: deadline.New(),
 	}
 	l.sessionLock.Lock()
 	l.sessions[remote.String()] = s
