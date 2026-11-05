@@ -59,7 +59,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
-	"github.com/pion/transport/v4/deadline"
+	"github.com/pion/transport/v5/deadline"
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"

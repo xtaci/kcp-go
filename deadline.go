@@ -49,7 +49,7 @@ package kcp
 import (
 	"time"
 
-	"github.com/pion/transport/v4/deadline"
+	"github.com/pion/transport/v5/deadline"
 )
 
 func freeDeadline(d *deadline.Deadline) {

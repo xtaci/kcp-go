@@ -44,7 +44,7 @@ import (
 	"weak"
 
 	"github.com/juju/ratelimit"
-	"github.com/pion/transport/v4/deadline"
+	"github.com/pion/transport/v5/deadline"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/pbkdf2"
 )
