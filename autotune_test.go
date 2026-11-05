@@ -25,6 +25,7 @@ package kcp
 import (
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -535,7 +536,7 @@ func TestAutoTuneSequenceWrapAround(t *testing.T) {
 
 func TestAutoTuneWithMissingAndDuplicateSamples(t *testing.T) {
 	tune := autoTune{}
-	for seq := uint32(0); seq < 20; seq++ {
+	for seq := range uint32(20) {
 		if seq == 1 || seq == 6 || seq == 9 {
 			continue
 		}
@@ -580,14 +581,8 @@ func TestAutoTuneFindsPulseAfterMissingBoundary(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			tune := autoTune{}
-			for seq := uint32(0); seq < 30; seq++ {
-				missing := false
-				for _, missingSeq := range tt.missingSeqs {
-					if seq == missingSeq {
-						missing = true
-						break
-					}
-				}
+			for seq := range uint32(30) {
+				missing := slices.Contains(tt.missingSeqs, seq)
 				if missing {
 					continue
 				}
@@ -602,7 +597,7 @@ func TestAutoTuneFindsPulseAfterMissingBoundary(t *testing.T) {
 
 func TestAutoTuneDiscardsConflictingDuplicateSequence(t *testing.T) {
 	tune := autoTune{}
-	for seq := uint32(0); seq < 30; seq++ {
+	for seq := range uint32(30) {
 		bit := seq%5 < 3
 		tune.Sample(bit, seq)
 		tune.Sample(bit, seq)
@@ -1096,7 +1091,7 @@ func TestAutoTuneSupports256Shards(t *testing.T) {
 		t.Fatal("failed to create decoder")
 	}
 
-	for seq := uint32(0); seq < 257; seq++ {
+	for seq := range uint32(257) {
 		decoder.autoTune.Sample(seq > 0 && seq < 256, seq)
 	}
 	packet := make([]byte, fecHeaderSize)

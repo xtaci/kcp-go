@@ -63,3 +63,17 @@ func (bp *bufferPool) Put(buf []byte) error {
 	bp.xmitBuf.Put(buf[:cap(buf)]) // reset slice length to full capacity
 	return nil
 }
+
+// Puts returns some buffers to the pool.
+func (bp *bufferPool) Puts(buffers [][]byte) {
+	for _, buf := range buffers {
+		bp.Put(buf)
+	}
+}
+
+// Puts returns some buffers to the pool.
+func (bp *bufferPool) PutPkts(buffers []fecPacket) {
+	for _, buf := range buffers {
+		bp.Put(buf)
+	}
+}

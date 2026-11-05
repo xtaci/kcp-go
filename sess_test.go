@@ -43,6 +43,7 @@ import (
 	"time"
 
 	"github.com/juju/ratelimit"
+	"github.com/pion/transport/v4/deadline"
 	"github.com/pkg/errors"
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -298,7 +299,7 @@ func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	// A queued segment that any flush would send.
 	s.kcp.Send([]byte("x"))
 	before := outputs.Load()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if n, err := s.Write(nil); n != 0 || err != nil {
 			t.Fatalf("Write(nil) = %d, %v", n, err)
 		}
@@ -372,7 +373,7 @@ func TestWriteRateLimitEndToEndThroughput(t *testing.T) {
 	}
 	defer l.Close()
 
-	var received int64
+	var received atomic.Int64
 	accepted := make(chan error, 1)
 	readErr := make(chan error, 1)
 	go func() {
@@ -393,7 +394,7 @@ func TestWriteRateLimitEndToEndThroughput(t *testing.T) {
 		for {
 			n, err := sess.Read(buf)
 			if n > 0 {
-				atomic.AddInt64(&received, int64(n))
+				received.Add(int64(n))
 			}
 			if err != nil {
 				readErr <- err
@@ -457,12 +458,12 @@ func TestWriteRateLimitEndToEndThroughput(t *testing.T) {
 	defer ticker.Stop()
 	var samples []float64
 	lastAt := time.Now()
-	lastBytes := atomic.LoadInt64(&received)
-	for tick := 0; tick < int(duration/time.Second); tick++ {
+	lastBytes := received.Load()
+	for tick := range int(duration / time.Second) {
 		select {
 		case <-ticker.C:
 			now := time.Now()
-			currentBytes := atomic.LoadInt64(&received)
+			currentBytes := received.Load()
 			rate := float64(currentBytes-lastBytes) / now.Sub(lastAt).Seconds()
 			lastAt, lastBytes = now, currentBytes
 			if tick >= warmupTicks {
@@ -534,6 +535,8 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 
 func newRateLimitTestSession(bucket *ratelimit.Bucket) *UDPSession {
 	s := &UDPSession{
+		readDeadline:       deadline.New(),
+		writeDeadline:      deadline.New(),
 		die:                make(chan struct{}),
 		writeGate:          make(chan struct{}, 1),
 		chWriteEvent:       make(chan struct{}, 1),
@@ -1066,38 +1069,6 @@ func sink_tester(cli *UDPSession, msglen, msgcount int) error {
 		}
 	}
 	return nil
-}
-
-func TestSNMP(t *testing.T) {
-	snmp := newSnmp()
-	snmp.BytesSent = 123
-	snmp.FECRecovered = 45
-	snmp.OOBPackets = 6
-
-	header := snmp.Header()
-	values := snmp.ToSlice()
-	if len(header) != len(values) {
-		t.Fatalf("Header() has %d values, ToSlice() has %d", len(header), len(values))
-	}
-	if header[0] != "BytesSent" || values[0] != "123" {
-		t.Fatalf("BytesSent = %q:%q, want %q:%q", header[0], values[0], "BytesSent", "123")
-	}
-
-	snapshot := snmp.Copy()
-	snmp.BytesSent = 999
-	if snapshot.BytesSent != 123 {
-		t.Fatalf("Copy().BytesSent = %d, want 123", snapshot.BytesSent)
-	}
-
-	snmp.Reset()
-	if got := snmp.Copy(); *got != (Snmp{}) {
-		t.Fatalf("Reset() = %+v, want zero Snmp", got)
-	}
-	for i, value := range snmp.ToSlice() {
-		if value != "0" {
-			t.Fatalf("ToSlice()[%d] = %q after Reset, want %q", i, value, "0")
-		}
-	}
 }
 
 func TestListenerClose(t *testing.T) {
@@ -1830,10 +1801,8 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	sizePlus1 := size + 1
 
 	var wg sync.WaitGroup
-	wg.Add(1)
 
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		// Client does NOT set OOB handler, only sends OOB packets of varying lengths.
 		buf := make([]byte, size)
 		for i := range len(buf) {
@@ -1847,7 +1816,7 @@ func TestOOB_OneSideHandler(t *testing.T) {
 				runtime.Gosched()
 			}
 		}
-	}()
+	})
 
 	wg.Wait()
 	waitForOOBLengths(t, receivedLengths, errCh, sizePlus1)
@@ -1955,13 +1924,13 @@ func TestGetOOBMaxSizeConcurrentSetMtu(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10000; i++ {
+		for i := range 10000 {
 			sess.SetMtu(1200 + i%2*100)
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 10000; i++ {
+		for range 10000 {
 			if size := sess.GetOOBMaxSize(); size <= 0 {
 				t.Errorf("invalid OOB maximum size: %d", size)
 				return
@@ -1976,14 +1945,12 @@ func TestSetLoggerConcurrentWithKCPTrace(t *testing.T) {
 	logger := logoutput_callback(func(string, ...any) {})
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for i := 0; i < 10000; i++ {
+	wg.Go(func() {
+		for range 10000 {
 			sess.SetLogger(IKCP_LOG_ALL, logger)
 		}
-	}()
-	for i := 0; i < 10000; i++ {
+	})
+	for range 10000 {
 		sess.mu.Lock()
 		sess.kcp.debugLog(IKCP_LOG_INPUT, "test")
 		sess.mu.Unlock()

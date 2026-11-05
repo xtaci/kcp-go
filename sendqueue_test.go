@@ -29,7 +29,7 @@ func TestSendQueue(t *testing.T) {
 	if _, ok := sq.pop(); ok {
 		t.Fatal("pop from an empty queue")
 	}
-	for i := 0; i < devBacklog; i++ {
+	for i := range devBacklog {
 		if !sq.push(sendRequest{buffer: []byte{byte(i)}}) {
 			t.Fatalf("push %d refused under the backlog", i)
 		}
@@ -37,7 +37,7 @@ func TestSendQueue(t *testing.T) {
 	if sq.push(sendRequest{}) {
 		t.Fatal("push past devBacklog accepted")
 	}
-	for i := 0; i < devBacklog/2; i++ {
+	for i := range devBacklog / 2 {
 		r, ok := sq.pop()
 		if !ok || r.buffer[0] != byte(i) {
 			t.Fatalf("pop %d: got %v %v", i, r.buffer, ok)
