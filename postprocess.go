@@ -171,13 +171,7 @@ func ppEnqueue(s *UDPSession) {
 // a bounded process-wide pool. It is called exactly once by ppQueue.once.
 func startPostProcessWorkers() {
 	ppQueue.cond = sync.NewCond(&ppQueue.mu)
-	n := runtime.NumCPU()
-	if n < 2 {
-		n = 2
-	}
-	if n > 8 {
-		n = 8
-	}
+	n := min(max(runtime.NumCPU(), 2), 8)
 	for i := 0; i < n; i++ {
 		go postProcessWorker()
 	}

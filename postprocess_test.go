@@ -59,7 +59,7 @@ func (c *blockingPacketConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *blockingPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
 func TestPostProcessWorkerHandoff(t *testing.T) {
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		s := &UDPSession{}
 		s.postQueue.push(sendRequest{})
 		s.ppRunning.Store(true)

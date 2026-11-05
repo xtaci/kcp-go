@@ -38,9 +38,9 @@ func TestTimedSchedRunsEachTaskOnTime(t *testing.T) {
 	var early, late, runs atomic.Int64
 	var wg sync.WaitGroup
 	wg.Add(n)
-	for g := 0; g < 8; g++ {
+	for range 8 {
 		go func() {
-			for i := 0; i < n/8; i++ {
+			for i := range n / 8 {
 				deadline := time.Now().Add(time.Duration(i%50) * time.Millisecond)
 				ts.Put(func() {
 					d := time.Since(deadline)
@@ -145,7 +145,7 @@ func TestTimedFuncHeapOrder(t *testing.T) {
 	base := time.Now()
 	var h timedFuncHeap
 	var want []time.Time
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		ts := base.Add(time.Duration((i*37)%500) * time.Millisecond)
 		want = append(want, ts)
 		h.push(timedFunc{func() {}, ts})
@@ -172,7 +172,7 @@ func BenchmarkTimedFuncHeap(b *testing.B) {
 	base := time.Now()
 	h := make(timedFuncHeap, 0, 1024)
 	f := func() {}
-	for i := 0; i < 512; i++ {
+	for i := range 512 {
 		h.push(timedFunc{f, base.Add(time.Duration(i) * time.Microsecond)})
 	}
 	b.ReportAllocs()

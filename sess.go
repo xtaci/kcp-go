@@ -752,7 +752,7 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 // It returns once the queue is empty or after ppBudget packets.
 func (s *UDPSession) postProcess(w *ppWorker) (more bool) {
 	bytesToSend := 0
-	for n := 0; n < ppBudget; n++ {
+	for range ppBudget {
 		req, ok := s.postQueue.pop()
 		if !ok {
 			return false
