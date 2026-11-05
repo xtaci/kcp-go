@@ -518,7 +518,7 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 		writeDone <- err
 	}()
 
-	time.Sleep(time.Until(deadline))
+	<-s.writeDeadline.Done()
 	s.writeGate <- struct{}{}
 	select {
 	case err := <-writeDone:
@@ -530,6 +530,46 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 	}
 	if got := s.kcp.WaitSnd(); got != 0 {
 		t.Fatalf("expired Write queued %d KCP segments", got)
+	}
+}
+
+func TestCloseStopsSessionDeadlineTimers(t *testing.T) {
+	s, err := DialWithOptions("127.0.0.1:9", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetWriteDeadline(time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := s.readDeadline.Deadline(); ok {
+		t.Fatal("read deadline remains set after session close")
+	}
+	if _, ok := s.writeDeadline.Deadline(); ok {
+		t.Fatal("write deadline remains set after session close")
+	}
+}
+
+func TestCloseStopsListenerDeadlineTimer(t *testing.T) {
+	l, err := ListenWithOptions("127.0.0.1:0", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := l.SetReadDeadline(time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := l.readDeadline.Deadline(); ok {
+		t.Fatal("read deadline remains set after listener close")
 	}
 }
 
