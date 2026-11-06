@@ -534,19 +534,34 @@ func TestWriteDeadlineExpiresWhileWaitingForWriteGate(t *testing.T) {
 	}
 }
 
-// runtimeGC forces a garbage collection and waits for the GC done.
-func runtimeGC() {
-	done := make(chan struct{})
+func waitForDeadlineCollection(t *testing.T, deadlines ...weak.Pointer[deadline.Deadline]) {
+	t.Helper()
 
-	// use large object to avoid GC batching delay in the runtime.
-	ptr := new([32]byte)
-	runtime.AddCleanup(ptr, func(done chan struct{}) {
-		close(done)
-	}, done)
-	ptr = nil
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	retry := time.NewTicker(10 * time.Millisecond)
+	defer retry.Stop()
 
-	runtime.GC()
-	<-done
+	for {
+		runtime.GC()
+
+		collected := true
+		for _, d := range deadlines {
+			if d.Value() != nil {
+				collected = false
+				break
+			}
+		}
+		if collected {
+			return
+		}
+
+		select {
+		case <-timeout.C:
+			t.Fatal("deadline objects remained reachable after GC")
+		case <-retry.C:
+		}
+	}
 }
 
 func TestCloseStopsSessionDeadlineTimers(t *testing.T) {
@@ -567,14 +582,7 @@ func TestCloseStopsSessionDeadlineTimers(t *testing.T) {
 	}
 	s = nil
 
-	// 1st GC free *UDPSession, and call Cleanup callbacks.
-	runtimeGC()
-
-	// 2nd GC free *time.Timer of *deadline.Deadline from GC Roots.
-	runtimeGC()
-
-	// 3rd GC free *deadline.Deadline
-	runtimeGC()
+	waitForDeadlineCollection(t, rd, wd)
 
 	if rd.Value() != nil {
 		t.Fatal("read deadline reachable after object unreachable")
@@ -598,14 +606,7 @@ func TestCloseStopsListenerDeadlineTimer(t *testing.T) {
 	}
 	l = nil
 
-	// 1st GC free *Listener, and call Cleanup callbacks.
-	runtimeGC()
-
-	// 2nd GC free *time.Timer of *deadline.Deadline from GC Roots.
-	runtimeGC()
-
-	// 3rd GC free *deadline.Deadline
-	runtimeGC()
+	waitForDeadlineCollection(t, deadline)
 
 	if deadline.Value() != nil {
 		t.Fatal("accept deadline reachable after object unreachable")
