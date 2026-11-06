@@ -3,7 +3,7 @@ module github.com/xtaci/kcp-go/v5
 require (
 	github.com/juju/ratelimit v1.0.2
 	github.com/klauspost/reedsolomon v1.14.2
-	github.com/pion/transport/v4 v4.1.3
+	github.com/pion/transport/v5 v5.1.4
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
 	github.com/tjfoc/gmsm v1.4.1

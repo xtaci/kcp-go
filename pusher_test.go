@@ -30,7 +30,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pion/transport/v4/deadline"
+	"github.com/pion/transport/v5/deadline"
 )
 
 // pushConn reads its UDP socket on one goroutine and hands every packet to

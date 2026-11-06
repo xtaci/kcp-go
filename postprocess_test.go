@@ -31,7 +31,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pion/transport/v4/deadline"
+	"github.com/pion/transport/v5/deadline"
 	"golang.org/x/net/ipv4"
 )
 
