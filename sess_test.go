@@ -1713,6 +1713,107 @@ func TestListenDial(t *testing.T) {
 	conn.Close()
 }
 
+// oobTestObserver serializes callback results and retains the first error for cleanup.
+type oobTestObserver struct {
+	mu       sync.Mutex
+	stopped  bool
+	err      error
+	errCh    chan error
+	first    chan struct{}
+	counts   []atomic.Int32
+	received chan int
+}
+
+// newOOBTestObserver creates an observer for payload lengths below count.
+func newOOBTestObserver(count int) *oobTestObserver {
+	return &oobTestObserver{
+		errCh: make(chan error, 1), first: make(chan struct{}),
+		counts: make([]atomic.Int32, count), received: make(chan int, count),
+	}
+}
+
+// record runs a callback under the observer lock and retains its first error.
+func (o *oobTestObserver) record(f func() error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.stopped {
+		return
+	}
+	if err := f(); err != nil && o.err == nil {
+		o.err = err
+		o.errCh <- err
+	}
+}
+
+// receive validates an OOB payload and signals each newly received length.
+func (o *oobTestObserver) receive(buf []byte) {
+	o.record(func() error {
+		if len(buf) >= len(o.counts) {
+			return fmt.Errorf("unexpected OOB payload length %d", len(buf))
+		}
+		for i, b := range buf {
+			if b != byte(i) {
+				return fmt.Errorf("OOB payload mismatch at offset %d: expected %d, got %d", i, byte(i), b)
+			}
+		}
+		if o.counts[len(buf)].Add(1) == 1 {
+			o.received <- len(buf)
+		}
+		select {
+		case <-o.first:
+		default:
+			close(o.first)
+		}
+		return nil
+	})
+}
+
+// stop disables further observation and returns the first recorded error.
+func (o *oobTestObserver) stop() error {
+	// Wait for any active callback and ignore callbacks that arrive after cleanup starts.
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.stopped = true
+	return o.err
+}
+
+// startOOBTestServer accepts one session, installs its OOB handler, and cleans it up.
+func startOOBTestServer(t *testing.T, l net.Listener, handler func(*UDPSession, []byte)) {
+	t.Helper()
+	type acceptResult struct {
+		session *UDPSession
+		err     error
+	}
+	accepted := make(chan acceptResult, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := l.Accept()
+		if err != nil {
+			accepted <- acceptResult{err: err}
+			return
+		}
+		sess := conn.(*UDPSession)
+		err = sess.SetOOBHandler(func(buf []byte) { handler(sess, buf) })
+		accepted <- acceptResult{session: sess, err: err}
+		if err == nil {
+			handleEcho(sess)
+		}
+	}()
+	t.Cleanup(func() {
+		// Closing the listener unblocks Accept, but accepted sessions need separate cleanup.
+		l.Close()
+		result := <-accepted
+		if result.session != nil {
+			result.session.Close()
+		}
+		<-done
+		if result.err != nil && result.session != nil {
+			t.Errorf("server failed to register OOB handler: %v", result.err)
+		}
+	})
+}
+
 // TestOOB verifies the end-to-end transmission and reception of OOB (Out-Of-Band) data:
 // 1. The server registers an OOB callback and echoes back any received OOB data.
 // 2. The client registers an OOB callback to validate the content and length of echoed OOB data.
@@ -1727,37 +1828,38 @@ func TestOOB(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	defer l.Close()
-
-	go func() {
-		// Server listens for OOB data and echoes it back
-		kcplistener := l.(*Listener)
-		kcplistener.SetReadBuffer(4 * 1024 * 1024)
-		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
-		for {
-			s, err := l.Accept()
-			if err != nil {
-				return
+	observer := newOOBTestObserver(maxPacketSize)
+	startOOBTestServer(t, l, func(sess *UDPSession, buf []byte) {
+		observer.record(func() error {
+			if err := sess.SendOOB(buf); err != nil {
+				return fmt.Errorf("server failed to echo OOB payload: %w", err)
 			}
-			sess := s.(*UDPSession)
-			sess.SetReadBuffer(4 * 1024 * 1024)
-			sess.SetWriteBuffer(4 * 1024 * 1024)
-			// Register OOB callback, echo back received OOB data immediately
-			sess.SetOOBHandler(func(buf []byte) {
-				if err := sess.SendOOB(buf); err != nil {
-					t.Errorf("server failed to echo OOB payload: %v", err)
-				}
-			})
-			go handleEcho(sess)
-		}
-	}()
+			return nil
+		})
+	})
 
 	block2, _ := NewAESGCMCrypt(pass)
 	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 	}
-	defer cli.Close()
+	t.Cleanup(func() {
+		if err := observer.stop(); err != nil {
+			t.Errorf("OOB callback: %v", err)
+		}
+	})
+	streamStop := make(chan struct{})
+	streamDone := make(chan error, 1)
+	streamRunning := false
+	t.Cleanup(func() {
+		close(streamStop)
+		cli.Close()
+		if streamRunning {
+			if err := <-streamDone; err != nil && !t.Failed() {
+				t.Errorf("stream echo failed: %v", err)
+			}
+		}
+	})
 	cli.SetWriteDelay(false)
 	if err := cli.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
 		t.Fatal(err)
@@ -1770,47 +1872,40 @@ func TestOOB(t *testing.T) {
 	t.Log("Max OOB size:", size)
 
 	sizePlus1 := size + 1
-	counts := make([]atomic.Int32, sizePlus1)
-	receivedLengths := make(chan int, sizePlus1)
-	errCh := make(chan error, 1)
+	if err := cli.SetOOBHandler(observer.receive); err != nil {
+		t.Fatal(err)
+	}
 
-	// Client registers OOB callback to validate echoed OOB data content and length
-	cli.SetOOBHandler(func(buf []byte) {
-		for i, b := range buf {
-			if b != byte(i) {
-				select {
-				case errCh <- fmt.Errorf("OOB echo payload mismatch at offset %d: expected %d, got %d", i, byte(i), b):
-				default:
-				}
-				return
-			}
-		}
-		if counts[len(buf)].Add(1) == 1 {
-			receivedLengths <- len(buf)
-		}
-	})
-
-	var wg sync.WaitGroup
-	wg.Go(func() {
-		// Stress test for normal data channel to ensure main channel does not affect OOB
-		randomEchoTest(t, cli, 10*1024*1024)
-	})
-	defer func() {
-		cli.Close()
-		wg.Wait()
+	streamStarted := make(chan struct{})
+	streamRunning = true
+	go func() {
+		streamDone <- runOOBTestStream(cli, streamStarted, observer.first, streamStop)
 	}()
+	select {
+	case <-streamStarted:
+	case err := <-streamDone:
+		streamDone <- err
+		t.Fatalf("stream did not start: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("stream did not start")
+	}
 
-	waitForOOBLengths(t, cli, counts, receivedLengths, errCh, sizePlus1)
-	wg.Wait()
+	waitForOOBLengths(t, cli, observer, sizePlus1)
+	select {
+	case err := <-streamDone:
+		streamDone <- err
+		if err != nil {
+			t.Fatalf("stream echo failed: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("stream did not complete")
+	}
 }
 
 // TestOOB_OneSideHandler verifies that OOB data can be received and processed
 // when only the server sets the OOB handler and the client does not.
 //
-// The server OOB handler updates the shared 'counts' slice, which is initialized
-// in the main goroutine and referenced by the handler for each OOB payload length.
-// This test ensures that the server can receive and correctly process OOB packets
-// of all possible lengths, even if the client does not set any OOB handler.
+// The server validates OOB packets of all possible lengths.
 func TestOOB_OneSideHandler(t *testing.T) {
 	port := nextPort()
 	block1, _ := NewAESGCMCrypt(pass)
@@ -1819,63 +1914,79 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	if err != nil {
 		panic(err)
 	}
-	defer l.Close()
-
-	counts := make([]atomic.Int32, maxPacketSize)
-	receivedLengths := make(chan int, maxPacketSize)
-	errCh := make(chan error, 1)
-
-	// Get OOB max payload size and initialize the shared counts slice.
-	go func() {
-		// Server sets OOB handler and counts received OOB packets by length.
-		// The handler directly updates the shared 'counts' slice.
-		kcplistener := l.(*Listener)
-		kcplistener.SetReadBuffer(4 * 1024 * 1024)
-		kcplistener.SetWriteBuffer(4 * 1024 * 1024)
-		for {
-			s, err := l.Accept()
-			if err != nil {
-				return
-			}
-			sess := s.(*UDPSession)
-			sess.SetReadBuffer(4 * 1024 * 1024)
-			sess.SetWriteBuffer(4 * 1024 * 1024)
-			// Only the server sets the OOB handler.
-			// The handler references the 'counts' slice from the main goroutine.
-			sess.SetOOBHandler(func(buf []byte) {
-				// Validate OOB payload content and count by length.
-				for i, b := range buf {
-					if b != byte(i) {
-						select {
-						case errCh <- fmt.Errorf("OOB payload mismatch at offset %d: expected %d, got %d", i, byte(i), b):
-						default:
-						}
-						return
-					}
-				}
-				if counts[len(buf)].Add(1) == 1 {
-					receivedLengths <- len(buf)
-				}
-			})
-			go handleEcho(sess)
-		}
-	}()
+	observer := newOOBTestObserver(maxPacketSize)
+	startOOBTestServer(t, l, func(_ *UDPSession, buf []byte) { observer.receive(buf) })
 
 	block2, _ := NewAESGCMCrypt(pass)
 	cli, err := dialEcho(port, block2)
 	if err != nil {
 		panic(err)
 	}
-	defer cli.Close()
+	t.Cleanup(func() { cli.Close() })
+	t.Cleanup(func() {
+		if err := observer.stop(); err != nil {
+			t.Errorf("OOB callback: %v", err)
+		}
+	})
 	cli.SetWriteDelay(false)
 
 	size := cli.GetOOBMaxSize()
 	sizePlus1 := size + 1
 
-	waitForOOBLengths(t, cli, counts, receivedLengths, errCh, sizePlus1)
+	waitForOOBLengths(t, cli, observer, sizePlus1)
 }
 
-func waitForOOBLengths(t *testing.T, cli *UDPSession, counts []atomic.Int32, receivedLengths <-chan int, errCh chan error, count int) {
+// runOOBTestStream verifies stream echoes before and after the first OOB packet.
+func runOOBTestStream(cli *UDPSession, started chan<- struct{}, firstOOB, stop <-chan struct{}) error {
+	const chunkSize = 32 * 1024
+	const totalSize = 10 * 1024 * 1024
+	payload := make([]byte, chunkSize)
+	for i := range payload {
+		payload[i] = byte(i)
+	}
+	echo := make([]byte, chunkSize)
+	for sent := 0; sent < totalSize; sent += chunkSize {
+		n, err := cli.Write(payload)
+		if err != nil {
+			return fmt.Errorf("write stream: %w", err)
+		}
+		if n != len(payload) {
+			return fmt.Errorf("short stream write: %d of %d", n, len(payload))
+		}
+		if _, err := io.ReadFull(cli, echo); err != nil {
+			return fmt.Errorf("read stream echo: %w", err)
+		}
+		if !bytes.Equal(payload, echo) {
+			return fmt.Errorf("stream echo mismatch at offset %d", sent)
+		}
+		if sent == 0 {
+			// Keep the stream unfinished until an OOB packet has been received.
+			close(started)
+			select {
+			case <-firstOOB:
+			case <-stop:
+				return fmt.Errorf("stream stopped before first OOB packet")
+			}
+		}
+	}
+	return nil
+}
+
+// TestOOBTestObserver verifies that late callback errors survive until cleanup.
+func TestOOBTestObserver(t *testing.T) {
+	observer := newOOBTestObserver(1)
+	observer.receive(nil)
+	<-observer.received
+	observer.record(func() error { return fmt.Errorf("late callback error") })
+	<-observer.errCh
+	if err := observer.stop(); err == nil || err.Error() != "late callback error" {
+		t.Fatalf("stop returned %v, want late callback error", err)
+	}
+	observer.record(func() error { t.Error("callback ran after stop"); return nil })
+}
+
+// waitForOOBLengths retries missing payload lengths until all are observed or the test times out.
+func waitForOOBLengths(t *testing.T, cli *UDPSession, observer *oobTestObserver, count int) {
 	t.Helper()
 
 	stop := make(chan struct{})
@@ -1886,6 +1997,7 @@ func waitForOOBLengths(t *testing.T, cli *UDPSession, counts []atomic.Int32, rec
 		for i := range buf {
 			buf[i] = byte(i)
 		}
+		// OOB is best-effort: pace retries to avoid overflowing the send queue.
 		ticker := time.NewTicker(time.Millisecond)
 		defer ticker.Stop()
 		for i := 0; ; i++ {
@@ -1895,12 +2007,10 @@ func waitForOOBLengths(t *testing.T, cli *UDPSession, counts []atomic.Int32, rec
 			default:
 			}
 			length := i % count
-			if counts[length].Load() == 0 {
+			// Retry only lengths that have not yet been validated by the receiver.
+			if observer.counts[length].Load() == 0 {
 				if err := cli.SendOOB(buf[:length]); err != nil {
-					select {
-					case errCh <- fmt.Errorf("client failed to send OOB payload: %w", err):
-					default:
-					}
+					observer.record(func() error { return fmt.Errorf("client failed to send OOB payload: %w", err) })
 					return
 				}
 			}
@@ -1924,9 +2034,12 @@ func waitForOOBLengths(t *testing.T, cli *UDPSession, counts []atomic.Int32, rec
 
 	for remaining := count; remaining > 0; {
 		select {
-		case err := <-errCh:
+		case err := <-observer.errCh:
 			t.Fatal(err)
-		case length := <-receivedLengths:
+		case length := <-observer.received:
+			if length >= count {
+				t.Fatalf("unexpected OOB payload length %d", length)
+			}
 			if !received[length] {
 				received[length] = true
 				remaining--
