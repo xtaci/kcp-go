@@ -362,6 +362,10 @@ func TestWriteRateLimitWaitsAndAcceptsLargeWrites(t *testing.T) {
 }
 
 func TestWriteRateLimitEndToEndThroughput(t *testing.T) {
+	if testing.Short() {
+		t.Skipf("skipping %s in short mode.", t.Name())
+	}
+
 	const (
 		targetRate  = 1_000_000
 		duration    = 12 * time.Second
