@@ -181,7 +181,7 @@ type (
 		//
 		// OOB data bypasses the KCP reliable data path and is delivered unreliably.
 		// The callback is invoked synchronously from the KCP input processing path.
-		callbackForOOB atomic.Value
+		callbackForOOB atomic.Pointer[OOBCallBackType]
 	}
 
 	setReadBuffer interface {
@@ -919,10 +919,10 @@ func (s *UDPSession) SetOOBHandler(callback OOBCallBackType) error {
 		return errors.New("OOB requires FEC to be enabled")
 	}
 	if callback == nil {
-		s.callbackForOOB.Store(OOBCallBackType(func([]byte) {}))
+		s.callbackForOOB.Store(nil)
 		return nil
 	}
-	s.callbackForOOB.Store(callback)
+	s.callbackForOOB.Store(&callback)
 	return nil
 }
 
@@ -1170,7 +1170,7 @@ func (s *UDPSession) kcpInput(data []byte) {
 		// The callback is responsible for ensuring non-blocking behavior.
 		if callback := s.callbackForOOB.Load(); callback != nil {
 			// Data layout: | FEC header (fecHeaderSizePlus2) | conv (4B) | OOB payload |
-			callback.(OOBCallBackType)(data[fecHeaderSizePlus2+convSize:])
+			(*callback)(data[fecHeaderSizePlus2+convSize:])
 		}
 	default: // packet without FEC
 		s.mu.Lock()
