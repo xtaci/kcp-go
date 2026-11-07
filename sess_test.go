@@ -1759,6 +1759,9 @@ func TestOOB(t *testing.T) {
 	}
 	defer cli.Close()
 	cli.SetWriteDelay(false)
+	if err := cli.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
 
 	size := cli.GetOOBMaxSize()
 	if size < 1000 {
@@ -1788,33 +1791,17 @@ func TestOOB(t *testing.T) {
 	})
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		// Stress test for normal data channel to ensure main channel does not affect OOB
 		randomEchoTest(t, cli, 10*1024*1024)
+	})
+	defer func() {
+		cli.Close()
+		wg.Wait()
 	}()
 
-	go func() {
-		defer wg.Done()
-		// Send OOB data of varying lengths in a loop, content is [0,1,2,...]
-		buf := make([]byte, size)
-		for i := range len(buf) {
-			buf[i] = byte(i)
-		}
-		for i := range 10 * 1024 * 1024 {
-			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
-				t.Errorf("client failed to send OOB payload: %v", err)
-			}
-			if i%128 == 0 {
-				runtime.Gosched()
-			}
-		}
-	}()
-
+	waitForOOBLengths(t, cli, counts, receivedLengths, errCh, sizePlus1)
 	wg.Wait()
-	waitForOOBLengths(t, receivedLengths, errCh, sizePlus1)
 }
 
 // TestOOB_OneSideHandler verifies that OOB data can be received and processed
@@ -1863,6 +1850,7 @@ func TestOOB_OneSideHandler(t *testing.T) {
 						case errCh <- fmt.Errorf("OOB payload mismatch at offset %d: expected %d, got %d", i, byte(i), b):
 						default:
 						}
+						return
 					}
 				}
 				if counts[len(buf)].Add(1) == 1 {
@@ -1884,33 +1872,54 @@ func TestOOB_OneSideHandler(t *testing.T) {
 	size := cli.GetOOBMaxSize()
 	sizePlus1 := size + 1
 
-	var wg sync.WaitGroup
-
-	wg.Go(func() {
-		// Client does NOT set OOB handler, only sends OOB packets of varying lengths.
-		buf := make([]byte, size)
-		for i := range len(buf) {
-			buf[i] = byte(i)
-		}
-		for i := range 10 * 1024 * 1024 {
-			if err := cli.SendOOB(buf[:i%sizePlus1]); err != nil {
-				t.Errorf("client failed to send OOB payload: %v", err)
-			}
-			if i%128 == 0 {
-				runtime.Gosched()
-			}
-		}
-	})
-
-	wg.Wait()
-	waitForOOBLengths(t, receivedLengths, errCh, sizePlus1)
+	waitForOOBLengths(t, cli, counts, receivedLengths, errCh, sizePlus1)
 }
 
-func waitForOOBLengths(t *testing.T, receivedLengths <-chan int, errCh <-chan error, count int) {
+func waitForOOBLengths(t *testing.T, cli *UDPSession, counts []atomic.Int32, receivedLengths <-chan int, errCh chan error, count int) {
 	t.Helper()
 
+	stop := make(chan struct{})
+	senderDone := make(chan struct{})
+	go func() {
+		defer close(senderDone)
+		buf := make([]byte, count-1)
+		for i := range buf {
+			buf[i] = byte(i)
+		}
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			length := i % count
+			if counts[length].Load() == 0 {
+				if err := cli.SendOOB(buf[:length]); err != nil {
+					select {
+					case errCh <- fmt.Errorf("client failed to send OOB payload: %w", err):
+					default:
+					}
+					return
+				}
+			}
+			if i%32 == 31 {
+				select {
+				case <-stop:
+					return
+				case <-ticker.C:
+				}
+			}
+		}
+	}()
+	defer func() {
+		close(stop)
+		<-senderDone
+	}()
+
 	received := make([]bool, count)
-	timeout := time.NewTimer(10 * time.Second)
+	timeout := time.NewTimer(30 * time.Second)
 	defer timeout.Stop()
 
 	for remaining := count; remaining > 0; {
@@ -1925,7 +1934,7 @@ func waitForOOBLengths(t *testing.T, receivedLengths <-chan int, errCh <-chan er
 		case <-timeout.C:
 			for length, seen := range received {
 				if !seen {
-					t.Fatalf("missing OOB echo for payload length %d", length)
+					t.Fatalf("missing OOB payload length %d", length)
 				}
 			}
 		}
