@@ -1,0 +1,59 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.test.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-latest
+          - windows-latest
+        test:
+          - name: full
+            command: go test -v ./...
+          - name: short-race
+            command: go test -v -short -race ./...
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run tests
+        shell: bash
+        run: ${{ matrix.test.command }}
+
+  freebsd:
+    name: FreeBSD / ${{ matrix.test.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        test:
+          - name: full
+            command: go test -v ./...
+          - name: short-race
+            command: go test -v -short -race ./...
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests in FreeBSD VM
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.0"
+          usesh: true
+          run: |
+            set -eu
+            fetch -o /tmp/go.tar.gz \
+              https://go.dev/dl/go1.26.2.freebsd-amd64.tar.gz
+            tar -C /tmp -xzf /tmp/go.tar.gz
+            export PATH="/tmp/go/bin:$PATH"
+            go version
+            ${{ matrix.test.command }}
