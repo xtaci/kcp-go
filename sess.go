@@ -1016,7 +1016,7 @@ func (s *UDPSession) notifyWriteEvent() {
 
 func (s *UDPSession) notifyReadError(err error) {
 	s.socketReadErrorOnce.Do(func() {
-		s.socketReadError= err
+		s.socketReadError = err
 		close(s.chSocketReadError)
 	})
 	s.callReadNotify()
@@ -1024,7 +1024,7 @@ func (s *UDPSession) notifyReadError(err error) {
 
 func (s *UDPSession) notifyWriteError(err error) {
 	s.socketWriteErrorOnce.Do(func() {
-		s.socketWriteError= err
+		s.socketWriteError = err
 		close(s.chSocketWriteError)
 	})
 }
@@ -1369,7 +1369,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 
 func (l *Listener) notifyReadError(err error) {
 	l.socketReadErrorOnce.Do(func() {
-		l.socketReadError= err
+		l.socketReadError = err
 		close(l.chSocketReadError)
 
 		// propagate read error to all sessions
