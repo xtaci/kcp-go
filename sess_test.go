@@ -35,7 +35,6 @@ import (
 	mrand "math/rand"
 	"net"
 	"os"
-	"reflect"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -2068,39 +2067,39 @@ func TestSetOOBHandler_Basic(t *testing.T) {
 	if err := sess.SetOOBHandler(nil); err != nil {
 		t.Error("unregister nil callback should not error")
 	}
-	// After setting nil, callbackForOOB should be a dummy handler, and calling it should not panic
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("dummy OOB handler should not panic, got panic: %v", r)
-		}
-	}()
+	// After setting nil, callbackForOOB must hold a nil pointer.
+	// No sentinel empty function any more; absence is represented by nil.
 	if f := sess.callbackForOOB.Load(); f != nil {
-		typeName := reflect.TypeOf(f).String()
-		t.Logf("callbackForOOB type: %s", typeName)
-
-		if cb, ok := f.(OOBCallBackType); ok {
-			cb([]byte("dummy"))
-		} else {
-			t.Errorf("callbackForOOB type assertion failed: got %T", f)
-		}
-	} else {
-		t.Error("callbackForOOB should not be nil after SetOOBHandler(nil)")
+		t.Errorf("callbackForOOB should be nil after SetOOBHandler(nil), got %v", f)
 	}
+
 	called := false
 	cb := func([]byte) { called = true }
 	if err := sess.SetOOBHandler(cb); err != nil {
 		t.Errorf("register callback failed: %v", err)
 	}
-	// Simulate callback invocation
+	// Simulate callback invocation. The loaded pointer is non-nil, and
+	// the function value it points to is guaranteed non-nil because
+	// SetOOBHandler rejected nil above.
 	if f := sess.callbackForOOB.Load(); f != nil {
-		if cb2, ok := f.(OOBCallBackType); ok {
-			cb2([]byte("test"))
-			if !called {
-				t.Error("callback not called as expected")
-			}
-		} else {
-			t.Errorf("callbackForOOB type assertion failed: got %T", f)
+		(*f)([]byte("test"))
+		if !called {
+			t.Error("callback not called as expected")
 		}
+	} else {
+		t.Error("callbackForOOB should not be nil after SetOOBHandler(cb)")
+	}
+
+	// Re-register then unregister, and confirm the previously loaded
+	// pointer is no longer the current callback.
+	if err := sess.SetOOBHandler(cb); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.SetOOBHandler(nil); err != nil {
+		t.Fatal(err)
+	}
+	if sess.callbackForOOB.Load() != nil {
+		t.Error("callback still registered after unregister")
 	}
 }
 
