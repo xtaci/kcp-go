@@ -33,21 +33,11 @@ import (
 )
 
 type (
-	platform struct {
-		batchConn batchConn
-	}
-
 	// udpConn is an interface implemented by net.UDPConn.
 	// It can be used for interface assertions to check if a net.Conn is a UDP connection.
 	udpConn interface {
 		SyscallConn() (syscall.RawConn, error)
 		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
-	}
-
-	// batchConn defines the interface used for batch I/O.
-	batchConn interface {
-		WriteBatch(ms []ipv4.Message, flags int) (int, error)
-		ReadBatch(ms []ipv4.Message, flags int) (int, error)
 	}
 )
 
