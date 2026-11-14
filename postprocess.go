@@ -172,7 +172,7 @@ func ppEnqueue(s *UDPSession) {
 func startPostProcessWorkers() {
 	ppQueue.cond = sync.NewCond(&ppQueue.mu)
 	n := min(max(runtime.NumCPU(), 2), 8)
-	for i := 0; i < n; i++ {
+	for range n {
 		go postProcessWorker()
 	}
 }

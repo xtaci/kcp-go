@@ -197,6 +197,35 @@ type (
 	}
 )
 
+func (s *UDPSession) output(buf []byte, size int) {
+	// A basic check for the minimum packet size
+	if size < IKCP_OVERHEAD {
+		return
+	}
+
+	// make a copy
+	bts := defaultBufferPool.Get()[:size+s.headerSize]
+
+	// copy the data to a new buffer, and reserve header space
+	copy(bts[s.headerSize:], buf)
+
+	// delivery to post processing (non-blocking to avoid deadlock under lock)
+	select {
+	case <-s.die:
+		defaultBufferPool.Put(bts)
+		return
+	default:
+	}
+
+	if s.postQueue.push(sendRequest{buffer: bts, oob: false}) {
+		s.kickPostProcess()
+		return
+	}
+
+	// drop and recycle to avoid blocking; KCP will retransmit if needed
+	defaultBufferPool.Put(bts)
+}
+
 // newUDPSession creates a new UDP session for a client or server.
 func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, remote net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
@@ -242,29 +271,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 		sess.headerSize += fecHeaderSizePlus2
 	}
 
-	sess.kcp = NewKCP(conv, func(buf []byte, size int) {
-		// A basic check for the minimum packet size
-		if size >= IKCP_OVERHEAD {
-			// make a copy
-			bts := defaultBufferPool.Get()[:size+sess.headerSize]
-			// copy the data to a new buffer, and reserve header space
-			copy(bts[sess.headerSize:], buf)
-
-			// delivery to post processing (non-blocking to avoid deadlock under lock)
-			select {
-			case <-sess.die:
-				defaultBufferPool.Put(bts)
-				return
-			default:
-			}
-			if sess.postQueue.push(sendRequest{bts, false}) {
-				sess.kickPostProcess()
-			} else {
-				// drop and recycle to avoid blocking; KCP will retransmit if needed
-				defaultBufferPool.Put(bts)
-			}
-		}
-	})
+	sess.kcp = NewKCP(conv, sess.output)
 
 	// Set Default MTU
 	if !sess.SetMtu(IKCP_MTU_DEF) {
@@ -989,13 +996,15 @@ func (s *UDPSession) SendOOB(data []byte) error {
 		return errors.WithStack(io.ErrClosedPipe)
 	default:
 	}
-	if s.postQueue.push(sendRequest{buf, true}) {
+
+	if s.postQueue.push(sendRequest{buffer: buf, oob: true}) {
 		s.kickPostProcess()
-	} else {
-		// Drop silently to avoid blocking the sender.
-		// OOB delivery is best-effort by design.
-		defaultBufferPool.Put(buf)
+		return nil
 	}
+
+	// Drop silently to avoid blocking the sender.
+	// OOB delivery is best-effort by design.
+	defaultBufferPool.Put(buf)
 	return nil
 }
 
