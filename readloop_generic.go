@@ -28,6 +28,10 @@ func (s *UDPSession) readLoop() {
 	s.readLoopGeneric()
 }
 
-func (l *Listener) monitor() {
-	l.monitorGeneric()
+func (l *Listener) readLoop() {
+	l.readLoopGeneric()
+}
+
+func (l *Listener) readLoopUnspecified() {
+	l.readLoopUnspecifiedGeneric()
 }

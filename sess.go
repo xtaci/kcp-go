@@ -53,16 +53,18 @@ import (
 	"hash/crc32"
 	"io"
 	"net"
-	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/juju/ratelimit"
 	"github.com/pion/transport/v5/deadline"
 	"github.com/pkg/errors"
 	"github.com/puzpuzpuz/xsync/v4"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -81,6 +83,9 @@ const (
 
 	// maximum packet size (IPv4)
 	maxPacketSize = 1472
+
+	// cmsg packet size
+	cmsgPacketSize = 64
 
 	// conversation ID field size (bytes)
 	convSize = 4
@@ -137,12 +142,16 @@ type (
 		recvbuf []byte
 		input   bytes.Reader
 
+		// control message for sending
+		cmsg *[]byte
+
 		// FEC codec
 		fecDecoder *fecDecoder
 		fecEncoder *fecEncoder
 
 		// settings
-		remoteAddr                  *net.UDPAddr // remote peer address
+		laddr                       libnetip.AddrInterface
+		localAddr, remoteAddr       *net.UDPAddr
 		readDeadline, writeDeadline *deadline.Deadline
 		readNotify                  atomic.Pointer[func()] // see SetReadNotify
 		headerSize                  int                    // the header size additional to a KCP frame
@@ -215,7 +224,7 @@ func (s *UDPSession) output(buf []byte, size int) {
 }
 
 // newUDPSession creates a new UDP session for a client or server.
-func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, remoteAddr *net.UDPAddr, block BlockCrypt) *UDPSession {
+func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.writeGate = make(chan struct{}, 1)
 	sess.writeGate <- struct{}{}
@@ -227,6 +236,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.readDone = make(chan struct{})
 	sess.writeDone = make(chan struct{})
 	sess.sender.activeCall = libsync.NewQuit()
+	sess.laddr = laddr
+	sess.localAddr = localAddr
 	sess.remoteAddr = remoteAddr
 	sess.conn = conn
 	sess.ownConn = ownConn
@@ -237,6 +248,11 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 
 	sess.readDeadline = deadline.New()
 	sess.writeDeadline = deadline.New()
+
+	// If localAddr not nil, create a control message for sending packets with the specified source address.
+	if localAddr != nil {
+		sess.cmsg = cmsg.AcquireControlMessage(laddr)
+	}
 
 	// Stop pending timers so closed sessions do not retain deadline resources
 	// until their deadlines expire.
@@ -577,6 +593,10 @@ func (s *UDPSession) Close() error {
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
 func (s *UDPSession) LocalAddr() net.Addr {
+	if s.localAddr != nil {
+		return s.localAddr
+	}
+
 	return s.conn.LocalAddr()
 }
 
@@ -857,6 +877,9 @@ func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 		// --- Stage 3: TX batching ---
 		var msg ipv4.Message
 		msg.Addr = s.remoteAddr
+		if s.cmsg != nil {
+			msg.OOB = *s.cmsg
+		}
 
 		// original copy, move buf to txqueue directly
 		msg.Buffers = w.append(buf)
@@ -1074,12 +1097,12 @@ func (s *UDPSession) notifyWriteError(err error) {
 // Packet input pipeline (decryption -> integrity check -> FEC -> KCP)
 // -----------------------------------------------------------------------
 
-// packetInput is the entry point for incoming packets.
+// dispatch is the entry point for incoming packets.
 // It handles decryption and integrity verification before passing data to
 // kcpInput. CFB mode uses CRC32; AEAD mode verifies its authentication tag.
 //
 // Pipeline: Network -> [Decrypt and verify] -> kcpInput
-func (s *UDPSession) packetInput(data []byte) {
+func (s *UDPSession) dispatch(data []byte) {
 	switch block := s.block.(type) {
 	case nil:
 	case *aeadCrypt:
@@ -1253,15 +1276,24 @@ func (s *UDPSession) ResetRTO() {
 // -----------------------------------------------------------------------
 
 type (
+	// udpConn is an interface implemented by net.UDPConn.
+	// It can be used for interface assertions to check if a net.Conn is a UDP connection.
+	udpConn interface {
+		SyscallConn() (syscall.RawConn, error)
+		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
+		WriteMsgUDP(b, oob []byte, addr *net.UDPAddr) (n, oobn int, err error)
+	}
+
 	// Listener accepts incoming connections.
 	Listener struct {
 		block        BlockCrypt     // block encryption
 		dataShards   int            // number of FEC data shards
 		parityShards int            // number of FEC parity shards
 		conn         net.PacketConn // the underlying packet connection
+		udpPort      uint16         // the local UDP port, if applicable
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions   *xsync.Map[netip.AddrPort, *UDPSession] // all sessions accepted by this Listener
+		sessions   connectionManager // all sessions accepted by this Listener
 		acceptCh   chan *UDPSession
 		activeCall *libsync.Quit
 
@@ -1274,9 +1306,9 @@ type (
 	}
 )
 
-func (l *Listener) getConn(remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
+func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
 	var created bool
-	sess, _ := l.sessions.Compute(remoteAddr.AddrPort(), func(sess *UDPSession, ok bool) (*UDPSession, xsync.ComputeOp) {
+	sess, _ := l.sessions.Compute(laddr, remoteAddr, func(sess *UDPSession, ok bool) (*UDPSession, xsync.ComputeOp) {
 		if ok {
 			// If we have a valid conversation id or we cannot get conversation id from the packet,
 			// just feed the data into the existing session.
@@ -1307,15 +1339,15 @@ func (l *Listener) getConn(remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint3
 
 		// new session
 		created = true
-		return newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, remoteAddr, l.block), xsync.UpdateOp
+		return newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, laddr, localAddr, remoteAddr, l.block), xsync.UpdateOp
 	})
 	return sess, created
 }
 
-// packetInput is the Listener's packet input handler.
+// dispatch is the Listener's packet input handler.
 // It decrypts the packet, demultiplexes by remote address,
 // and dispatches to existing sessions or creates new ones.
-func (l *Listener) packetInput(data []byte, remoteAddr *net.UDPAddr) {
+func (l *Listener) dispatch(data []byte, laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr) {
 	if !l.activeCall.Add(1) {
 		return
 	}
@@ -1396,7 +1428,7 @@ func (l *Listener) packetInput(data []byte, remoteAddr *net.UDPAddr) {
 		sn = binary.LittleEndian.Uint32(data[IKCP_SN_OFFSET:])
 	}
 
-	sess, created := l.getConn(remoteAddr, hasConv, conv, sn)
+	sess, created := l.getConn(laddr, localAddr, remoteAddr, hasConv, conv, sn)
 	if sess == nil {
 		return
 	}
@@ -1413,9 +1445,8 @@ func (l *Listener) notifyReadError(err error) {
 		l.readError = err
 		close(l.readDone)
 
-		l.sessions.DeleteMatching(func(_ netip.AddrPort, s *UDPSession) (bool, bool) {
+		l.sessions.Range(func(s *UDPSession) {
 			s.notifyReadError(err)
-			return false, false
 		})
 	})
 }
@@ -1532,10 +1563,7 @@ closeUnaccepted:
 		}
 	}
 
-	l.sessions.DeleteMatching(func(_ netip.AddrPort, s *UDPSession) (bool, bool) {
-		s.release()
-		return true, false
-	})
+	l.sessions.Close()
 
 	if l.ownConn {
 		return l.conn.Close()
@@ -1557,7 +1585,7 @@ func (l *Listener) Control(f func(conn net.PacketConn) error) error {
 // closeSession notifies the listener that a session has closed.
 func (l *Listener) closeSession(s *UDPSession) {
 	// acquire the bucket lock to ensure that no other goroutine is concurrently closing the same session.
-	l.sessions.Compute(s.remoteAddr.AddrPort(), func(v *UDPSession, _ bool) (*UDPSession, xsync.ComputeOp) {
+	l.sessions.Compute(s.laddr, s.remoteAddr, func(v *UDPSession, _ bool) (*UDPSession, xsync.ComputeOp) {
 		// If the session is already removed/replaced by another goroutine, we don't need to do anything.
 		if v != s {
 			return nil, xsync.CancelOp
@@ -1614,7 +1642,6 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l := new(Listener)
 	l.conn = conn
 	l.ownConn = ownConn
-	l.sessions = xsync.NewMap[netip.AddrPort, *UDPSession]()
 	l.acceptCh = make(chan *UDPSession, acceptBacklog)
 	l.activeCall = libsync.NewQuit()
 	l.dataShards = dataShards
@@ -1628,10 +1655,50 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	runtime.AddCleanup(l, freeDeadline, l.acceptDeadline)
 
 	if pp, ok := conn.(PacketPusher); ok {
+		l.sessions = newConnectionManager()
 		pp.SetPacketReceiver(l.pushedPacket)
-	} else {
-		go l.monitor()
+		return l, nil
 	}
+
+	// Use scope for goto jumping to generic case below.
+	{
+		if !cmsg.SupportsControlMessage {
+			goto genericListener
+		}
+
+		udpConn, ok := conn.(udpConn)
+		if !ok {
+			goto genericListener
+		}
+
+		laddr, ok := conn.LocalAddr().(*net.UDPAddr)
+		if !ok {
+			goto genericListener
+		}
+
+		if !laddr.IP.IsUnspecified() {
+			goto genericListener
+		}
+
+		rawConn, err := udpConn.SyscallConn()
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		err = cmsg.SetupControlMessage(rawConn)
+		if err != nil {
+			return nil, errors.WithStack(err)
+		}
+
+		l.udpPort = uint16(laddr.Port)
+		l.sessions = newConnectionManagerUnspecified()
+		go l.readLoopUnspecified()
+		return l, nil
+	}
+
+genericListener:
+	l.sessions = newConnectionManager()
+	go l.readLoop()
 	return l, nil
 }
 
@@ -1671,7 +1738,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, true, remoteAddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, true, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
 }
 
 // NewConn4 establishes a session that speaks KCP over a packet connection.
@@ -1682,7 +1749,7 @@ func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parit
 		return nil, errors.New("invalid remote address type")
 	}
 
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, remoteAddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
 }
 
 // NewConn3 establishes a session that speaks KCP over a packet connection.
@@ -1693,7 +1760,7 @@ func NewConn3(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parit
 		return nil, errors.New("invalid remote address type")
 	}
 
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, remoteAddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
 }
 
 // NewConn2 establishes a session that speaks KCP over a packet connection.

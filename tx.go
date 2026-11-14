@@ -23,12 +23,43 @@
 package kcp
 
 import (
+	"net"
+
 	"github.com/pkg/errors"
 	"golang.org/x/net/ipv4"
 )
 
+func (s *UDPSession) defaultTxUDP(udpConn udpConn, txqueue []ipv4.Message) {
+	nbytes := 0
+	npkts := 0
+	for k := range txqueue {
+		var n int
+		var err error
+		switch txqueue[k].OOB {
+		case nil:
+			n, err = s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr)
+		default:
+			n, _, err = udpConn.WriteMsgUDP(txqueue[k].Buffers[0], txqueue[k].OOB, txqueue[k].Addr.(*net.UDPAddr))
+		}
+		if err != nil {
+			s.notifyWriteError(errors.WithStack(err))
+			break
+		}
+		nbytes += n
+		npkts++
+	}
+
+	DefaultSnmp.addOutPkts(npkts)
+	DefaultSnmp.addOutBytes(nbytes)
+}
+
 // defaultTx is the default transmission function for UDP sessions.
 func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
+	if udpConn, ok := s.conn.(udpConn); ok {
+		s.defaultTxUDP(udpConn, txqueue)
+		return
+	}
+
 	nbytes := 0
 	npkts := 0
 	for k := range txqueue {

@@ -118,7 +118,9 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 		sender: sender{
 			activeCall: libsync.NewQuit(),
 		},
+		closeGate: make(chan struct{}, 1),
 	}
+	s.closeGate <- struct{}{}
 	w := &txWorker{
 		txqueue: []ipv4.Message{{
 			Buffers: [][]byte{defaultBufferPool.Get()[:1]},

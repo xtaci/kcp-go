@@ -26,6 +26,8 @@ import (
 	"net"
 
 	"github.com/pkg/errors"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 )
 
 func isSameUDPAddr(a, b *net.UDPAddr) bool {
@@ -70,12 +72,12 @@ func (s *UDPSession) readLoopGeneric() {
 			continue
 		}
 
-		s.packetInput(buf[:n])
+		s.dispatch(buf[:n])
 	}
 }
 
-// monitorGeneric is the standard procedure for reading and accepting connections on a listener
-func (l *Listener) monitorGeneric() {
+// readLoopGeneric is the standard procedure for reading and accepting connections on a listener
+func (l *Listener) readLoopGeneric() {
 	buf := make([]byte, maxPacketSize)
 	for {
 		n, raddr, err := l.conn.ReadFrom(buf)
@@ -89,7 +91,33 @@ func (l *Listener) monitorGeneric() {
 			continue
 		}
 
-		l.packetInput(buf[:n], remoteAddr)
+		l.dispatch(buf[:n], libnetip.AddrInterface{}, nil, remoteAddr)
+	}
+}
+
+func (l *Listener) readLoopUnspecifiedGeneric() {
+	udpConn := l.conn.(udpConn)
+
+	buf := make([]byte, maxPacketSize)
+	oob := make([]byte, cmsgPacketSize)
+	for {
+		n, nn, _, remoteAddr, err := udpConn.ReadMsgUDP(buf, oob)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		laddr, err := cmsg.ParseControlMessage(oob[:nn])
+		if err != nil {
+			continue
+		}
+
+		if !isUnicast(laddr.Addr()) {
+			continue
+		}
+
+		localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+		l.dispatch(buf[:n], laddr, localAddr, remoteAddr)
 	}
 }
 
@@ -133,7 +161,7 @@ func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 		return
 	}
 
-	s.packetInput(b)
+	s.dispatch(b)
 }
 
 // pushedPacket is the PacketPusher callback of a Listener.
@@ -148,5 +176,5 @@ func (l *Listener) pushedPacket(b []byte, raddr net.Addr, err error) {
 		return
 	}
 
-	l.packetInput(b, remoteAddr)
+	l.dispatch(b, libnetip.AddrInterface{}, nil, remoteAddr)
 }

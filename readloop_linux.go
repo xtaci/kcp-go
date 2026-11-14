@@ -28,6 +28,8 @@ import (
 	"net"
 
 	"github.com/pkg/errors"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 	"golang.org/x/net/ipv4"
 )
 
@@ -74,22 +76,21 @@ func (s *UDPSession) readLoop() {
 			}
 
 			// The source and packet size have been validated.
-			s.packetInput(msg.Buffers[0][:msg.N])
+			s.dispatch(msg.Buffers[0][:msg.N])
 		}
 	}
 }
 
-// monitor is the optimized Linux listener loop, using the recvmmsg syscall.
-func (l *Listener) monitor() {
+// readLoop is the optimized Linux read loop, using the recvmmsg syscall to
+// receive multiple UDP packets in a single system call.
+func (l *Listener) readLoop() {
 	batchConn := newBatchConn(l.conn)
 
-	// default version
 	if batchConn == nil {
-		l.monitorGeneric()
+		l.readLoopGeneric()
 		return
 	}
 
-	// x/net version
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
@@ -110,7 +111,51 @@ func (l *Listener) monitor() {
 				continue
 			}
 
-			l.packetInput(msg.Buffers[0][:msg.N], remoteAddr)
+			l.dispatch(msg.Buffers[0][:msg.N], libnetip.AddrInterface{}, nil, remoteAddr)
+		}
+	}
+}
+
+// readLoop is the optimized Linux listener read loop, using the recvmmsg syscall.
+func (l *Listener) readLoopUnspecified() {
+	batchConn := newBatchConn(l.conn)
+	if batchConn == nil {
+		l.readLoopUnspecifiedGeneric()
+		return
+	}
+
+	msgs := make([]ipv4.Message, batchSize)
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
+		msgs[k].OOB = make([]byte, cmsgPacketSize)
+	}
+
+	for {
+		count, err := batchConn.ReadBatch(msgs, 0)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		for i := range count {
+			msg := &msgs[i]
+
+			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
+			if !ok {
+				continue
+			}
+
+			laddr, err := cmsg.ParseControlMessage(msg.OOB[:msg.NN])
+			if err != nil {
+				continue
+			}
+
+			if !isUnicast(laddr.Addr()) {
+				continue
+			}
+
+			localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+			l.dispatch(msg.Buffers[0][:msg.N], laddr, localAddr, remoteAddr)
 		}
 	}
 }
