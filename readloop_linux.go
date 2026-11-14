@@ -40,20 +40,11 @@ const (
 func (s *UDPSession) readLoop() {
 	// default version
 	if s.platform.batchConn == nil {
-		s.defaultReadLoop()
+		s.readLoopGeneric()
 		return
 	}
 
 	// x/net version
-	var src *net.UDPAddr
-	var srcStr string
-	if s.remote != nil {
-		if udp, ok := s.remote.(*net.UDPAddr); ok {
-			src = udp
-		} else {
-			srcStr = s.remote.String()
-		}
-	}
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
@@ -73,20 +64,13 @@ func (s *UDPSession) readLoop() {
 		for i := range count {
 			msg := &msgs[i]
 
+			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
+			if !ok {
+				continue
+			}
+
 			// Ensure the packet comes from the same source.
-			if src == nil && srcStr == "" { // set source address if nil
-				if udp, ok := msg.Addr.(*net.UDPAddr); ok {
-					src = udp
-				} else {
-					srcStr = msg.Addr.String()
-				}
-			} else if src != nil {
-				udp, ok := msg.Addr.(*net.UDPAddr)
-				if !ok || !sameUDPAddr(src, udp) {
-					DefaultSnmp.increaseInErrs()
-					continue
-				}
-			} else if msg.Addr.String() != srcStr {
+			if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
 				DefaultSnmp.increaseInErrs()
 				continue
 			}
@@ -103,7 +87,7 @@ func (l *Listener) monitor() {
 
 	// default version
 	if batchConn == nil {
-		l.defaultMonitor()
+		l.monitorGeneric()
 		return
 	}
 
@@ -122,7 +106,13 @@ func (l *Listener) monitor() {
 
 		for i := range count {
 			msg := &msgs[i]
-			l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
+
+			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
+			if !ok {
+				continue
+			}
+
+			l.packetInput(msg.Buffers[0][:msg.N], remoteAddr)
 		}
 	}
 }

@@ -28,29 +28,26 @@ import (
 	"github.com/pkg/errors"
 )
 
-func sameUDPAddr(a, b *net.UDPAddr) bool {
-	if a == nil || b == nil {
+func isSameUDPAddr(a, b *net.UDPAddr) bool {
+	if a.Port != b.Port {
 		return false
 	}
-	if a.Port != b.Port || a.Zone != b.Zone {
+
+	if !a.IP.Equal(b.IP) {
 		return false
 	}
-	return a.IP.Equal(b.IP)
+
+	if a.Zone != b.Zone {
+		return false
+	}
+
+	return true
 }
 
-// defaultReadLoop is the standard procedure for reading from a connection
-func (s *UDPSession) defaultReadLoop() {
+// readLoopGeneric is the standard procedure for reading from a connection
+func (s *UDPSession) readLoopGeneric() {
 	buf := make([]byte, maxPacketSize)
 
-	var src *net.UDPAddr
-	var srcStr string
-	if s.remote != nil {
-		if udp, ok := s.remote.(*net.UDPAddr); ok {
-			src = udp
-		} else {
-			srcStr = s.remote.String()
-		}
-	}
 	for {
 		n, addr, err := s.conn.ReadFrom(buf)
 		if err != nil {
@@ -62,20 +59,13 @@ func (s *UDPSession) defaultReadLoop() {
 			return
 		}
 
+		remoteAddr, ok := addr.(*net.UDPAddr)
+		if !ok {
+			continue
+		}
+
 		// Ensure the packet comes from the same source.
-		if src == nil && srcStr == "" { // set source address if nil
-			if udp, ok := addr.(*net.UDPAddr); ok {
-				src = udp
-			} else {
-				srcStr = addr.String()
-			}
-		} else if src != nil {
-			udp, ok := addr.(*net.UDPAddr)
-			if !ok || !sameUDPAddr(src, udp) {
-				DefaultSnmp.increaseInErrs()
-				continue
-			}
-		} else if addr.String() != srcStr {
+		if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
 			DefaultSnmp.increaseInErrs()
 			continue
 		}
@@ -84,17 +74,22 @@ func (s *UDPSession) defaultReadLoop() {
 	}
 }
 
-// defaultReadLoop is the standard procedure for reading and accepting connections on a listener
-func (l *Listener) defaultMonitor() {
+// monitorGeneric is the standard procedure for reading and accepting connections on a listener
+func (l *Listener) monitorGeneric() {
 	buf := make([]byte, maxPacketSize)
 	for {
-		n, from, err := l.conn.ReadFrom(buf)
+		n, raddr, err := l.conn.ReadFrom(buf)
 		if err != nil {
 			l.notifyReadError(errors.WithStack(err))
 			return
 		}
 
-		l.packetInput(buf[:n], from)
+		remoteAddr, ok := raddr.(*net.UDPAddr)
+		if !ok {
+			continue
+		}
+
+		l.packetInput(buf[:n], remoteAddr)
 	}
 }
 
@@ -108,12 +103,17 @@ func (l *Listener) defaultMonitor() {
 // conn. fn may modify b but must not keep it after returning. A non-nil err
 // ends reads. Closing a client session, or a Listener once its sessions have
 // closed, sets a nil fn, which must remove the receiver.
+//
+// SetPacketReceiver is called with internal locks held. Implementations must
+// not call back into kcp from inside SetPacketReceiver — no calls into the
+// owning Listener or session, and no acquisition of any lock reachable from
+// them. Doing so will deadlock.
 type PacketPusher interface {
-	SetPacketReceiver(fn func(b []byte, addr net.Addr, err error))
+	SetPacketReceiver(fn func(b []byte, raddr net.Addr, err error))
 }
 
 // pushedPacket is the PacketPusher callback of a client session.
-func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
+func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 	if err != nil {
 		s.notifyReadError(errors.WithStack(err))
 		return
@@ -121,32 +121,32 @@ func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
 	if s.isClosed() {
 		return
 	}
-	// Without a remote address, pin the peer to the first packet as
-	// defaultReadLoop does.
-	src := s.remote
-	if src == nil {
-		if s.pushedFrom == nil {
-			s.pushedFrom = addr
-		}
-		src = s.pushedFrom
+
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok {
+		return
 	}
-	if udp, ok := src.(*net.UDPAddr); ok {
-		if a, ok := addr.(*net.UDPAddr); !ok || !sameUDPAddr(udp, a) {
-			DefaultSnmp.increaseInErrs()
-			return
-		}
-	} else if addr.String() != src.String() {
+
+	// Ensure the packet comes from the same source.
+	if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
 		DefaultSnmp.increaseInErrs()
 		return
 	}
+
 	s.packetInput(b)
 }
 
 // pushedPacket is the PacketPusher callback of a Listener.
-func (l *Listener) pushedPacket(b []byte, addr net.Addr, err error) {
+func (l *Listener) pushedPacket(b []byte, raddr net.Addr, err error) {
 	if err != nil {
 		l.notifyReadError(errors.WithStack(err))
 		return
 	}
-	l.packetInput(b, addr)
+
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok {
+		return
+	}
+
+	l.packetInput(b, remoteAddr)
 }

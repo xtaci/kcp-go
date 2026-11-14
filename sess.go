@@ -53,6 +53,7 @@ import (
 	"hash/crc32"
 	"io"
 	"net"
+	"net/netip"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -139,8 +140,7 @@ type (
 		fecEncoder *fecEncoder
 
 		// settings
-		remote                      net.Addr // remote peer address
-		pushedFrom                  net.Addr // peer pinned by pushedPacket when remote is nil
+		remoteAddr                  *net.UDPAddr // remote peer address
 		readDeadline, writeDeadline *deadline.Deadline
 		readNotify                  atomic.Pointer[func()] // see SetReadNotify
 		headerSize                  int                    // the header size additional to a KCP frame
@@ -227,7 +227,7 @@ func (s *UDPSession) output(buf []byte, size int) {
 }
 
 // newUDPSession creates a new UDP session for a client or server.
-func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, remote net.Addr, block BlockCrypt) *UDPSession {
+func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, remoteAddr *net.UDPAddr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.writeGate = make(chan struct{}, 1)
 	sess.writeGate <- struct{}{}
@@ -236,7 +236,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.chWriteEvent = make(chan struct{}, 1)
 	sess.chSocketReadError = make(chan struct{})
 	sess.chSocketWriteError = make(chan struct{})
-	sess.remote = remote
+	sess.remoteAddr = remoteAddr
 	sess.conn = conn
 	sess.ownConn = ownConn
 	sess.l = l
@@ -548,7 +548,7 @@ func (s *UDPSession) Close() error {
 		s.discardPostProcess()
 
 		if s.l != nil { // belongs to listener
-			s.l.closeSession(s.remote)
+			s.l.closeSession(s.remoteAddr)
 			return
 		}
 
@@ -567,10 +567,14 @@ func (s *UDPSession) Close() error {
 }
 
 // LocalAddr returns the local network address. The Addr returned is shared by all invocations of LocalAddr, so do not modify it.
-func (s *UDPSession) LocalAddr() net.Addr { return s.conn.LocalAddr() }
+func (s *UDPSession) LocalAddr() net.Addr {
+	return s.conn.LocalAddr()
+}
 
 // RemoteAddr returns the remote network address. The Addr returned is shared by all invocations of RemoteAddr, so do not modify it.
-func (s *UDPSession) RemoteAddr() net.Addr { return s.remote }
+func (s *UDPSession) RemoteAddr() net.Addr {
+	return s.remoteAddr
+}
 
 // SetDeadline sets the session's read and write deadlines. A zero time value
 // disables the deadlines.
@@ -825,7 +829,7 @@ func (s *UDPSession) postProcess(w *ppWorker) (more bool) {
 
 		// --- Stage 3: TX batching ---
 		var msg ipv4.Message
-		msg.Addr = s.remote
+		msg.Addr = s.remoteAddr
 
 		// original copy, move buf to txqueue directly
 		msg.Buffers = w.oneBuf(buf)
@@ -1229,7 +1233,7 @@ type (
 		conn         net.PacketConn // the underlying packet connection
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions    map[string]*UDPSession // all sessions accepted by this Listener
+		sessions    map[netip.AddrPort]*UDPSession // all sessions accepted by this Listener
 		sessionLock sync.RWMutex
 		chAccepts   chan *UDPSession // Listen() backlog
 
@@ -1248,7 +1252,7 @@ type (
 // packetInput is the Listener's packet input handler.
 // It decrypts the packet, demultiplexes by remote address,
 // and dispatches to existing sessions or creates new ones.
-func (l *Listener) packetInput(data []byte, addr net.Addr) {
+func (l *Listener) packetInput(data []byte, remoteAddr *net.UDPAddr) {
 	switch block := l.block.(type) {
 	case nil:
 	case *aeadCrypt:
@@ -1291,9 +1295,12 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		return
 	}
 
+	// convert remoteAddr to netip.AddrPort for map key
+	raddr := remoteAddr.AddrPort()
+
 	// look for existing session
 	l.sessionLock.RLock()
-	s, exist := l.sessions[addr.String()]
+	s, exist := l.sessions[raddr]
 	l.sessionLock.RUnlock()
 
 	var conv, sn uint32
@@ -1361,7 +1368,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 	}
 
 	// new session
-	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, addr, l.block)
+	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, remoteAddr, l.block)
 	s.kcpInput(data)
 	l.sessionLock.Lock()
 	select {
@@ -1371,7 +1378,7 @@ func (l *Listener) packetInput(data []byte, addr net.Addr) {
 		return
 	default:
 	}
-	l.sessions[addr.String()] = s
+	l.sessions[raddr] = s
 	l.sessionLock.Unlock()
 	l.chAccepts <- s
 }
@@ -1477,29 +1484,25 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 // Close stops listening on the UDP address and closes the socket if the
 // Listener owns it.
 func (l *Listener) Close() error {
-	var once bool
 	l.sessionLock.Lock()
+	defer l.sessionLock.Unlock()
+
+	var once bool
 	l.dieOnce.Do(func() {
 		close(l.die)
 		once = true
 	})
 
 	if !once {
-		l.sessionLock.Unlock()
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 
-	pp := l.releasePusherLocked()
-	l.sessionLock.Unlock()
-	if pp != nil {
-		pp.SetPacketReceiver(nil)
+	if !l.ownConn {
+		l.releasePusherLocked()
+		return nil
 	}
 
-	if l.ownConn {
-		return l.conn.Close()
-	}
-
-	return nil
+	return l.conn.Close()
 }
 
 // Control applies a function to the underlying packet connection.
@@ -1512,37 +1515,42 @@ func (l *Listener) Control(f func(conn net.PacketConn) error) error {
 }
 
 // closeSession notifies the listener that a session has closed.
-func (l *Listener) closeSession(remote net.Addr) (ret bool) {
+func (l *Listener) closeSession(remoteAddr *net.UDPAddr) bool {
+	raddr := remoteAddr.AddrPort()
+
 	l.sessionLock.Lock()
-	if _, ok := l.sessions[remote.String()]; ok {
-		delete(l.sessions, remote.String())
-		pp := l.releasePusherLocked()
-		l.sessionLock.Unlock()
-		if pp != nil {
-			pp.SetPacketReceiver(nil)
-		}
-		return true
+	defer l.sessionLock.Unlock()
+	defer l.releasePusherLocked()
+
+	_, ok := l.sessions[raddr]
+	if !ok {
+		return false
 	}
-	l.sessionLock.Unlock()
-	return false
+	delete(l.sessions, raddr)
+	return true
 }
 
 // releasePusherLocked removes the PacketPusher receiver once the Listener is
-// closed and its last session has gone. sessionLock must be held. The caller
-// must unregister the returned pusher after releasing sessionLock.
-func (l *Listener) releasePusherLocked() PacketPusher {
+// closed and its last session has gone. sessionLock must be held. The pusher
+// is unregistered inline; implementations must not call back into kcp from
+// SetPacketReceiver, which would deadlock on sessionLock.
+func (l *Listener) releasePusherLocked() {
 	select {
 	case <-l.die:
 	default:
-		return nil
+		return
 	}
-	if len(l.sessions) > 0 {
-		return nil
+
+	if l.ownConn || len(l.sessions) > 0 {
+		return
 	}
-	if pp, ok := l.conn.(PacketPusher); ok {
-		return pp
+
+	pp, ok := l.conn.(PacketPusher)
+	if !ok {
+		return
 	}
-	return nil
+
+	pp.SetPacketReceiver(nil)
 }
 
 // Addr returns the listener's network address. The returned address is shared
@@ -1592,7 +1600,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l := new(Listener)
 	l.conn = conn
 	l.ownConn = ownConn
-	l.sessions = make(map[string]*UDPSession)
+	l.sessions = make(map[netip.AddrPort]*UDPSession)
 	l.chAccepts = make(chan *UDPSession, acceptBacklog)
 	l.die = make(chan struct{})
 	l.dataShards = dataShards
@@ -1629,50 +1637,75 @@ func Dial(raddr string) (net.Conn, error) {
 // See https://github.com/klauspost/reedsolomon for details.
 func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards int) (*UDPSession, error) {
 	// network type detection
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	remoteAddr, err := net.ResolveUDPAddr("udp", raddr)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	var convid uint32
+	err = binary.Read(rand.Reader, binary.LittleEndian, &convid)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
 	network := "udp4"
-	if udpaddr.IP.To4() == nil {
-		network = "udp"
+	if remoteAddr.IP.To4() == nil {
+		network = "udp6"
 	}
 
 	conn, err := net.ListenUDP(network, nil)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-
-	var convid uint32
-	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, true, udpaddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, true, remoteAddr, block), nil
 }
 
 // NewConn4 establishes a session that speaks KCP over a packet connection.
+// TODO: use *net.UDPAddr in future.
 func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, ownConn bool, conn net.PacketConn) (*UDPSession, error) {
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, raddr, block), nil
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok {
+		return nil, errors.New("invalid remote address type")
+	}
+
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, remoteAddr, block), nil
 }
 
 // NewConn3 establishes a session that speaks KCP over a packet connection.
+// TODO: Remove this function in the future, as it is redundant with NewConn4.
 func NewConn3(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, raddr, block), nil
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok {
+		return nil, errors.New("invalid remote address type")
+	}
+
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, remoteAddr, block), nil
 }
 
 // NewConn2 establishes a session that speaks KCP over a packet connection.
+// TODO: use *net.UDPAddr in future.
 func NewConn2(raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok {
+		return nil, errors.New("invalid remote address type")
+	}
+
 	var convid uint32
-	binary.Read(rand.Reader, binary.LittleEndian, &convid)
-	return NewConn3(convid, raddr, block, dataShards, parityShards, conn)
+	err := binary.Read(rand.Reader, binary.LittleEndian, &convid)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+
+	return NewConn3(convid, remoteAddr, block, dataShards, parityShards, conn)
 }
 
 // NewConn establishes a session that speaks KCP over a packet connection.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	udpaddr, err := net.ResolveUDPAddr("udp", raddr)
+	remoteAddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	return NewConn2(udpaddr, block, dataShards, parityShards, conn)
+	return NewConn2(remoteAddr, block, dataShards, parityShards, conn)
 }
 
 // buffersEmpty reports whether v holds no bytes.
