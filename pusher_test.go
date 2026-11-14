@@ -157,10 +157,7 @@ func TestPacketPusherListenerClosed(t *testing.T) {
 	pkt[0] = 1
 	pkt[4] = IKCP_CMD_PUSH
 	l.pushedPacket(pkt, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, nil)
-	l.sessionLock.RLock()
-	n := len(l.sessions)
-	l.sessionLock.RUnlock()
-	if n != 0 {
+	if n := l.sessions.Size(); n != 0 {
 		t.Fatalf("closed listener registered %d sessions", n)
 	}
 }

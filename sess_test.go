@@ -1171,11 +1171,6 @@ func TestListenerClose(t *testing.T) {
 	}
 
 	l.Close()
-	fakeaddr, _ := net.ResolveUDPAddr("udp6", "127.0.0.1:1111")
-	if l.closeSession(fakeaddr) {
-		t.Fail()
-		return
-	}
 }
 
 // A wrapper for net.PacketConn that remembers when Close has been called.

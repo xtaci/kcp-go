@@ -62,6 +62,7 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/pion/transport/v5/deadline"
 	"github.com/pkg/errors"
+	"github.com/puzpuzpuz/xsync/v4"
 	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
@@ -168,9 +169,9 @@ type (
 		bucket atomic.Pointer[ratelimit.Bucket]
 
 		mutex      sync.Mutex
-		mutexClose sync.Mutex
 		activeCall *libsync.Quit
 		writeGate  chan struct{}
+		closeGate  chan struct{}
 
 		// callbackForOOB is an optional callback for handling received out-of-band (OOB) data.
 		//
@@ -218,6 +219,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess := new(UDPSession)
 	sess.writeGate = make(chan struct{}, 1)
 	sess.writeGate <- struct{}{}
+	sess.closeGate = make(chan struct{}, 1)
+	sess.closeGate <- struct{}{}
 	sess.activeCall = libsync.NewQuit()
 	sess.readEvent = make(chan struct{}, 1)
 	sess.writeEvent = make(chan struct{}, 1)
@@ -514,14 +517,8 @@ func (s *UDPSession) isClosed() bool {
 	}
 }
 
-// Close closes the connection.
-func (s *UDPSession) Close() error {
-	s.mutexClose.Lock()
-	defer s.mutexClose.Unlock()
-
-	if !s.activeCall.Wait() {
-		return errors.WithStack(io.ErrClosedPipe)
-	}
+func (s *UDPSession) doClose() {
+	s.activeCall.Wait()
 
 	// try best to send all queued messages especially the data in txqueue
 	s.mutex.Lock()
@@ -533,12 +530,38 @@ func (s *UDPSession) Close() error {
 	DefaultSnmp.decreaseCurrEstab()
 	s.callReadNotify()
 	s.discardSender()
+}
 
-	// belongs to listener
-	if s.l != nil {
-		s.l.closeSession(s.remoteAddr)
-		return nil
+// release frees the session's local state: full flush under the session
+// mutex, close die, then notify readers and discard the post-process queue.
+// It does not unregister the session from its Listener; closeSession does
+// that separately. Runs once.
+func (s *UDPSession) release() error {
+	_, ok := <-s.closeGate
+	if !ok {
+		return errors.WithStack(io.ErrClosedPipe)
 	}
+	defer close(s.closeGate)
+
+	s.doClose()
+	return nil
+}
+
+// Close closes the connection.
+func (s *UDPSession) Close() error {
+	if s.l != nil {
+		// notify the listener that this session is closed
+		s.l.closeSession(s)
+		return s.release()
+	}
+
+	_, ok := <-s.closeGate
+	if !ok {
+		return errors.WithStack(io.ErrClosedPipe)
+	}
+	defer close(s.closeGate)
+
+	s.doClose()
 
 	if pp, ok := s.conn.(PacketPusher); ok {
 		pp.SetPacketReceiver(nil)
@@ -1238,10 +1261,9 @@ type (
 		conn         net.PacketConn // the underlying packet connection
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions    map[netip.AddrPort]*UDPSession // all sessions accepted by this Listener
-		sessionLock sync.RWMutex
-		acceptCh    chan *UDPSession
-		activeCall  *libsync.Quit
+		sessions   *xsync.Map[netip.AddrPort, *UDPSession] // all sessions accepted by this Listener
+		acceptCh   chan *UDPSession
+		activeCall *libsync.Quit
 
 		// socket error handling
 		readError           error
@@ -1251,6 +1273,44 @@ type (
 		acceptDeadline *deadline.Deadline
 	}
 )
+
+func (l *Listener) getConn(remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
+	var created bool
+	sess, _ := l.sessions.Compute(remoteAddr.AddrPort(), func(sess *UDPSession, ok bool) (*UDPSession, xsync.ComputeOp) {
+		if ok {
+			// If we have a valid conversation id or we cannot get conversation id from the packet,
+			// just feed the data into the existing session.
+			if !hasConv || conv == sess.kcp.conv {
+				return sess, xsync.CancelOp
+			}
+
+			// conversation id mismatched, only accept reset packet with sn == 0
+			if sn != 0 {
+				return nil, xsync.CancelOp
+			}
+
+			// release the existing session, so we can create a new session with the same addr and replace it below.
+			sess.release()
+		}
+
+		// The connection does not exist, try to create a new one.
+		// But if we don't have a valid conversation id, nothing we can do here except dropping the packet.
+		if !hasConv {
+			return nil, xsync.DeleteOp
+		}
+
+		// Now we have a valid conversation id here without a session object, create a new session.
+		// do not let the new sessions overwhelm accept queue
+		if len(l.acceptCh) >= cap(l.acceptCh) {
+			return nil, xsync.DeleteOp
+		}
+
+		// new session
+		created = true
+		return newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, remoteAddr, l.block), xsync.UpdateOp
+	})
+	return sess, created
+}
 
 // packetInput is the Listener's packet input handler.
 // It decrypts the packet, demultiplexes by remote address,
@@ -1303,22 +1363,12 @@ func (l *Listener) packetInput(data []byte, remoteAddr *net.UDPAddr) {
 		return
 	}
 
-	// convert remoteAddr to netip.AddrPort for map key
-	raddr := remoteAddr.AddrPort()
-
-	// look for existing session
-	l.sessionLock.RLock()
-	s, exist := l.sessions[raddr]
-	l.sessionLock.RUnlock()
-
 	var conv, sn uint32
 	hasConv := false
-
 	// try to get conversation id from the packet
 	// The 16-bit KCP cmd/frg field (cmd 81-84, frg 0-255) cannot match the FEC
 	// type markers 0x00f1-0x00f3.
 	fecFlag := binary.LittleEndian.Uint16(data[4:])
-
 	switch fecFlag {
 	case typeData:
 		// data packet of FEC, conversation id inside
@@ -1346,42 +1396,16 @@ func (l *Listener) packetInput(data []byte, remoteAddr *net.UDPAddr) {
 		sn = binary.LittleEndian.Uint32(data[IKCP_SN_OFFSET:])
 	}
 
-	// on an existing connection
-	if exist {
-		// If we have a valid conversation id or we cannot get conversation id from the packet,
-		// just feed the data into the existing session.
-		if !hasConv || conv == s.kcp.conv {
-			s.kcpInput(data)
-			return
-		}
-		// conversation id mismatched, only accept reset packet with sn == 0
-		if sn != 0 {
-			return
-		}
-		// Close will remove the session from listener's session map,
-		// So we can create a new session with the same addr below.
-		s.Close()
-	}
-
-	// The connection does not exist, try to create a new one.
-	// But if we don't have a valid conversation id, nothing we can do here except dropping the packet.
-	if !hasConv {
+	sess, created := l.getConn(remoteAddr, hasConv, conv, sn)
+	if sess == nil {
 		return
 	}
+	sess.kcpInput(data)
 
-	// Now we have a valid conversation id here without a session object, create a new session.
-	// do not let the new sessions overwhelm accept queue
-	if len(l.acceptCh) >= cap(l.acceptCh) {
+	if !created {
 		return
 	}
-
-	// new session
-	s = newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, remoteAddr, l.block)
-	s.kcpInput(data)
-	l.sessionLock.Lock()
-	l.sessions[raddr] = s
-	l.sessionLock.Unlock()
-	l.acceptCh <- s
+	l.acceptCh <- sess
 }
 
 func (l *Listener) notifyReadError(err error) {
@@ -1389,12 +1413,10 @@ func (l *Listener) notifyReadError(err error) {
 		l.readError = err
 		close(l.readDone)
 
-		// propagate read error to all sessions
-		l.sessionLock.RLock()
-		for _, s := range l.sessions {
+		l.sessions.DeleteMatching(func(_ netip.AddrPort, s *UDPSession) (bool, bool) {
 			s.notifyReadError(err)
-		}
-		l.sessionLock.RUnlock()
+			return false, false
+		})
 	})
 }
 
@@ -1510,6 +1532,11 @@ closeUnaccepted:
 		}
 	}
 
+	l.sessions.DeleteMatching(func(_ netip.AddrPort, s *UDPSession) (bool, bool) {
+		s.release()
+		return true, false
+	})
+
 	if l.ownConn {
 		return l.conn.Close()
 	}
@@ -1524,25 +1551,20 @@ closeUnaccepted:
 // Control applies a function to the underlying packet connection.
 // CAUTION: BE VERY CAREFUL TO USE THIS FUNCTION, YOU MAY BREAK THE PROTOCOL.
 func (l *Listener) Control(f func(conn net.PacketConn) error) error {
-	l.sessionLock.Lock()
-	defer l.sessionLock.Unlock()
-
 	return f(l.conn)
 }
 
 // closeSession notifies the listener that a session has closed.
-func (l *Listener) closeSession(remoteAddr *net.UDPAddr) bool {
-	raddr := remoteAddr.AddrPort()
+func (l *Listener) closeSession(s *UDPSession) {
+	// acquire the bucket lock to ensure that no other goroutine is concurrently closing the same session.
+	l.sessions.Compute(s.remoteAddr.AddrPort(), func(v *UDPSession, _ bool) (*UDPSession, xsync.ComputeOp) {
+		// If the session is already removed/replaced by another goroutine, we don't need to do anything.
+		if v != s {
+			return nil, xsync.CancelOp
+		}
 
-	l.sessionLock.Lock()
-	defer l.sessionLock.Unlock()
-
-	_, ok := l.sessions[raddr]
-	if !ok {
-		return false
-	}
-	delete(l.sessions, raddr)
-	return true
+		return nil, xsync.DeleteOp
+	})
 }
 
 // Addr returns the listener's network address. The returned address is shared
@@ -1592,7 +1614,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l := new(Listener)
 	l.conn = conn
 	l.ownConn = ownConn
-	l.sessions = make(map[netip.AddrPort]*UDPSession)
+	l.sessions = xsync.NewMap[netip.AddrPort, *UDPSession]()
 	l.acceptCh = make(chan *UDPSession, acceptBacklog)
 	l.activeCall = libsync.NewQuit()
 	l.dataShards = dataShards

@@ -5,6 +5,7 @@ require (
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/pion/transport/v5 v5.1.5
 	github.com/pkg/errors v0.9.1
+	github.com/puzpuzpuz/xsync/v4 v4.5.0
 	github.com/stretchr/testify v1.12.1
 	github.com/tjfoc/gmsm v1.4.1
 	github.com/xtaci/lossyconn v1.1.1
