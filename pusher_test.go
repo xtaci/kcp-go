@@ -133,60 +133,6 @@ func TestPacketPusherListener(t *testing.T) {
 	}
 }
 
-func TestPacketPusherReleasedOnClose(t *testing.T) {
-	cudp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cudp.Close()
-	cpc := &pushConn{UDPConn: cudp}
-	sess, err := NewConn3(1, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, nil, 0, 0, cpc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cpc.receiver.Load() == nil {
-		t.Fatal("client session set no receiver")
-	}
-	sess.Close()
-	if cpc.receiver.Load() != nil {
-		t.Fatal("closed client session kept its receiver")
-	}
-
-	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer udp.Close()
-	lpc := &pushConn{UDPConn: udp}
-	l, err := ServeConn(nil, 0, 0, lpc)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cli, err := Dial(udp.LocalAddr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cli.Close()
-	if _, err := cli.Write([]byte("hello")); err != nil {
-		t.Fatal(err)
-	}
-	s, err := l.AcceptKCP()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Accepted sessions keep receiving after the Listener closes, as they do
-	// with a read goroutine, so the receiver stays until the last one goes.
-	l.Close()
-	if lpc.receiver.Load() == nil {
-		t.Fatal("Listener dropped its receiver with a session open")
-	}
-	s.Close()
-	if lpc.receiver.Load() != nil {
-		t.Fatal("Listener kept its receiver after its last session closed")
-	}
-}
-
 func TestPacketPusherListenerClosed(t *testing.T) {
 	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {

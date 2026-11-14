@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/pion/transport/v5/deadline"
+	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/net/ipv4"
 )
 
@@ -59,14 +60,19 @@ func (c *blockingPacketConn) SetDeadline(time.Time) error      { return nil }
 func (c *blockingPacketConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *blockingPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
-func TestPostProcessWorkerHandoff(t *testing.T) {
+func TestSenderWorkerHandoff(t *testing.T) {
 	for i := range 1000 {
 		s := &UDPSession{
+			activeCall:    libsync.NewQuit(),
 			readDeadline:  deadline.New(),
 			writeDeadline: deadline.New(),
+			sender: sender{
+				activeCall: libsync.NewQuit(),
+			},
 		}
-		s.postQueue.push(sendRequest{})
-		s.ppRunning.Store(true)
+
+		s.sender.queue.push(sendRequest{})
+		s.sender.running.Store(true)
 
 		start := make(chan struct{})
 		var wg sync.WaitGroup
@@ -75,14 +81,14 @@ func TestPostProcessWorkerHandoff(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			if s.claimPostProcess() {
+			if s.claimSender() {
 				claims.Add(1)
 			}
 		}()
 		go func() {
 			defer wg.Done()
 			<-start
-			if s.finishPostProcess() {
+			if s.finishSender() {
 				claims.Add(1)
 			}
 		}()
@@ -92,25 +98,28 @@ func TestPostProcessWorkerHandoff(t *testing.T) {
 		if got := claims.Load(); got != 1 {
 			t.Fatalf("iteration %d: got %d scheduling claims, want exactly one", i, got)
 		}
-		if !s.ppRunning.Load() {
+		if !s.sender.running.Load() {
 			t.Fatalf("iteration %d: pending packet has no worker scheduled", i)
 		}
 	}
 }
 
-func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
+func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	conn := &blockingPacketConn{
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
 	}
 	s := &UDPSession{
 		conn:          conn,
-		die:           make(chan struct{}),
+		activeCall:    libsync.NewQuit(),
 		kcp:           NewKCP(1, nil),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
+		sender: sender{
+			activeCall: libsync.NewQuit(),
+		},
 	}
-	w := &ppWorker{
+	w := &txWorker{
 		txqueue: []ipv4.Message{{
 			Buffers: [][]byte{defaultBufferPool.Get()[:1]},
 			Addr:    conn.LocalAddr(),
@@ -132,7 +141,7 @@ func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- s.Close() }()
 	select {
-	case <-s.die:
+	case <-s.activeCall.Signal():
 	case <-time.After(time.Second):
 		close(conn.release)
 		t.Fatal("Close did not close the session")
@@ -166,7 +175,7 @@ func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
 		t.Fatalf("concurrent Close returned %v, want ErrClosedPipe", err)
 	}
 
-	afterClose := &ppWorker{
+	afterClose := &txWorker{
 		txqueue: []ipv4.Message{{
 			Buffers: [][]byte{defaultBufferPool.Get()[:1]},
 			Addr:    conn.LocalAddr(),
@@ -180,29 +189,33 @@ func TestCloseWaitsForActivePostProcessSend(t *testing.T) {
 	}
 }
 
-func TestFinishClosedPostProcessDrainsQueue(t *testing.T) {
+func TestFinishClosedSenderDrainsQueue(t *testing.T) {
 	s := &UDPSession{
-		die:           make(chan struct{}),
+		activeCall:    libsync.NewQuit(),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
+		sender: sender{
+			activeCall: libsync.NewQuit(),
+		},
 	}
-	close(s.die)
-	s.ppRunning.Store(true)
-	if !s.postQueue.push(sendRequest{buffer: defaultBufferPool.Get()}) {
+
+	s.activeCall.Wait()
+	s.sender.running.Store(true)
+	if !s.sender.queue.push(sendRequest{buffer: defaultBufferPool.Get()}) {
 		t.Fatal("failed to queue packet")
 	}
 
-	if s.finishPostProcess() {
+	if s.finishSender() {
 		t.Fatal("closed session was scheduled for more post-processing")
 	}
-	if got := s.postQueue.len(); got != 0 {
+	if got := s.sender.queue.len(); got != 0 {
 		t.Fatalf("closed session retained %d queued packets", got)
 	}
 }
 
 // Writes waiting for application-rate tokens must not hold shared
 // postProcess workers from an unlimited session.
-func TestPostProcessRateLimitedMixed(t *testing.T) {
+func TestSenderRateLimitedMixed(t *testing.T) {
 	port := nextPort()
 	l := sinkServer(port)
 	defer l.Close()

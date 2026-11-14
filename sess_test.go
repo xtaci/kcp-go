@@ -45,6 +45,7 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/pion/transport/v5/deadline"
 	"github.com/pkg/errors"
+	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -293,8 +294,8 @@ func TestTimeout(t *testing.T) {
 func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	var outputs atomic.Int64
 	s := new(UDPSession)
-	s.die = make(chan struct{})
-	s.chSocketWriteError = make(chan struct{})
+	s.activeCall = libsync.NewQuit()
+	s.writeDone = make(chan struct{})
 	s.kcp = NewKCP(1, func([]byte, int) { outputs.Add(1) })
 	// A queued segment that any flush would send.
 	s.kcp.Send([]byte("x"))
@@ -307,7 +308,7 @@ func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	if got := outputs.Load(); got != before {
 		t.Fatalf("Write(nil) flushed %d times", got-before)
 	}
-	close(s.die)
+	s.activeCall.Wait()
 	if _, err := s.Write(nil); err == nil {
 		t.Fatal("Write(nil) on a closed session returned no error")
 	}
@@ -618,13 +619,13 @@ func TestCloseStopsListenerDeadlineTimer(t *testing.T) {
 
 func newRateLimitTestSession(bucket *ratelimit.Bucket) *UDPSession {
 	s := &UDPSession{
-		readDeadline:       deadline.New(),
-		writeDeadline:      deadline.New(),
-		die:                make(chan struct{}),
-		writeGate:          make(chan struct{}, 1),
-		chWriteEvent:       make(chan struct{}, 1),
-		chSocketWriteError: make(chan struct{}),
-		kcp:                NewKCP(1, func([]byte, int) {}),
+		readDeadline:  deadline.New(),
+		writeDeadline: deadline.New(),
+		activeCall:    libsync.NewQuit(),
+		writeGate:     make(chan struct{}, 1),
+		writeEvent:    make(chan struct{}, 1),
+		writeDone:     make(chan struct{}),
+		kcp:           NewKCP(1, func([]byte, int) {}),
 	}
 	s.writeGate <- struct{}{}
 	s.SetBucket(bucket)
@@ -2156,9 +2157,9 @@ func TestSetLoggerConcurrentWithKCPTrace(t *testing.T) {
 		}
 	})
 	for range 10000 {
-		sess.mu.Lock()
+		sess.mutex.Lock()
 		sess.kcp.debugLog(IKCP_LOG_INPUT, "test")
-		sess.mu.Unlock()
+		sess.mutex.Unlock()
 	}
 	wg.Wait()
 }

@@ -38,13 +38,11 @@ const (
 // readLoop is the optimized Linux read loop, using the recvmmsg syscall to
 // receive multiple UDP packets in a single system call.
 func (s *UDPSession) readLoop() {
-	// default version
 	if s.platform.batchConn == nil {
 		s.readLoopGeneric()
 		return
 	}
 
-	// x/net version
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}

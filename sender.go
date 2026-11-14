@@ -25,55 +25,64 @@ package kcp
 import (
 	"runtime"
 	"sync"
+	"sync/atomic"
 
+	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/net/ipv4"
 )
 
-// ppBudget is how many packets a worker takes from one session before it
+// senderBudget is how many packets a worker takes from one session before it
 // moves on, so a busy session cannot starve the others.
-const ppBudget = 4 * maxBatchSize
+const senderBudget = 4 * maxBatchSize
 
-// ppQueue holds the sessions with packets waiting for postProcess. A fixed
-// set of workers serves every session, so an idle session holds no goroutine.
-// ppRunning ensures that a session appears at most once in this queue or is
-// being handled by a worker. head avoids shifting entries after each dequeue.
-var ppQueue struct {
-	once sync.Once
-	mu   sync.Mutex
-	cond *sync.Cond
-	q    []*UDPSession
-	head int
+type sender struct {
+	running    atomic.Bool   // true if a worker is processing this session
+	activeCall *libsync.Quit // active sendTx calls, including the current worker
+	queue      sendQueue     // packets waiting for postProcess
 }
 
-// ppWorker owns a batch while a worker transforms queued packets into UDP
+// senderQueue holds the sessions with packets waiting for postProcess. A fixed
+// set of workers serves every session, so an idle session holds no goroutine.
+// sender.running ensures that a session appears at most once in this queue or is
+// being handled by a worker. head avoids shifting entries after each dequeue.
+var senderQueue struct {
+	once  sync.Once
+	mutex sync.Mutex
+	cond  *sync.Cond
+	queue []*UDPSession
+	head  int
+}
+
+// txWorker owns a batch while a worker transforms queued packets into UDP
 // datagrams. Its slices are reused between sessions to reduce allocations.
-type ppWorker struct {
+type txWorker struct {
 	txqueue []ipv4.Message
 	bufs    [][]byte
 }
 
-// oneBuf appends b to the worker-owned slice and returns a one-element view
+// append appends b to the worker-owned slice and returns a one-element view
 // suitable for ipv4.Message.Buffers. recycle clears that view before reuse.
-func (w *ppWorker) oneBuf(b []byte) [][]byte {
+func (w *txWorker) append(b []byte) [][]byte {
 	w.bufs = append(w.bufs, b)
 	return w.bufs[len(w.bufs)-1 : len(w.bufs) : len(w.bufs)]
 }
 
 // recycle returns every datagram buffer to the shared pool and clears
 // references held by the worker's message and slice arrays.
-func (w *ppWorker) recycle() {
+func (w *txWorker) recycle() {
 	for k := range w.txqueue {
 		defaultBufferPool.Put(w.txqueue[k].Buffers[0])
 		w.txqueue[k].Buffers = nil
 	}
+
 	w.txqueue = w.txqueue[:0]
 	clear(w.bufs)
 	w.bufs = w.bufs[:0]
 }
 
-// ppWorkers reuses batch storage across post-processing workers.
-var ppWorkers = sync.Pool{New: func() any {
-	return &ppWorker{
+// txWorkers reuses batch storage across post-processing workers.
+var txWorkers = sync.Pool{New: func() any {
+	return &txWorker{
 		txqueue: make([]ipv4.Message, 0, maxBatchSize),
 		bufs:    make([][]byte, 0, maxBatchSize),
 	}
@@ -81,10 +90,10 @@ var ppWorkers = sync.Pool{New: func() any {
 
 // flushTx sends a completed batch and reports whether the worker must discard
 // it because the session is closed.
-func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
+func (s *UDPSession) flushTx(w *txWorker, bytesToSend int) bool {
 	if s.isClosed() {
 		w.recycle()
-		ppWorkers.Put(w)
+		txWorkers.Put(w)
 		return true
 	}
 	s.sendTx(w, bytesToSend)
@@ -95,55 +104,55 @@ func (s *UDPSession) flushTx(w *ppWorker, bytesToSend int) bool {
 // trace record when enabled, and recycles the batch buffers. ppSendMu keeps
 // Close from returning while a send is in progress and rejects sends after
 // Close has shut the gate.
-func (s *UDPSession) sendTx(w *ppWorker, bytesToSend int) bool {
-	s.ppSendMu.Lock()
-	defer s.ppSendMu.Unlock()
-	if s.ppClosing {
+func (s *UDPSession) sendTx(w *txWorker, bytesToSend int) bool {
+	if !s.sender.activeCall.Add(1) {
 		w.recycle()
 		return false
 	}
+	defer s.sender.activeCall.Done()
+
 	s.tx(w.txqueue)
 	if kcpTrace {
-		s.mu.Lock()
+		s.mutex.Lock()
 		s.kcp.debugLog(IKCP_LOG_OUTPUT, "conv", s.kcp.conv, "datalen", bytesToSend)
-		s.mu.Unlock()
+		s.mutex.Unlock()
 	}
 	w.recycle()
 	return true
 }
 
-// kickPostProcess schedules s after its caller enqueues a packet. The atomic
+// kickSender schedules s after its caller enqueues a packet. The atomic
 // claim prevents concurrent producers from queueing the same session twice.
-func (s *UDPSession) kickPostProcess() {
-	if s.claimPostProcess() {
-		ppEnqueue(s)
+func (s *UDPSession) kickSender() {
+	if s.claimSender() {
+		senderEnqueue(s)
 	}
 }
 
-// claimPostProcess changes the session from idle to queued-or-running.
-func (s *UDPSession) claimPostProcess() bool {
-	return s.ppRunning.CompareAndSwap(false, true)
+// claimSender changes the session from idle to queued-or-running.
+func (s *UDPSession) claimSender() bool {
+	return s.sender.running.CompareAndSwap(false, true)
 }
 
-// finishPostProcess relinquishes the current worker claim. If the session is
+// finishSender relinquishes the current worker claim. If the session is
 // still open and packets arrived during processing, it claims the session
 // again so the caller can enqueue another worker pass. Closed sessions instead
 // release queued packet buffers.
-func (s *UDPSession) finishPostProcess() bool {
-	s.ppRunning.Store(false)
+func (s *UDPSession) finishSender() bool {
+	s.sender.running.Store(false)
 	if s.isClosed() {
-		s.discardPostProcess()
+		s.discardSender()
 		return false
 	}
-	return s.postQueue.len() > 0 && s.claimPostProcess()
+	return s.sender.queue.len() > 0 && s.claimSender()
 }
 
-// discardPostProcess releases queued packet buffers after Close.
+// discardSender releases queued packet buffers after Close.
 // Close serializes its final KCP flush and closes die while holding s.mu, so
 // the output callback cannot enqueue more packets after this drain completes.
-func (s *UDPSession) discardPostProcess() {
+func (s *UDPSession) discardSender() {
 	for {
-		req, ok := s.postQueue.pop()
+		req, ok := s.sender.queue.pop()
 		if !ok {
 			return
 		}
@@ -151,65 +160,68 @@ func (s *UDPSession) discardPostProcess() {
 	}
 }
 
-// ppEnqueue appends a claimed session to the shared worker queue and wakes one
+// senderEnqueue asenderends a claimed session to the shared worker queue and wakes one
 // worker. Queue compaction drops consumed references without shifting on every
 // dequeue.
-func ppEnqueue(s *UDPSession) {
-	ppQueue.once.Do(startPostProcessWorkers)
-	ppQueue.mu.Lock()
-	if ppQueue.head > len(ppQueue.q)/2 {
-		n := copy(ppQueue.q, ppQueue.q[ppQueue.head:])
-		clear(ppQueue.q[n:])
-		ppQueue.q, ppQueue.head = ppQueue.q[:n], 0
+func senderEnqueue(s *UDPSession) {
+	senderQueue.once.Do(startSenderWorkers)
+
+	defer senderQueue.cond.Signal()
+	senderQueue.mutex.Lock()
+	defer senderQueue.mutex.Unlock()
+
+	if senderQueue.head > len(senderQueue.queue)/2 {
+		n := copy(senderQueue.queue, senderQueue.queue[senderQueue.head:])
+		clear(senderQueue.queue[n:])
+		senderQueue.queue, senderQueue.head = senderQueue.queue[:n], 0
 	}
-	ppQueue.q = append(ppQueue.q, s)
-	ppQueue.mu.Unlock()
-	ppQueue.cond.Signal()
+	senderQueue.queue = append(senderQueue.queue, s)
 }
 
-// startPostProcessWorkers initializes the queue condition variable and starts
+// startSenderWorkers initializes the queue condition variable and starts
 // a bounded process-wide pool. It is called exactly once by ppQueue.once.
-func startPostProcessWorkers() {
-	ppQueue.cond = sync.NewCond(&ppQueue.mu)
+func startSenderWorkers() {
+	senderQueue.cond = sync.NewCond(&senderQueue.mutex)
+
 	n := min(max(runtime.NumCPU(), 2), 8)
 	for range n {
-		go postProcessWorker()
+		go sendWorker()
 	}
 }
 
-// postProcessWorker repeatedly takes one claimed session from ppQueue,
+// sendWorker repeatedly takes one claimed session from senderQueue,
 // processes packets within the per-session budget, and requeues the session
 // when more packets remain.
-func postProcessWorker() {
-	w := ppWorkers.Get().(*ppWorker)
+func sendWorker() {
+	w := txWorkers.Get().(*txWorker)
 	for {
-		ppQueue.mu.Lock()
-		for ppQueue.head == len(ppQueue.q) {
-			ppQueue.cond.Wait()
+		senderQueue.mutex.Lock()
+		for senderQueue.head == len(senderQueue.queue) {
+			senderQueue.cond.Wait()
 		}
-		s := ppQueue.q[ppQueue.head]
-		ppQueue.q[ppQueue.head] = nil
-		ppQueue.head++
-		if ppQueue.head == len(ppQueue.q) {
-			ppQueue.q, ppQueue.head = ppQueue.q[:0], 0
+		s := senderQueue.queue[senderQueue.head]
+		senderQueue.queue[senderQueue.head] = nil
+		senderQueue.head++
+		if senderQueue.head == len(senderQueue.queue) {
+			senderQueue.queue, senderQueue.head = senderQueue.queue[:0], 0
 		}
-		ppQueue.mu.Unlock()
+		senderQueue.mutex.Unlock()
 
 		if s.isClosed() {
 			// Close may leave a queue entry behind after draining its buffers.
-			// finishPostProcess clears the claim and performs an idempotent drain.
-			s.finishPostProcess()
+			// finishSender clears the claim and performs an idempotent drain.
+			s.finishSender()
 			continue
 		}
 
 		more := s.postProcess(w)
 		if more {
-			ppEnqueue(s)
+			senderEnqueue(s)
 			continue
 		}
-		// Hand back to kickPostProcess, unless a packet arrived meanwhile.
-		if s.finishPostProcess() {
-			ppEnqueue(s)
+		// Hand back to kickSender, unless a packet arrived meanwhile.
+		if s.finishSender() {
+			senderEnqueue(s)
 		}
 	}
 }
