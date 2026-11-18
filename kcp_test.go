@@ -25,9 +25,12 @@ package kcp
 import (
 	"bytes"
 	"container/heap"
+	crand "crypto/rand"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/rand"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -51,6 +54,24 @@ type lossyTestCase struct {
 	wantCorrupt  bool
 	wantReorder  bool
 	wantLinkDown bool
+}
+
+// netAddrFactory supplies distinct UDP addresses to the lossy connection tests.
+func netAddrFactory() net.Addr {
+	ip := make(net.IP, net.IPv6len)
+	ip[0] = 0x20
+	ip[1] = 0x01
+	ip[2] = 0x0d
+	ip[3] = 0xb8
+	_, err := io.ReadFull(crand.Reader, ip[4:])
+	if err != nil {
+		panic(fmt.Sprintf("failed to generate random IP: %v", err))
+	}
+
+	return &net.UDPAddr{
+		IP:   ip,
+		Port: rand.Intn(65535) + 1,
+	}
 }
 
 func TestLossyConn(t *testing.T) {
@@ -106,11 +127,11 @@ func TestLossyConn(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			clientConfig, serverConfig := tt.config, tt.config
 			serverConfig.Seed++
-			client, err := lossyconn.NewWithConfig(clientConfig)
+			client, err := lossyconn.NewWithConfigAndAddrFactory(clientConfig, netAddrFactory)
 			if err != nil {
 				t.Fatal(err)
 			}
-			server, err := lossyconn.NewWithConfig(serverConfig)
+			server, err := lossyconn.NewWithConfigAndAddrFactory(serverConfig, netAddrFactory)
 			if err != nil {
 				_ = client.Close()
 				t.Fatal(err)

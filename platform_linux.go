@@ -37,9 +37,9 @@ type (
 		batchConn batchConn
 	}
 
-	// udpConn is an interface implemented by net.UDPConn.
+	// netUDPConn is an interface implemented by net.UDPConn.
 	// It can be used for interface assertions to check if a net.Conn is a UDP connection.
-	udpConn interface {
+	netUDPConn interface {
 		SyscallConn() (syscall.RawConn, error)
 		ReadMsgUDP(b, oob []byte) (n, oobn, flags int, addr *net.UDPAddr, err error)
 	}
@@ -53,7 +53,7 @@ type (
 
 // newBatchConn creates a batchConn based on the IP version of the provided net.PacketConn.
 func newBatchConn(conn net.PacketConn) batchConn {
-	if _, ok := conn.(udpConn); !ok {
+	if _, ok := conn.(netUDPConn); !ok {
 		return nil
 	}
 

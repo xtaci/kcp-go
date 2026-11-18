@@ -25,9 +25,15 @@
 package kcp
 
 func (s *UDPSession) readLoop() {
-	s.defaultReadLoop()
+	s.readLoopGeneric()
 }
 
-func (l *Listener) monitor() {
-	l.defaultMonitor()
+// readLoop receives listener packets without platform-specific batch I/O.
+func (l *Listener) readLoop() {
+	l.readLoopGeneric()
+}
+
+// readLoopUnspecified reads destination control messages without batch I/O.
+func (l *Listener) readLoopUnspecified() {
+	l.readLoopUnspecifiedGeneric()
 }
