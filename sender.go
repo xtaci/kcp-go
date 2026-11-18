@@ -39,6 +39,7 @@ type sender struct {
 	running    atomic.Bool   // true if a worker is processing this session
 	activeCall *libsync.Quit // active sendTx calls, including the current worker
 	queue      sendQueue     // packets waiting for postProcess
+	processMu  sync.Mutex    // serializes post-processing with the final close drain
 }
 
 // senderQueue holds the sessions with packets waiting for postProcess. A fixed
@@ -88,22 +89,9 @@ var txWorkers = sync.Pool{New: func() any {
 	}
 }}
 
-// flushTx sends a completed batch and reports whether the worker must discard
-// it because the session is closed.
-func (s *UDPSession) flushTx(w *txWorker, bytesToSend int) bool {
-	if s.isClosed() {
-		w.recycle()
-		txWorkers.Put(w)
-		return true
-	}
-	s.sendTx(w, bytesToSend)
-	return false
-}
-
 // sendTx performs the platform-specific send for a completed batch, emits a
-// trace record when enabled, and recycles the batch buffers. ppSendMu keeps
-// Close from returning while a send is in progress and rejects sends after
-// Close has shut the gate.
+// trace record when enabled, and recycles the batch buffers. activeCall keeps
+// Close from returning while a send is in progress and rejects later sends.
 func (s *UDPSession) sendTx(w *txWorker, bytesToSend int) bool {
 	if !s.sender.activeCall.Add(1) {
 		w.recycle()
@@ -136,28 +124,14 @@ func (s *UDPSession) claimSender() bool {
 
 // finishSender relinquishes the current worker claim. If the session is
 // still open and packets arrived during processing, it claims the session
-// again so the caller can enqueue another worker pass. Closed sessions instead
-// release queued packet buffers.
+// again so the caller can enqueue another worker pass. Close drains the queue
+// itself after excluding workers.
 func (s *UDPSession) finishSender() bool {
 	s.sender.running.Store(false)
 	if s.isClosed() {
-		s.discardSender()
 		return false
 	}
 	return s.sender.queue.len() > 0 && s.claimSender()
-}
-
-// discardSender releases queued packet buffers after Close.
-// Close serializes its final KCP flush and closes die while holding s.mu, so
-// the output callback cannot enqueue more packets after this drain completes.
-func (s *UDPSession) discardSender() {
-	for {
-		req, ok := s.sender.queue.pop()
-		if !ok {
-			return
-		}
-		defaultBufferPool.Put(req.buffer)
-	}
 }
 
 // senderEnqueue asenderends a claimed session to the shared worker queue and wakes one
@@ -207,14 +181,15 @@ func sendWorker() {
 		}
 		senderQueue.mutex.Unlock()
 
+		s.sender.processMu.Lock()
 		if s.isClosed() {
-			// Close may leave a queue entry behind after draining its buffers.
-			// finishSender clears the claim and performs an idempotent drain.
 			s.finishSender()
+			s.sender.processMu.Unlock()
 			continue
 		}
 
 		more := s.postProcess(w)
+		s.sender.processMu.Unlock()
 		if more {
 			senderEnqueue(s)
 			continue

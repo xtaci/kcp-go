@@ -52,6 +52,26 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
+func TestNewConnRejectsNilUDPAddr(t *testing.T) {
+	var addr *net.UDPAddr
+	for _, tt := range []struct {
+		name string
+		new  func(net.Addr) (*UDPSession, error)
+	}{
+		{"NewConn2", func(a net.Addr) (*UDPSession, error) { return NewConn2(a, nil, 0, 0, nil) }},
+		{"NewConn3", func(a net.Addr) (*UDPSession, error) { return NewConn3(1, a, nil, 0, 0, nil) }},
+		{"NewConn4", func(a net.Addr) (*UDPSession, error) { return NewConn4(1, a, nil, 0, 0, false, nil) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			for _, a := range []net.Addr{nil, addr} {
+				if sess, err := tt.new(a); err == nil || sess != nil {
+					t.Fatalf("address %v: got session %v, error %v", a, sess, err)
+				}
+			}
+		})
+	}
+}
+
 // TestWildcardListenerReplySource checks destination tracking and replies for both IP families.
 func TestWildcardListenerReplySource(t *testing.T) {
 	if !cmsg.SupportsControlMessage {

@@ -65,6 +65,32 @@ func (c *pushConn) readLoop() {
 	}
 }
 
+func TestPacketPusherRejectsNilUDPAddr(t *testing.T) {
+	udp, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+
+	pc := &pushConn{UDPConn: udp}
+	s, err := NewConn3(1, udp.LocalAddr(), nil, 0, 0, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var addr *net.UDPAddr
+	s.pushedPacket(make([]byte, IKCP_OVERHEAD), addr, nil)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	l, err := ServeConn(nil, 0, 0, pc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	l.pushedPacket(make([]byte, IKCP_OVERHEAD), addr, nil)
+}
+
 func TestPacketPusherEcho(t *testing.T) {
 	port := nextPort()
 	l := echoServer(port, nil)

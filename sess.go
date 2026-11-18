@@ -381,6 +381,10 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 }
 
 func (s *UDPSession) writeBuffersLocked(v [][]byte) (int, bool) {
+	if s.isClosed() {
+		return 0, false
+	}
+
 	// make sure write do not overflow the max sliding window on both side
 	waitsnd := s.kcp.WaitSnd()
 	if waitsnd >= int(s.kcp.snd_wnd) {
@@ -534,26 +538,38 @@ func (s *UDPSession) isClosed() bool {
 	}
 }
 
-// doClose stops the session, waits for active sends, and discards queued packets.
+// doClose stops the session and makes a best-effort attempt to send queued packets.
 func (s *UDPSession) doClose() {
 	s.activeCall.Wait()
 
-	// try best to send all queued messages especially the data in txqueue
+	// Exclude workers until the final KCP output and all queued packets are sent.
+	s.sender.processMu.Lock()
+	// Wait for any producer that entered before the close signal.
 	s.mutex.Lock()
-	s.kcp.flush((IKCP_FLUSH_FULL))
 	s.mutex.Unlock()
 
+	w := txWorkers.Get().(*txWorker)
+	for s.postProcess(w) {
+	}
+	s.mutex.Lock()
+	if s.kcp.nocwnd == 0 && s.kcp.cwnd == 0 {
+		// The first flush initializes the congestion window.
+		s.kcp.flush(IKCP_FLUSH_FULL)
+	}
+	s.kcp.flush(IKCP_FLUSH_FULL)
+	s.mutex.Unlock()
+	for s.postProcess(w) {
+	}
+	txWorkers.Put(w)
 	s.sender.activeCall.Wait()
+	s.sender.processMu.Unlock()
 
 	DefaultSnmp.decreaseCurrEstab()
 	s.callReadNotify()
-	s.discardSender()
 }
 
-// release frees the session's local state: full flush under the session
-// mutex, close die, then notify readers and discard the post-process queue.
-// It does not unregister the session from its Listener; closeSession does
-// that separately. Runs once.
+// release closes the session without unregistering it from its Listener.
+// closeSession handles the unregistration separately. Runs once.
 func (s *UDPSession) release() error {
 	_, ok := <-s.closeGate
 	if !ok {
@@ -565,7 +581,8 @@ func (s *UDPSession) release() error {
 	return nil
 }
 
-// Close closes the connection.
+// Close makes a best-effort attempt to send queued data, then closes the
+// connection without waiting for acknowledgments.
 func (s *UDPSession) Close() error {
 	if s.l != nil {
 		// notify the listener that this session is closed
@@ -908,14 +925,12 @@ func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 
 		// transmit when sender.queue is empty or we've reached max batch size
 		if s.sender.queue.len() == 0 || len(w.txqueue) >= maxBatchSize {
-			if s.flushTx(w, bytesToSend) {
-				return true
-			}
+			s.sendTx(w, bytesToSend)
 			bytesToSend = 0
 		}
 	}
-	if len(w.txqueue) > 0 && s.flushTx(w, bytesToSend) {
-		return true
+	if len(w.txqueue) > 0 {
+		s.sendTx(w, bytesToSend)
 	}
 	return s.sender.queue.len() > 0
 }
@@ -926,6 +941,10 @@ func (s *UDPSession) update() {
 	case <-s.activeCall.Signal():
 	default:
 		s.mutex.Lock()
+		if s.isClosed() {
+			s.mutex.Unlock()
+			return
+		}
 		interval := s.kcp.flush(IKCP_FLUSH_FULL)
 		waitsnd := s.kcp.WaitSnd()
 		if waitsnd < int(s.kcp.snd_wnd) {
@@ -1182,6 +1201,9 @@ func (s *UDPSession) kcpInput(data []byte) {
 		// lock
 		s.mutex.Lock()
 		defer s.mutex.Unlock()
+		if s.isClosed() {
+			return
+		}
 
 		// if fecDecoder is not initialized, create one with default parameter
 		// lazy initialization
@@ -1241,6 +1263,9 @@ func (s *UDPSession) kcpInput(data []byte) {
 	default: // packet without FEC
 		s.mutex.Lock()
 		defer s.mutex.Unlock()
+		if s.isClosed() {
+			return
+		}
 
 		if ret := s.kcp.Input(data, IKCP_PACKET_REGULAR, s.ackNoDelay); ret != 0 {
 			DefaultSnmp.addKCPInErrors(1)
@@ -1752,6 +1777,9 @@ func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parit
 	if !ok {
 		return nil, errors.New("invalid remote address type")
 	}
+	if remoteAddr == nil {
+		return nil, errors.New("nil remote address")
+	}
 
 	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
 }
@@ -1763,6 +1791,9 @@ func NewConn3(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parit
 	if !ok {
 		return nil, errors.New("invalid remote address type")
 	}
+	if remoteAddr == nil {
+		return nil, errors.New("nil remote address")
+	}
 
 	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
 }
@@ -1773,6 +1804,9 @@ func NewConn2(raddr net.Addr, block BlockCrypt, dataShards, parityShards int, co
 	remoteAddr, ok := raddr.(*net.UDPAddr)
 	if !ok {
 		return nil, errors.New("invalid remote address type")
+	}
+	if remoteAddr == nil {
+		return nil, errors.New("nil remote address")
 	}
 
 	var convid uint32

@@ -50,6 +50,10 @@ func isUnicast(addr libnetip.Addr) bool {
 
 // isSameUDPAddr compares UDP addresses, including their IPv6 zones.
 func isSameUDPAddr(a, b *net.UDPAddr) bool {
+	if a == nil || b == nil {
+		return false
+	}
+
 	if a.Port != b.Port {
 		return false
 	}
@@ -81,7 +85,7 @@ func (s *UDPSession) readLoopGeneric() {
 		}
 
 		remoteAddr, ok := addr.(*net.UDPAddr)
-		if !ok {
+		if !ok || remoteAddr == nil {
 			continue
 		}
 
@@ -106,7 +110,7 @@ func (l *Listener) readLoopGeneric() {
 		}
 
 		remoteAddr, ok := raddr.(*net.UDPAddr)
-		if !ok {
+		if !ok || remoteAddr == nil {
 			continue
 		}
 
@@ -172,7 +176,7 @@ func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 	}
 
 	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok {
+	if !ok || remoteAddr == nil {
 		return
 	}
 
@@ -193,7 +197,7 @@ func (l *Listener) pushedPacket(b []byte, raddr net.Addr, err error) {
 	}
 
 	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok {
+	if !ok || remoteAddr == nil {
 		return
 	}
 

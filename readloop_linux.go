@@ -65,7 +65,7 @@ func (s *UDPSession) readLoop() {
 			msg := &msgs[i]
 
 			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
-			if !ok {
+			if !ok || remoteAddr == nil {
 				continue
 			}
 
@@ -107,7 +107,7 @@ func (l *Listener) readLoop() {
 			msg := &msgs[i]
 
 			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
-			if !ok {
+			if !ok || remoteAddr == nil {
 				continue
 			}
 
@@ -141,7 +141,7 @@ func (l *Listener) readLoopUnspecified() {
 			msg := &msgs[i]
 
 			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
-			if !ok {
+			if !ok || remoteAddr == nil {
 				continue
 			}
 
