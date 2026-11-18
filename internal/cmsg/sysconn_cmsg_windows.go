@@ -16,11 +16,13 @@ const (
 	sizeofIn6Pktinfo = int(unsafe.Sizeof(windows.IN6_PKTINFO{}))
 )
 
+// cmsgAlignOf rounds a control-message length up to pointer alignment.
 func cmsgAlignOf(salen int) int {
 	salign := sizeofPtr
 	return (salen + salign - 1) &^ (salign - 1)
 }
 
+// socketControlMessageHeaderAndData separates a control-message header from its payload.
 func socketControlMessageHeaderAndData(b []byte) (*windows.WSACMSGHDR, []byte, error) {
 	h := (*windows.WSACMSGHDR)(unsafe.Pointer(&b[0]))
 	if h.Len < uintptr(sizeofWSACMSGHDR) || uint64(h.Len) > uint64(len(b)) {
@@ -30,6 +32,7 @@ func socketControlMessageHeaderAndData(b []byte) (*windows.WSACMSGHDR, []byte, e
 	return h, b[cmsgAlignOf(sizeofWSACMSGHDR):h.Len], nil
 }
 
+// parseOneSocketControlMessage parses one message and returns any aligned remainder.
 func parseOneSocketControlMessage(b []byte) (hdr windows.WSACMSGHDR, dbuf []byte, remainder []byte, err error) {
 	h, dbuf, err := socketControlMessageHeaderAndData(b)
 	if err != nil {
@@ -41,6 +44,7 @@ func parseOneSocketControlMessage(b []byte) (hdr windows.WSACMSGHDR, dbuf []byte
 	return *h, dbuf, remainder, nil
 }
 
+// buildSocketControlMessage packs aligned control-message headers and payloads.
 func buildSocketControlMessage(hdr []windows.WSACMSGHDR, data [][]byte) *[]byte {
 	if len(hdr) != len(data) {
 		panic("invalid arguments: hdr and data must be the same length")
@@ -70,6 +74,8 @@ func buildSocketControlMessage(hdr []windows.WSACMSGHDR, data [][]byte) *[]byte 
 
 const SupportsControlMessage = true
 
+// SetupControlMessage enables IPv4 and IPv6 destination packet information.
+// It returns an error if socket control fails or both socket options fail.
 func SetupControlMessage(c syscall.RawConn) error {
 	var ret4, ret6 error
 	err := c.Control(func(fd uintptr) {
@@ -79,12 +85,14 @@ func SetupControlMessage(c syscall.RawConn) error {
 	if err != nil {
 		return err
 	}
+	// Single-family sockets may reject the option for the other family.
 	if ret4 != nil && ret6 != nil {
 		return errors.Join(ret4, ret6)
 	}
 	return nil
 }
 
+// ParseControlMessage extracts the destination address and interface from received ancillary data.
 func ParseControlMessage(data []byte) (netip.AddrInterface, error) {
 	for len(data) > 0 {
 		hdr, body, remainder, err := parseOneSocketControlMessage(data)
@@ -126,6 +134,7 @@ func ParseControlMessage(data []byte) (netip.AddrInterface, error) {
 	return netip.AddrInterface{}, errors.New("no valid control message found")
 }
 
+// buildControlMessage selects the local source address and interface for a reply.
 func buildControlMessage(laddr netip.AddrInterface) *[]byte {
 	addr := laddr.Addr()
 

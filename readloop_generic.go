@@ -28,10 +28,12 @@ func (s *UDPSession) readLoop() {
 	s.readLoopGeneric()
 }
 
+// readLoop receives listener packets without platform-specific batch I/O.
 func (l *Listener) readLoop() {
 	l.readLoopGeneric()
 }
 
+// readLoopUnspecified reads destination control messages without batch I/O.
 func (l *Listener) readLoopUnspecified() {
 	l.readLoopUnspecifiedGeneric()
 }

@@ -29,6 +29,7 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
+// defaultTxUDP sends each datagram, preserving any source-address control message.
 func (s *UDPSession) defaultTxUDP(udpConn udpConn, txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0

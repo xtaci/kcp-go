@@ -52,6 +52,7 @@ func (zc *ipv6ZoneCache) update(ift []net.Interface, force bool) (updated bool) 
 	return true
 }
 
+// name returns the cached interface name, falling back to its numeric index.
 func (zc *ipv6ZoneCache) name(zone int) string {
 	updated := zc.update(nil, false)
 	zc.RLock()
@@ -69,6 +70,7 @@ func (zc *ipv6ZoneCache) name(zone int) string {
 	return name
 }
 
+// index returns the cached interface index, accepting a numeric zone as a fallback.
 func (zc *ipv6ZoneCache) index(zone string) int {
 	updated := zc.update(nil, false)
 	zc.RLock()

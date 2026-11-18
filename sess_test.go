@@ -45,9 +45,127 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/pion/transport/v5/deadline"
 	"github.com/pkg/errors"
+	"github.com/puzpuzpuz/xsync/v4"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/crypto/pbkdf2"
 )
+
+// TestWildcardListenerReplySource checks destination tracking and replies for both IP families.
+func TestWildcardListenerReplySource(t *testing.T) {
+	if !cmsg.SupportsControlMessage {
+		t.Skip("destination control messages are not supported on this platform")
+	}
+
+	for _, tt := range []struct {
+		name    string
+		network string
+		bindIP  net.IP
+		peerIP  net.IP
+	}{
+		{name: "IPv4", network: "udp4", bindIP: net.IPv4zero, peerIP: net.IPv4(127, 0, 0, 1)},
+		{name: "IPv6", network: "udp6", bindIP: net.IPv6unspecified, peerIP: net.IPv6loopback},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			socket, err := net.ListenUDP(tt.network, &net.UDPAddr{IP: tt.bindIP})
+			if err != nil {
+				if tt.network == "udp6" {
+					t.Skipf("IPv6 unavailable: %v", err)
+				}
+				t.Fatal(err)
+			}
+			defer socket.Close()
+
+			listener, err := ServeConn(nil, 0, 0, socket)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer listener.Close()
+			if err := listener.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+
+			destination := &net.UDPAddr{IP: tt.peerIP, Port: socket.LocalAddr().(*net.UDPAddr).Port}
+			client, err := DialWithOptions(destination.String(), nil, 0, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			if err := client.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := client.Write([]byte("request")); err != nil {
+				t.Fatal(err)
+			}
+
+			server, err := listener.AcceptKCP()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer server.Close()
+			local, ok := server.LocalAddr().(*net.UDPAddr)
+			if !ok || !local.IP.Equal(tt.peerIP) || local.Port != destination.Port {
+				t.Fatalf("server local address = %v, want %v", server.LocalAddr(), destination)
+			}
+			if err := server.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+				t.Fatal(err)
+			}
+			request := make([]byte, len("request"))
+			if _, err := io.ReadFull(server, request); err != nil {
+				t.Fatal(err)
+			}
+			if string(request) != "request" {
+				t.Fatalf("request = %q", request)
+			}
+			if _, err := server.Write([]byte("reply")); err != nil {
+				t.Fatal(err)
+			}
+			reply := make([]byte, len("reply"))
+			if _, err := io.ReadFull(client, reply); err != nil {
+				t.Fatalf("receive reply from destination address: %v", err)
+			}
+			if string(reply) != "reply" {
+				t.Fatalf("reply = %q", reply)
+			}
+		})
+	}
+}
+
+// TestWildcardSessionKeys verifies that a peer's sessions remain distinct across destinations.
+func TestWildcardSessionKeys(t *testing.T) {
+	manager := newConnManagerUnspecified()
+	remote := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 1), Port: 1234}
+	first := libnetip.AddrInterfaceFrom(libnetip.AddrFrom4([4]byte{192, 0, 2, 2}), 1)
+	otherIP := libnetip.AddrInterfaceFrom(libnetip.AddrFrom4([4]byte{192, 0, 2, 3}), 1)
+	otherInterface := libnetip.AddrInterfaceFrom(libnetip.AddrFrom4([4]byte{192, 0, 2, 2}), 2)
+	firstSession, secondSession, thirdSession := &UDPSession{}, &UDPSession{}, &UDPSession{}
+
+	for _, tc := range []struct {
+		local libnetip.AddrInterface
+		sess  *UDPSession
+	}{
+		{first, firstSession},
+		{otherIP, secondSession},
+		{otherInterface, thirdSession},
+	} {
+		manager.Compute(tc.local, remote, func(_ *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp) {
+			if loaded {
+				t.Error("different local destination reused a session")
+			}
+			return tc.sess, xsync.UpdateOp
+		})
+	}
+	got, loaded := manager.Compute(first, remote, func(old *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp) {
+		if !loaded || old != firstSession {
+			t.Errorf("same destination returned session %p, loaded %v", old, loaded)
+		}
+		return old, xsync.CancelOp
+	})
+	if !loaded || got != firstSession || manager.Size() != 3 {
+		t.Fatalf("first session = %p, loaded = %v, total = %d", got, loaded, manager.Size())
+	}
+}
 
 var (
 	baseport = uint32(10000)

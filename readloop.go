@@ -1,6 +1,7 @@
 // The MIT License (MIT)
 //
 // Copyright (c) 2015 xtaci
+// Copyright (c) 2026 Coia Prant
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +31,24 @@ import (
 	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 )
 
+// isUnicast rejects unspecified, multicast, and limited broadcast destinations.
+func isUnicast(addr libnetip.Addr) bool {
+	if addr.IsUnspecified() {
+		return false
+	}
+
+	if addr.IsMulticast() {
+		return false
+	}
+
+	if addr == libnetip.IPv4Broadcast() {
+		return false
+	}
+
+	return true
+}
+
+// isSameUDPAddr compares UDP addresses, including their IPv6 zones.
 func isSameUDPAddr(a, b *net.UDPAddr) bool {
 	if a.Port != b.Port {
 		return false
@@ -95,6 +114,7 @@ func (l *Listener) readLoopGeneric() {
 	}
 }
 
+// readLoopUnspecifiedGeneric receives packets and their local destination addresses.
 func (l *Listener) readLoopUnspecifiedGeneric() {
 	udpConn := l.conn.(udpConn)
 
@@ -107,6 +127,7 @@ func (l *Listener) readLoopUnspecifiedGeneric() {
 			return
 		}
 
+		// The destination is required to select the reply source and session key.
 		laddr, err := cmsg.ParseControlMessage(oob[:nn])
 		if err != nil {
 			continue

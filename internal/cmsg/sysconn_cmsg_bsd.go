@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// buildSocketControlMessage packs aligned control-message headers and payloads.
 func buildSocketControlMessage(hdr []unix.Cmsghdr, data [][]byte) *[]byte {
 	if len(hdr) != len(data) {
 		panic("invalid arguments: hdr and data must be the same length")
@@ -42,6 +43,8 @@ func buildSocketControlMessage(hdr []unix.Cmsghdr, data [][]byte) *[]byte {
 
 const SupportsControlMessage = true
 
+// SetupControlMessage enables IPv4 and IPv6 destination packet information.
+// It returns an error if socket control fails or both socket options fail.
 func SetupControlMessage(c syscall.RawConn) error {
 	var ret4, ret6 error
 	err := c.Control(func(fd uintptr) {
@@ -51,12 +54,14 @@ func SetupControlMessage(c syscall.RawConn) error {
 	if err != nil {
 		return err
 	}
+	// Single-family sockets may reject the option for the other family.
 	if ret4 != nil && ret6 != nil {
 		return errors.Join(ret4, ret6)
 	}
 	return nil
 }
 
+// ParseControlMessage extracts the destination address and, for IPv6, the interface.
 func ParseControlMessage(data []byte) (netip.AddrInterface, error) {
 	for len(data) > 0 {
 		hdr, body, remainder, err := unix.ParseOneSocketControlMessage(data)
@@ -99,6 +104,7 @@ func ParseControlMessage(data []byte) (netip.AddrInterface, error) {
 	return netip.AddrInterface{}, errors.New("no valid control message found")
 }
 
+// buildControlMessage selects the local source address for a reply.
 func buildControlMessage(laddr netip.AddrInterface) *[]byte {
 	addr := laddr.Addr()
 

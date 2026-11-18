@@ -15,6 +15,7 @@ var (
 	cacheControlMessage = xsync.NewMap[netip.AddrInterface, weak.Pointer[[]byte]]()
 )
 
+// init starts cache cleanup only on platforms that support control messages.
 func init() {
 	if !SupportsControlMessage {
 		return
@@ -23,6 +24,7 @@ func init() {
 	go cacheCleanup()
 }
 
+// cacheCleanup periodically removes entries whose cached values were collected.
 func cacheCleanup() {
 	for range time.Tick(time.Hour) {
 		cacheUDPAddr.DeleteMatching(func(_ netip.AddrInterfacePort, v weak.Pointer[net.UDPAddr]) (bool, bool) {
@@ -34,6 +36,7 @@ func cacheCleanup() {
 	}
 }
 
+// ResolveUDPAddr returns a cached UDP address for the local interface and port.
 func ResolveUDPAddr(laddr netip.AddrInterface, port uint16) (ret *net.UDPAddr) {
 	key := netip.AddrInterfacePortFrom(laddr, port)
 	cacheUDPAddr.Compute(key, func(v weak.Pointer[net.UDPAddr], _ bool) (weak.Pointer[net.UDPAddr], xsync.ComputeOp) {
@@ -45,6 +48,7 @@ func ResolveUDPAddr(laddr netip.AddrInterface, port uint16) (ret *net.UDPAddr) {
 			IP:   net.IP(laddr.Addr().AsSlice()),
 			Port: int(port),
 		}
+		// Link-local IPv6 addresses require a zone to identify the interface.
 		if laddr.Addr().Is6() && laddr.Addr().IsLinkLocalUnicast() {
 			ret.Zone = zone.Name(int(laddr.IfIndex()))
 		}
@@ -54,6 +58,7 @@ func ResolveUDPAddr(laddr netip.AddrInterface, port uint16) (ret *net.UDPAddr) {
 	return
 }
 
+// AcquireControlMessage returns a cached send control message for the local interface.
 func AcquireControlMessage(laddr netip.AddrInterface) (ret *[]byte) {
 	cacheControlMessage.Compute(laddr, func(v weak.Pointer[[]byte], _ bool) (weak.Pointer[[]byte], xsync.ComputeOp) {
 		if ret = v.Value(); ret != nil {

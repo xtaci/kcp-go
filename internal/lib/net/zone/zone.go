@@ -10,6 +10,7 @@ var zoneCache = ipv6ZoneCache{
 	toName:  make(map[int]string),
 }
 
+// Name converts an interface index to the platform's IPv6 zone representation.
 func Name(zone int) string {
 	switch {
 	case zone == 0:
@@ -21,6 +22,7 @@ func Name(zone int) string {
 	}
 }
 
+// Index converts an IPv6 zone name or numeric zone to an interface index.
 func Index(zone string) int {
 	switch {
 	case zone == "":

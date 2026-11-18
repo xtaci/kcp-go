@@ -202,6 +202,7 @@ type (
 	}
 )
 
+// output queues a copy of a KCP packet for the asynchronous sender.
 func (s *UDPSession) output(buf []byte, size int) {
 	// A basic check for the minimum packet size
 	if size < IKCP_OVERHEAD {
@@ -533,6 +534,7 @@ func (s *UDPSession) isClosed() bool {
 	}
 }
 
+// doClose stops the session, waits for active sends, and discards queued packets.
 func (s *UDPSession) doClose() {
 	s.activeCall.Wait()
 
@@ -1293,7 +1295,7 @@ type (
 		udpPort      uint16         // the local UDP port, if applicable
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions   connectionManager // all sessions accepted by this Listener
+		sessions   connManager // all sessions accepted by this Listener
 		acceptCh   chan *UDPSession
 		activeCall *libsync.Quit
 
@@ -1306,8 +1308,10 @@ type (
 	}
 )
 
+// getConn finds or atomically creates the session for an incoming packet.
 func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
 	var created bool
+	// Compute serializes replacement with other operations on the same session key.
 	sess, _ := l.sessions.Compute(laddr, remoteAddr, func(sess *UDPSession, ok bool) (*UDPSession, xsync.ComputeOp) {
 		if ok {
 			// If we have a valid conversation id or we cannot get conversation id from the packet,
@@ -1655,7 +1659,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	runtime.AddCleanup(l, freeDeadline, l.acceptDeadline)
 
 	if pp, ok := conn.(PacketPusher); ok {
-		l.sessions = newConnectionManager()
+		l.sessions = newConnManager()
 		pp.SetPacketReceiver(l.pushedPacket)
 		return l, nil
 	}
@@ -1691,13 +1695,13 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 		}
 
 		l.udpPort = uint16(laddr.Port)
-		l.sessions = newConnectionManagerUnspecified()
+		l.sessions = newConnManagerUnspecified()
 		go l.readLoopUnspecified()
 		return l, nil
 	}
 
 genericListener:
-	l.sessions = newConnectionManager()
+	l.sessions = newConnManager()
 	go l.readLoop()
 	return l, nil
 }

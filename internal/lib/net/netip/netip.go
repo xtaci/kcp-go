@@ -19,8 +19,8 @@ import (
 )
 
 type Addr struct {
-	// addr is the hi and lo bits of an IPv6 address. If z==z4,
-	// hi and lo contain the IPv4-mapped IPv6 address.
+	// addr is the hi and lo bits of an IPv6 address. IPv4 addresses use
+	// their IPv4-mapped IPv6 representation.
 	//
 	// hi and lo are constructed by interpreting a 16-byte IPv6
 	// address as a big-endian 128-bit number. The most significant
@@ -43,6 +43,7 @@ func IPv6Unspecified() Addr { return Addr{} }
 // IPv4Unspecified returns the IPv4 unspecified address "0.0.0.0".
 func IPv4Unspecified() Addr { return AddrFrom4([4]byte{}) }
 
+// IPv4Broadcast returns the limited IPv4 broadcast address.
 func IPv4Broadcast() Addr { return AddrFrom4([4]byte{255, 255, 255, 255}) }
 
 // AddrFrom4 returns the address of the IPv4 address given by the bytes in addr.
@@ -53,8 +54,7 @@ func AddrFrom4(addr [4]byte) Addr {
 }
 
 // AddrFrom16 returns the IPv6 address given by the bytes in addr.
-// An IPv4-mapped IPv6 address is left as an IPv6 address.
-// (Use [Addr.Unmap] to convert them if needed.)
+// IPv4-mapped IPv6 addresses are represented as IPv4 addresses.
 func AddrFrom16(addr [16]byte) Addr {
 	return Addr{
 		addr: uint128{
@@ -67,6 +67,7 @@ func AddrFrom16(addr [16]byte) Addr {
 // ParseAddr parses s as an IP address, returning the result. The string
 // s can be in dotted decimal ("192.0.2.1"), IPv6 ("2001:db8::68"),
 // or IPv6 with a scoped addressing zone ("fe80::1cc0:3e8c:119f:c2e1%ens18").
+// An explicitly specified zone must be nonempty and is not retained in the returned Addr.
 func ParseAddr(s string) (Addr, error) {
 	for i := 0; i < len(s); i++ {
 		switch s[i] {
@@ -99,6 +100,7 @@ type parseAddrError struct {
 	at  string // optionally, the unparsed portion of in at which the error occurred.
 }
 
+// Error formats an address parsing error and its optional failure location.
 func (err parseAddrError) Error() string {
 	q := strconv.Quote
 	if err.at != "" {
@@ -107,6 +109,7 @@ func (err parseAddrError) Error() string {
 	return "ParseAddr(" + q(err.in) + "): " + err.msg
 }
 
+// parseIPv4Fields parses four decimal octets within in[off:end] into fields.
 func parseIPv4Fields(in string, off, end int, fields []uint8) error {
 	var val, pos int
 	var digLen int // number of digits in current octet
@@ -416,7 +419,7 @@ func (ip Addr) IsLinkLocalMulticast() bool {
 // IANA-allocated 2000::/3 global unicast space, with the exception of the
 // link-local address space. It also returns true even if ip is in the IPv4
 // private address space or IPv6 unique local address space.
-// It returns false for the zero [Addr].
+// It returns false for the zero [Addr], which represents IPv6 unspecified.
 //
 // For reference, see RFC 1122, RFC 4291, and RFC 4632.
 func (ip Addr) IsGlobalUnicast() bool {
@@ -461,15 +464,14 @@ func (ip Addr) IsPrivate() bool {
 // IsUnspecified reports whether ip is an unspecified address, either the IPv4
 // address "0.0.0.0" or the IPv6 address "::".
 //
-// Note that the zero [Addr] is not an unspecified address.
+// The zero [Addr] represents the IPv6 unspecified address.
 func (ip Addr) IsUnspecified() bool {
 	return ip == IPv4Unspecified() || ip == IPv6Unspecified()
 }
 
 // As16 returns the IP address in its 16-byte representation.
 // IPv4 addresses are returned as IPv4-mapped IPv6 addresses.
-// IPv6 addresses with zones are returned without their zone (use the
-// [Addr.Zone] method to get it).
+// IPv6 addresses are returned without a zone.
 // The ip zero value returns all zeroes.
 func (ip Addr) As16() (a16 [16]byte) {
 	binary.BigEndian.PutUint64(a16[:8], ip.addr.hi)
@@ -478,7 +480,7 @@ func (ip Addr) As16() (a16 [16]byte) {
 }
 
 // As4 returns an IPv4 or IPv4-in-IPv6 address in its 4-byte representation.
-// If ip is the zero [Addr] or an IPv6 address, As4 panics.
+// If ip is an IPv6 address, As4 panics.
 // Note that 0.0.0.0 is not the zero Addr.
 func (ip Addr) As4() (a4 [4]byte) {
 	if !ip.Is4() {
@@ -537,7 +539,7 @@ func (p AddrPort) Addr() Addr { return p.ip }
 // Port returns p's port.
 func (p AddrPort) Port() uint16 { return p.port }
 
-// AddrPort is an IP and a port number.
+// AddrInterfacePort is an IP address, interface index, and port number.
 type AddrInterfacePort struct {
 	ip   AddrInterface
 	port uint16
@@ -549,7 +551,7 @@ func AddrInterfacePortFrom(ip AddrInterface, port uint16) AddrInterfacePort {
 	return AddrInterfacePort{ip: ip, port: port}
 }
 
-// Addr returns p's IP address.
+// AddrInterface returns p's IP address and interface index.
 func (p AddrInterfacePort) AddrInterface() AddrInterface { return p.ip }
 
 // Port returns p's port.

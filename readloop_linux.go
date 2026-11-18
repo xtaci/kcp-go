@@ -116,7 +116,7 @@ func (l *Listener) readLoop() {
 	}
 }
 
-// readLoop is the optimized Linux listener read loop, using the recvmmsg syscall.
+// readLoopUnspecified reads packet destinations in batches using recvmmsg.
 func (l *Listener) readLoopUnspecified() {
 	batchConn := newBatchConn(l.conn)
 	if batchConn == nil {

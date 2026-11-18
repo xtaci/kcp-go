@@ -60,6 +60,7 @@ func (c *blockingPacketConn) SetDeadline(time.Time) error      { return nil }
 func (c *blockingPacketConn) SetReadDeadline(time.Time) error  { return nil }
 func (c *blockingPacketConn) SetWriteDeadline(time.Time) error { return nil }
 
+// TestSenderWorkerHandoff verifies that queued work has exactly one worker claim.
 func TestSenderWorkerHandoff(t *testing.T) {
 	for i := range 1000 {
 		s := &UDPSession{
@@ -104,6 +105,7 @@ func TestSenderWorkerHandoff(t *testing.T) {
 	}
 }
 
+// TestCloseWaitsForActiveSenderSend verifies that closing waits for in-flight writes.
 func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	conn := &blockingPacketConn{
 		entered: make(chan struct{}),
@@ -191,6 +193,7 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	}
 }
 
+// TestFinishClosedSenderDrainsQueue verifies that closed sessions discard queued packets.
 func TestFinishClosedSenderDrainsQueue(t *testing.T) {
 	s := &UDPSession{
 		activeCall:    libsync.NewQuit(),

@@ -25,11 +25,11 @@ package kcp
 import (
 	"bytes"
 	"container/heap"
+	crand "crypto/rand"
 	"fmt"
 	"io"
 	"log/slog"
 	"math/rand"
-	crand "crypto/rand"
 	"net"
 	"sync"
 	"testing"
@@ -56,7 +56,8 @@ type lossyTestCase struct {
 	wantLinkDown bool
 }
 
-func netAddrFactory() (net.Addr) {
+// netAddrFactory supplies distinct UDP addresses to the lossy connection tests.
+func netAddrFactory() net.Addr {
 	ip := make(net.IP, net.IPv6len)
 	ip[0] = 0x20
 	ip[1] = 0x01
@@ -69,7 +70,7 @@ func netAddrFactory() (net.Addr) {
 
 	return &net.UDPAddr{
 		IP:   ip,
-		Port: rand.Intn(65535)+1,
+		Port: rand.Intn(65535) + 1,
 	}
 }
 
