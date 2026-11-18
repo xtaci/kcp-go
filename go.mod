@@ -1,12 +1,12 @@
 module github.com/xtaci/kcp-go/v5
 
 require (
+	github.com/emmansun/gmsm v0.45.3
 	github.com/juju/ratelimit v1.0.2
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/pion/transport/v5 v5.1.4
 	github.com/pkg/errors v0.9.1
 	github.com/stretchr/testify v1.12.1
-	github.com/tjfoc/gmsm v1.4.1
 	github.com/xtaci/lossyconn v1.1.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.61.0

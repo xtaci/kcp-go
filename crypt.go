@@ -30,8 +30,7 @@ import (
 	"crypto/subtle"
 	"sync"
 
-	"github.com/tjfoc/gmsm/sm4"
-
+	"github.com/emmansun/gmsm/sm4"
 	"golang.org/x/crypto/blowfish"
 	"golang.org/x/crypto/cast5"
 	"golang.org/x/crypto/pbkdf2"
