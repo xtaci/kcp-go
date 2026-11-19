@@ -157,7 +157,7 @@ type (
 		headerSize                  int                    // the header size additional to a KCP frame
 		ackNoDelay                  bool                   // send ACKs immediately for each incoming packet (testing only)
 		writeDelay                  bool                   // delay kcp.flush() for Write() for bulk transfer
-		dup                         int                    // duplicate UDP packets (testing only)
+		dup                         atomic.Int64           // duplicate UDP packets (testing only)
 
 		// notifications
 		readEvent  chan struct{} // notify Read() can be called without blocking
@@ -690,10 +690,7 @@ func (s *UDPSession) SetACKNoDelay(nodelay bool) {
 //
 // SetDUP duplicates UDP packets sent by KCP.
 func (s *UDPSession) SetDUP(dup int) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	s.dup = dup
+	s.dup.Store(int64(dup))
 }
 
 // SetNoDelay sets the KCP no-delay options.
@@ -899,7 +896,7 @@ func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 		w.txqueue = append(w.txqueue, msg)
 
 		// dup copies for testing if set
-		for i := 0; i < s.dup; i++ {
+		for range int(s.dup.Load()) {
 			bts := defaultBufferPool.Get()[:len(buf)]
 			copy(bts, buf)
 			msg.Buffers = w.append(bts)

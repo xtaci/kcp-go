@@ -95,6 +95,94 @@ func (c *blockingBlockCrypt) Encrypt(dst, src []byte) {
 
 func (c *blockingBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
 
+func TestSenderSetDUP(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		dup  int
+		want int
+	}{
+		{name: "negative", dup: -1, want: 1},
+		{name: "zero", dup: 0, want: 1},
+		{name: "multiple", dup: 3, want: 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &recordingPacketConn{}
+			s := &UDPSession{
+				conn:       conn,
+				remoteAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
+				shutdown:   libsync.NewQuit(),
+			}
+			s.initPlatform()
+			s.SetDUP(tt.dup)
+
+			buf := defaultBufferPool.Get()[:IKCP_OVERHEAD]
+			clear(buf)
+			buf[0] = 42
+			if !s.sender.queue.push(sendRequest{buffer: buf}) {
+				defaultBufferPool.Put(buf)
+				t.Fatal("failed to queue packet")
+			}
+			s.postProcess(&txWorker{})
+
+			if len(conn.packets) != tt.want {
+				t.Fatalf("sent %d packets, want %d", len(conn.packets), tt.want)
+			}
+			for _, packet := range conn.packets {
+				if len(packet) != IKCP_OVERHEAD || packet[0] != 42 {
+					t.Fatalf("unexpected packet: %x", packet)
+				}
+			}
+		})
+	}
+}
+
+func TestSenderConcurrentSetDUP(t *testing.T) {
+	conn := &recordingPacketConn{}
+	s := &UDPSession{
+		conn:       conn,
+		remoteAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
+		shutdown:   libsync.NewQuit(),
+	}
+	s.initPlatform()
+
+	const packets = 512
+	for range packets {
+		buf := defaultBufferPool.Get()[:IKCP_OVERHEAD]
+		if !s.sender.queue.push(sendRequest{buffer: buf}) {
+			defaultBufferPool.Put(buf)
+			t.Fatal("failed to queue packet")
+		}
+	}
+
+	started := make(chan struct{})
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		s.SetDUP(0)
+		close(started)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				s.SetDUP(i % 2)
+			}
+		}
+	}()
+	<-started
+
+	w := &txWorker{}
+	for s.postProcess(w) {
+	}
+	close(stop)
+	<-done
+
+	if got := len(conn.packets); got < packets || got > 2*packets {
+		t.Fatalf("sent %d packets, want between %d and %d", got, packets, 2*packets)
+	}
+}
+
 // TestSenderWorkerHandoff verifies that queued work has exactly one worker claim.
 func TestSenderWorkerHandoff(t *testing.T) {
 	for i := range 1000 {
