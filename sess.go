@@ -1310,9 +1310,9 @@ type (
 		udpPort      uint16         // the local UDP port, if applicable
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
-		sessions   connManager // all sessions accepted by this Listener
-		acceptCh   chan *UDPSession
-		activeCall *libsync.Quit
+		sessions connManager // all sessions accepted by this Listener
+		acceptCh chan *UDPSession
+		shutdown *libsync.Quit // signals closure and tracks active dispatch calls
 
 		// socket error handling
 		readError           error
@@ -1367,10 +1367,10 @@ func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *
 // It decrypts the packet, demultiplexes by remote address,
 // and dispatches to existing sessions or creates new ones.
 func (l *Listener) dispatch(data []byte, laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr) {
-	if !l.activeCall.Add(1) {
+	if !l.shutdown.Add(1) {
 		return
 	}
-	defer l.activeCall.Done()
+	defer l.shutdown.Done()
 
 	switch block := l.block.(type) {
 	case nil:
@@ -1529,7 +1529,7 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 	select {
 	case <-l.acceptDeadline.Done():
 		return nil, errors.WithStack(errTimeout)
-	case <-l.activeCall.Signal():
+	case <-l.shutdown.Signal():
 		return nil, errors.WithStack(io.ErrClosedPipe)
 	case <-l.readDone:
 		return nil, l.readError
@@ -1543,7 +1543,7 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 		return c, nil
 	case <-l.readDone:
 		return nil, l.readError
-	case <-l.activeCall.Signal():
+	case <-l.shutdown.Signal():
 		return nil, errors.WithStack(io.ErrClosedPipe)
 	}
 }
@@ -1568,7 +1568,7 @@ func (l *Listener) SetWriteDeadline(t time.Time) error {
 // Close stops listening on the UDP address and closes the socket if the
 // Listener owns it.
 func (l *Listener) Close() error {
-	if !l.activeCall.Wait() {
+	if !l.shutdown.Wait() {
 		return errors.WithStack(io.ErrClosedPipe)
 	}
 
@@ -1662,7 +1662,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 	l.conn = conn
 	l.ownConn = ownConn
 	l.acceptCh = make(chan *UDPSession, acceptBacklog)
-	l.activeCall = libsync.NewQuit()
+	l.shutdown = libsync.NewQuit()
 	l.dataShards = dataShards
 	l.parityShards = parityShards
 	l.block = block
