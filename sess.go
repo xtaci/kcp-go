@@ -177,10 +177,10 @@ type (
 		// ratelimit buckets
 		bucket atomic.Pointer[ratelimit.Bucket]
 
-		mutex      sync.Mutex
-		activeCall *libsync.Quit
-		writeGate  chan struct{}
-		closeGate  chan struct{}
+		mutex     sync.Mutex    // protects KCP and related session state
+		shutdown  *libsync.Quit // signals session shutdown
+		writeGate chan struct{} // serializes non-empty writes
+		closeGate chan struct{} // serializes closure and signals its completion
 
 		// callbackForOOB is an optional callback for handling received out-of-band (OOB) data.
 		//
@@ -231,7 +231,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.writeGate <- struct{}{}
 	sess.closeGate = make(chan struct{}, 1)
 	sess.closeGate <- struct{}{}
-	sess.activeCall = libsync.NewQuit()
+	sess.shutdown = libsync.NewQuit()
 	sess.readEvent = make(chan struct{}, 1)
 	sess.writeEvent = make(chan struct{}, 1)
 	sess.readDone = make(chan struct{})
@@ -374,7 +374,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		case <-s.readDone:
 			return 0, s.readError
-		case <-s.activeCall.Signal():
+		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -439,7 +439,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		select {
 		case <-s.writeDone:
 			return 0, s.writeError
-		case <-s.activeCall.Signal():
+		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
 			return 0, nil
@@ -458,7 +458,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		case <-s.writeDone:
 			return 0, s.writeError
-		case <-s.activeCall.Signal():
+		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
 		}
@@ -474,7 +474,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		case <-s.writeDone:
 			return 0, s.writeError
-		case <-s.activeCall.Signal():
+		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -518,7 +518,7 @@ func (s *UDPSession) waitWriteGate() error {
 			return errors.WithStack(errTimeout)
 		case <-s.writeDone:
 			return s.writeError
-		case <-s.activeCall.Signal():
+		case <-s.shutdown.Signal():
 			return errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -531,38 +531,27 @@ func (s *UDPSession) releaseWriteGate() {
 
 func (s *UDPSession) isClosed() bool {
 	select {
-	case <-s.activeCall.Signal():
+	case <-s.shutdown.Signal():
 		return true
 	default:
 		return false
 	}
 }
 
-// doClose stops the session and makes a best-effort attempt to send queued packets.
+// doClose stops producers and senders, then discards queued packets.
 func (s *UDPSession) doClose() {
-	s.activeCall.Wait()
+	s.shutdown.Wait()
 
-	// Exclude workers until the final KCP output and all queued packets are sent.
-	s.sender.processMu.Lock()
-	// Wait for any producer that entered before the close signal.
+	// A producer may have checked the close signal while holding this mutex
+	// before shutdown began, and may still enqueue packets. Acquiring the mutex
+	// waits for it to finish. Later producers check the close signal under the
+	// same mutex and cannot enqueue. After active senders finish below, the
+	// queue can be safely discarded.
 	s.mutex.Lock()
 	s.mutex.Unlock()
 
-	w := txWorkers.Get().(*txWorker)
-	for s.postProcess(w) {
-	}
-	s.mutex.Lock()
-	if s.kcp.nocwnd == 0 && s.kcp.cwnd == 0 {
-		// The first flush initializes the congestion window.
-		s.kcp.flush(IKCP_FLUSH_FULL)
-	}
-	s.kcp.flush(IKCP_FLUSH_FULL)
-	s.mutex.Unlock()
-	for s.postProcess(w) {
-	}
-	txWorkers.Put(w)
 	s.sender.activeCall.Wait()
-	s.sender.processMu.Unlock()
+	s.discardSender()
 
 	DefaultSnmp.decreaseCurrEstab()
 	s.callReadNotify()
@@ -581,8 +570,8 @@ func (s *UDPSession) release() error {
 	return nil
 }
 
-// Close makes a best-effort attempt to send queued data, then closes the
-// connection without waiting for acknowledgments.
+// Close discards unsent data and closes the connection without waiting for
+// acknowledgments. It waits for active send processing to finish.
 func (s *UDPSession) Close() error {
 	if s.l != nil {
 		// notify the listener that this session is closed
@@ -837,6 +826,10 @@ func (s *UDPSession) Control(f func(conn net.PacketConn) error) error {
 func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 	bytesToSend := 0
 	for range senderBudget {
+		if s.isClosed() {
+			w.recycle()
+			return false
+		}
 		req, ok := s.sender.queue.pop()
 		if !ok {
 			return false
@@ -938,7 +931,7 @@ func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 // update advances the KCP protocol state.
 func (s *UDPSession) update() {
 	select {
-	case <-s.activeCall.Signal():
+	case <-s.shutdown.Signal():
 	default:
 		s.mutex.Lock()
 		if s.isClosed() {
@@ -1066,7 +1059,7 @@ func (s *UDPSession) SendOOB(data []byte) error {
 	// Enqueue the packet for post-processing.
 	// Performs OOB framing, encryption, and transmission, bypassing FEC and KCP.
 	select {
-	case <-s.activeCall.Signal():
+	case <-s.shutdown.Signal():
 		// Session is closing.
 		defaultBufferPool.Put(buf)
 		return errors.WithStack(io.ErrClosedPipe)
@@ -1855,7 +1848,7 @@ func (s *UDPSession) TryRead(b []byte) (int, error) {
 	select {
 	case <-s.readDone:
 		return 0, s.readError
-	case <-s.activeCall.Signal():
+	case <-s.shutdown.Signal():
 		return 0, errors.WithStack(io.ErrClosedPipe)
 	default:
 		return 0, nil

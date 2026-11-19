@@ -94,13 +94,13 @@ func TestTryReadWithNotify(t *testing.T) {
 
 func TestConcurrentReadersNotifiedForBufferedData(t *testing.T) {
 	s := &UDPSession{
-		activeCall: libsync.NewQuit(),
-		readEvent:  make(chan struct{}, 1),
-		readDone:   make(chan struct{}),
-		kcp:        NewKCP(1, nil),
+		shutdown:  libsync.NewQuit(),
+		readEvent: make(chan struct{}, 1),
+		readDone:  make(chan struct{}),
+		kcp:       NewKCP(1, nil),
 	}
 	s.input.Reset([]byte("ab"))
-	defer s.activeCall.Wait()
+	defer s.shutdown.Wait()
 
 	type result struct {
 		value byte

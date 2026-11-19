@@ -432,7 +432,7 @@ func TestTimeout(t *testing.T) {
 func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	var outputs atomic.Int64
 	s := new(UDPSession)
-	s.activeCall = libsync.NewQuit()
+	s.shutdown = libsync.NewQuit()
 	s.writeDone = make(chan struct{})
 	s.kcp = NewKCP(1, func([]byte, int) { outputs.Add(1) })
 	// A queued segment that any flush would send.
@@ -446,7 +446,7 @@ func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	if got := outputs.Load(); got != before {
 		t.Fatalf("Write(nil) flushed %d times", got-before)
 	}
-	s.activeCall.Wait()
+	s.shutdown.Wait()
 	if _, err := s.Write(nil); err == nil {
 		t.Fatal("Write(nil) on a closed session returned no error")
 	}
@@ -759,7 +759,7 @@ func newRateLimitTestSession(bucket *ratelimit.Bucket) *UDPSession {
 	s := &UDPSession{
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
-		activeCall:    libsync.NewQuit(),
+		shutdown:      libsync.NewQuit(),
 		writeGate:     make(chan struct{}, 1),
 		writeEvent:    make(chan struct{}, 1),
 		writeDone:     make(chan struct{}),

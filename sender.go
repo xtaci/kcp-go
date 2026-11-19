@@ -37,9 +37,8 @@ const senderBudget = 4 * maxBatchSize
 
 type sender struct {
 	running    atomic.Bool   // true if a worker is processing this session
-	activeCall *libsync.Quit // active sendTx calls, including the current worker
+	activeCall *libsync.Quit // active postProcess calls
 	queue      sendQueue     // packets waiting for postProcess
-	processMu  sync.Mutex    // serializes post-processing with the final close drain
 }
 
 // senderQueue holds the sessions with packets waiting for postProcess. A fixed
@@ -89,15 +88,12 @@ var txWorkers = sync.Pool{New: func() any {
 	}
 }}
 
-// sendTx performs the platform-specific send for a completed batch, emits a
-// trace record when enabled, and recycles the batch buffers. activeCall keeps
-// Close from returning while a send is in progress and rejects later sends.
-func (s *UDPSession) sendTx(w *txWorker, bytesToSend int) bool {
-	if !s.sender.activeCall.Add(1) {
+// sendTx sends a batch from an active postProcess call and recycles its buffers.
+func (s *UDPSession) sendTx(w *txWorker, bytesToSend int) {
+	if s.isClosed() {
 		w.recycle()
-		return false
+		return
 	}
-	defer s.sender.activeCall.Done()
 
 	s.tx(w.txqueue)
 	if kcpTrace {
@@ -106,13 +102,12 @@ func (s *UDPSession) sendTx(w *txWorker, bytesToSend int) bool {
 		s.mutex.Unlock()
 	}
 	w.recycle()
-	return true
 }
 
 // kickSender schedules s after its caller enqueues a packet. The atomic
 // claim prevents concurrent producers from queueing the same session twice.
 func (s *UDPSession) kickSender() {
-	if s.claimSender() {
+	if !s.isClosed() && s.claimSender() {
 		senderEnqueue(s)
 	}
 }
@@ -124,14 +119,25 @@ func (s *UDPSession) claimSender() bool {
 
 // finishSender relinquishes the current worker claim. If the session is
 // still open and packets arrived during processing, it claims the session
-// again so the caller can enqueue another worker pass. Close drains the queue
-// itself after excluding workers.
+// again so the caller can enqueue another worker pass. Close discards the queue
+// after waiting for active workers.
 func (s *UDPSession) finishSender() bool {
 	s.sender.running.Store(false)
 	if s.isClosed() {
 		return false
 	}
 	return s.sender.queue.len() > 0 && s.claimSender()
+}
+
+// discardSender returns queued packet buffers after producers and workers stop.
+func (s *UDPSession) discardSender() {
+	for {
+		req, ok := s.sender.queue.pop()
+		if !ok {
+			return
+		}
+		defaultBufferPool.Put(req.buffer)
+	}
 }
 
 // senderEnqueue asenderends a claimed session to the shared worker queue and wakes one
@@ -181,16 +187,14 @@ func sendWorker() {
 		}
 		senderQueue.mutex.Unlock()
 
-		s.sender.processMu.Lock()
-		if s.isClosed() {
+		if s.isClosed() || !s.sender.activeCall.Add(1) {
 			s.finishSender()
-			s.sender.processMu.Unlock()
 			continue
 		}
 
 		more := s.postProcess(w)
-		s.sender.processMu.Unlock()
-		if more {
+		s.sender.activeCall.Done()
+		if more && !s.isClosed() {
 			senderEnqueue(s)
 			continue
 		}

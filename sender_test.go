@@ -24,7 +24,6 @@ package kcp
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"io"
 	"net"
@@ -35,7 +34,6 @@ import (
 
 	"github.com/pion/transport/v5/deadline"
 	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
-	"golang.org/x/net/ipv4"
 )
 
 type blockingPacketConn struct {
@@ -101,7 +99,7 @@ func (c *blockingBlockCrypt) Decrypt(dst, src []byte) { copy(dst, src) }
 func TestSenderWorkerHandoff(t *testing.T) {
 	for i := range 1000 {
 		s := &UDPSession{
-			activeCall:    libsync.NewQuit(),
+			shutdown:      libsync.NewQuit(),
 			readDeadline:  deadline.New(),
 			writeDeadline: deadline.New(),
 			sender: sender{
@@ -150,7 +148,7 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	}
 	s := &UDPSession{
 		conn:          conn,
-		activeCall:    libsync.NewQuit(),
+		shutdown:      libsync.NewQuit(),
 		kcp:           NewKCP(1, nil),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
@@ -160,29 +158,19 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 		closeGate: make(chan struct{}, 1),
 	}
 	s.closeGate <- struct{}{}
-	w := &txWorker{
-		txqueue: []ipv4.Message{{
-			Buffers: [][]byte{defaultBufferPool.Get()[:1]},
-			Addr:    conn.LocalAddr(),
-		}},
-	}
-	sendDone := make(chan struct{})
-	go func() {
-		s.sendTx(w, 1)
-		close(sendDone)
-	}()
+	s.output(make([]byte, IKCP_OVERHEAD), IKCP_OVERHEAD)
 
 	select {
 	case <-conn.entered:
 	case <-time.After(time.Second):
 		close(conn.release)
-		t.Fatal("sendTx did not start writing")
+		t.Fatal("sender did not start writing")
 	}
 
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- s.Close() }()
 	select {
-	case <-s.activeCall.Signal():
+	case <-s.shutdown.Signal():
 	case <-time.After(time.Second):
 		close(conn.release)
 		t.Fatal("Close did not close the session")
@@ -204,11 +192,6 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	}
 
 	close(conn.release)
-	select {
-	case <-sendDone:
-	case <-time.After(time.Second):
-		t.Fatal("active send did not finish")
-	}
 	if err := <-closeDone; err != nil {
 		t.Fatal(err)
 	}
@@ -216,24 +199,19 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 		t.Fatalf("concurrent Close returned %v, want ErrClosedPipe", err)
 	}
 
-	afterClose := &txWorker{
-		txqueue: []ipv4.Message{{
-			Buffers: [][]byte{defaultBufferPool.Get()[:1]},
-			Addr:    conn.LocalAddr(),
-		}},
-	}
-	if s.sendTx(afterClose, 1) {
-		t.Fatal("sendTx succeeded after Close")
+	if s.sender.activeCall.Add(1) {
+		s.sender.activeCall.Done()
+		t.Fatal("sender admitted work after Close")
 	}
 	if got := conn.writes.Load(); got != 1 {
 		t.Fatalf("got %d writes, want exactly 1", got)
 	}
 }
 
-// TestFinishClosedSenderLeavesQueue verifies that Close owns the final drain.
+// TestFinishClosedSenderLeavesQueue verifies that Close owns queue cleanup.
 func TestFinishClosedSenderLeavesQueue(t *testing.T) {
 	s := &UDPSession{
-		activeCall:    libsync.NewQuit(),
+		shutdown:      libsync.NewQuit(),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
 		sender: sender{
@@ -241,7 +219,7 @@ func TestFinishClosedSenderLeavesQueue(t *testing.T) {
 		},
 	}
 
-	s.activeCall.Wait()
+	s.shutdown.Wait()
 	s.sender.running.Store(true)
 	if !s.sender.queue.push(sendRequest{buffer: defaultBufferPool.Get()}) {
 		t.Fatal("failed to queue packet")
@@ -257,12 +235,12 @@ func TestFinishClosedSenderLeavesQueue(t *testing.T) {
 	defaultBufferPool.Put(req.buffer)
 }
 
-func TestCloseFlushesDelayedAndQueuedPackets(t *testing.T) {
+func TestCloseDiscardsDelayedAndQueuedPackets(t *testing.T) {
 	conn := &recordingPacketConn{}
 	s := &UDPSession{
 		conn:          conn,
 		remoteAddr:    &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
-		activeCall:    libsync.NewQuit(),
+		shutdown:      libsync.NewQuit(),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
 		writeDone:     make(chan struct{}),
@@ -277,55 +255,32 @@ func TestCloseFlushesDelayedAndQueuedPackets(t *testing.T) {
 	s.initPlatform()
 	DefaultSnmp.increaseCurrEstab()
 
-	// Keep the worker from consuming the full backlog before Close starts.
-	s.sender.processMu.Lock()
-	payload := []byte("delayed data")
-	if _, err := s.Write(payload); err != nil {
-		s.sender.processMu.Unlock()
+	if _, err := s.Write([]byte("delayed data")); err != nil {
 		t.Fatal(err)
 	}
 	for range devBacklog {
-		s.output(make([]byte, IKCP_OVERHEAD), IKCP_OVERHEAD)
-	}
-	if got := s.sender.queue.len(); got != devBacklog {
-		s.sender.processMu.Unlock()
-		t.Fatalf("queued %d packets, want %d", got, devBacklog)
-	}
-
-	done := make(chan error, 1)
-	go func() { done <- s.Close() }()
-	select {
-	case <-s.activeCall.Signal():
-	case <-time.After(time.Second):
-		s.sender.processMu.Unlock()
-		t.Fatal("Close did not start")
-	}
-	s.sender.processMu.Unlock()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
+		if !s.sender.queue.push(sendRequest{buffer: defaultBufferPool.Get()[:IKCP_OVERHEAD]}) {
+			t.Fatal("failed to fill the send queue")
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not finish")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
-	if got := len(conn.packets); got != devBacklog+1 {
-		t.Fatalf("sent %d packets, want %d queued packets and one final flush", got, devBacklog)
+	if got := len(conn.packets); got != 0 {
+		t.Fatalf("Close sent %d queued packets", got)
 	}
-	last := conn.packets[len(conn.packets)-1]
-	if len(last) < IKCP_OVERHEAD || last[4] != IKCP_CMD_PUSH || !bytes.Equal(last[IKCP_OVERHEAD:], payload) {
-		t.Fatalf("last packet does not contain delayed data: %x", last)
+	if got := s.sender.queue.len(); got != 0 {
+		t.Fatalf("Close retained %d queued packets", got)
 	}
 }
 
-func TestCloseSendsPacketAlreadyBeingProcessed(t *testing.T) {
+func TestCloseWaitsForPacketBeingProcessed(t *testing.T) {
 	conn := &recordingPacketConn{}
 	block := &blockingBlockCrypt{entered: make(chan struct{}), release: make(chan struct{})}
-	s, err := NewConn3(1, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, block, 0, 0, conn)
+	s, err := NewConn3(1, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, block, 2, 1, conn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -338,14 +293,23 @@ func TestCloseSendsPacketAlreadyBeingProcessed(t *testing.T) {
 		close(block.release)
 		t.Fatal("sender did not start processing")
 	}
+	s.mutex.Lock()
+	s.output(make([]byte, IKCP_OVERHEAD), IKCP_OVERHEAD)
+	s.mutex.Unlock()
 
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
 	select {
-	case <-s.activeCall.Signal():
+	case <-s.shutdown.Signal():
 	case <-time.After(time.Second):
 		close(block.release)
 		t.Fatal("Close did not start")
+	}
+	select {
+	case err := <-done:
+		close(block.release)
+		t.Fatalf("Close returned before processing finished: %v", err)
+	case <-time.After(20 * time.Millisecond):
 	}
 	close(block.release)
 	select {
@@ -359,55 +323,11 @@ func TestCloseSendsPacketAlreadyBeingProcessed(t *testing.T) {
 
 	conn.mutex.Lock()
 	defer conn.mutex.Unlock()
-	if got := len(conn.packets); got != 1 {
-		t.Fatalf("sent %d packets, want the packet being processed", got)
+	if got := len(conn.packets); got != 0 {
+		t.Fatalf("Close sent %d packets still being processed", got)
 	}
-}
-
-func TestCloseEncodesQueuedFEC(t *testing.T) {
-	conn := &recordingPacketConn{}
-	s, err := NewConn3(1, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, nil, 2, 1, conn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s.sender.processMu.Lock()
-	s.mutex.Lock()
-	for range 2 {
-		s.output(make([]byte, IKCP_OVERHEAD), IKCP_OVERHEAD)
-	}
-	s.mutex.Unlock()
-
-	done := make(chan error, 1)
-	go func() { done <- s.Close() }()
-	select {
-	case <-s.activeCall.Signal():
-	case <-time.After(time.Second):
-		s.sender.processMu.Unlock()
-		t.Fatal("Close did not start")
-	}
-	s.sender.processMu.Unlock()
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("Close did not finish")
-	}
-
-	conn.mutex.Lock()
-	defer conn.mutex.Unlock()
-	if len(conn.packets) != 3 {
-		t.Fatalf("sent %d packets, want two data packets and one parity packet", len(conn.packets))
-	}
-	for i, packet := range conn.packets {
-		want := uint16(typeData)
-		if i == 2 {
-			want = typeParity
-		}
-		if len(packet) < fecHeaderSizePlus2 || binary.LittleEndian.Uint16(packet[4:6]) != want {
-			t.Fatalf("packet %d has invalid FEC header: %x", i, packet)
-		}
+	if got := s.sender.queue.len(); got != 0 {
+		t.Fatalf("Close retained %d queued packets", got)
 	}
 }
 
@@ -427,7 +347,7 @@ func TestCloseRejectsWriterWaitingForSessionLock(t *testing.T) {
 		done <- ok
 	}()
 	<-started
-	s.activeCall.Wait()
+	s.shutdown.Wait()
 	s.mutex.Unlock()
 	if <-done {
 		t.Fatal("write succeeded after the close signal")
