@@ -154,8 +154,8 @@ func (l *Listener) readLoopUnspecifiedGeneric() {
 //
 // The pusher must not call fn concurrently, just as one goroutine reads a
 // conn. fn may modify b but must not keep it after returning. A non-nil err
-// ends reads. Closing a client session, or a Listener once its sessions have
-// closed, sets a nil fn, which must remove the receiver.
+// ends reads. Closing a client session or Listener sets a nil fn, which must
+// remove the receiver. Closing a Listener also closes its accepted sessions.
 // When err is nil, raddr must be a non-nil *net.UDPAddr; packets with nil or
 // non-UDP source addresses are ignored.
 //

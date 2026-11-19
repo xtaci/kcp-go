@@ -888,6 +888,9 @@ func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 		var msg ipv4.Message
 		msg.Addr = s.remoteAddr
 		if s.cmsg != nil {
+			// Ask the socket to send the reply from the local destination
+			// address (and interface, where supported) that received this
+			// packet. This is unrelated to UDPSession's SendOOB payload.
 			msg.OOB = *s.cmsg
 		}
 

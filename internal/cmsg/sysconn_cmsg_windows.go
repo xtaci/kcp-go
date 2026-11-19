@@ -24,6 +24,10 @@ func cmsgAlignOf(salen int) int {
 
 // socketControlMessageHeaderAndData separates a control-message header from its payload.
 func socketControlMessageHeaderAndData(b []byte) (*windows.WSACMSGHDR, []byte, error) {
+	if len(b) < sizeofWSACMSGHDR {
+		return nil, nil, windows.WSAEINVAL
+	}
+
 	h := (*windows.WSACMSGHDR)(unsafe.Pointer(&b[0]))
 	if h.Len < uintptr(sizeofWSACMSGHDR) || uint64(h.Len) > uint64(len(b)) {
 		return nil, nil, windows.WSAEINVAL
