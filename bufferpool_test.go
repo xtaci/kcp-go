@@ -22,10 +22,13 @@
 
 package kcp
 
-import "testing"
+import (
+	"sync"
+	"testing"
+)
 
 func TestBufferPoolGetSize(t *testing.T) {
-	bp := newBufferPool(maxPacketSize)
+	bp := newPacketBufferPool()
 
 	buf := bp.Get()
 
@@ -43,7 +46,7 @@ func TestBufferPoolGetSize(t *testing.T) {
 }
 
 func TestBufferPoolPutResetsLength(t *testing.T) {
-	bp := newBufferPool(maxPacketSize)
+	bp := newPacketBufferPool()
 
 	buf := bp.Get()[:1]
 	if err := bp.Put(buf); err != nil {
@@ -60,7 +63,7 @@ func TestBufferPoolPutResetsLength(t *testing.T) {
 }
 
 func TestBufferPoolPutWrongSizeIgnored(t *testing.T) {
-	bp := newBufferPool(maxPacketSize)
+	bp := newPacketBufferPool()
 
 	// Make a buffer with wrong capacity
 	wrongBuf := make([]byte, 100)
@@ -77,7 +80,7 @@ func TestBufferPoolPutWrongSizeIgnored(t *testing.T) {
 }
 
 func TestBufferPoolPutReturnsError(t *testing.T) {
-	bp := newBufferPool(maxPacketSize)
+	bp := newPacketBufferPool()
 
 	// 1. Correct size
 	buf := make([]byte, maxPacketSize)
@@ -90,4 +93,56 @@ func TestBufferPoolPutReturnsError(t *testing.T) {
 	if err := bp.Put(wrongBuf); err == nil {
 		t.Fatalf("expected error for wrong size, got nil")
 	}
+}
+
+// BenchmarkPacketBufferPoolGetPut compares the production *[maxPacketSize]byte
+// pool against a naive []byte pool to demonstrate the slice-header boxing
+// allocation avoided on sync.Pool.Put.
+func BenchmarkPacketBufferPoolGetPut(b *testing.B) {
+	runPair := func(b *testing.B, get func() []byte, put func([]byte)) {
+		b.Run("Serial", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				buf := get()[:1]
+				buf[0] = 1
+				put(buf)
+			}
+		})
+		b.Run("Parallel", func(b *testing.B) {
+			b.ReportAllocs()
+			b.RunParallel(func(pb *testing.PB) {
+				for pb.Next() {
+					buf := get()[:1]
+					buf[0] = 1
+					put(buf)
+				}
+			})
+		})
+	}
+
+	b.Run("ArrayPointer", func(b *testing.B) {
+		bp := newPacketBufferPool()
+		runPair(b, bp.Get, func(buf []byte) {
+			_ = bp.Put(buf)
+		})
+	})
+
+	b.Run("Slice", func(b *testing.B) {
+		// Local baseline only; not for production use.
+		var sp = sync.Pool{
+			New: func() any {
+				return make([]byte, maxPacketSize)
+			},
+		}
+		runPair(b,
+			func() []byte {
+				return sp.Get().([]byte)
+			},
+			func(buf []byte) {
+				if cap(buf) == maxPacketSize {
+					sp.Put(buf[:maxPacketSize])
+				}
+			},
+		)
+	})
 }
