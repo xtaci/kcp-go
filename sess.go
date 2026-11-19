@@ -50,6 +50,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"io"
 	"net"
@@ -1649,10 +1650,18 @@ func ListenWithOptions(laddr string, block BlockCrypt, dataShards, parityShards 
 		return nil, errors.WithStack(err)
 	}
 
-	return serveConn(block, dataShards, parityShards, conn, true)
+	listener, err := serveConn(block, dataShards, parityShards, conn, true)
+	if err != nil {
+		if closeErr := conn.Close(); closeErr != nil {
+			return nil, fmt.Errorf("%w; close connection: %w", err, closeErr)
+		}
+		return nil, err
+	}
+	return listener, nil
 }
 
 // ServeConn serves the KCP protocol over a single packet connection.
+// Packets with a source address other than a non-nil *net.UDPAddr are ignored.
 func ServeConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*Listener, error) {
 	return serveConn(block, dataShards, parityShards, conn, false)
 }
@@ -1761,6 +1770,8 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 }
 
 // NewConn4 establishes a session that speaks KCP over a packet connection.
+// raddr must be a non-nil *net.UDPAddr. Packets with a nil or non-UDP source
+// address are ignored.
 // TODO: use *net.UDPAddr in future.
 func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, ownConn bool, conn net.PacketConn) (*UDPSession, error) {
 	remoteAddr, ok := raddr.(*net.UDPAddr)
@@ -1775,6 +1786,8 @@ func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parit
 }
 
 // NewConn3 establishes a session that speaks KCP over a packet connection.
+// raddr must be a non-nil *net.UDPAddr. Packets with a nil or non-UDP source
+// address are ignored.
 // TODO: Remove this function in the future, as it is redundant with NewConn4.
 func NewConn3(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	remoteAddr, ok := raddr.(*net.UDPAddr)
@@ -1789,6 +1802,8 @@ func NewConn3(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parit
 }
 
 // NewConn2 establishes a session that speaks KCP over a packet connection.
+// raddr must be a non-nil *net.UDPAddr. Packets with a nil or non-UDP source
+// address are ignored.
 // TODO: use *net.UDPAddr in future.
 func NewConn2(raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	remoteAddr, ok := raddr.(*net.UDPAddr)
@@ -1809,6 +1824,7 @@ func NewConn2(raddr net.Addr, block BlockCrypt, dataShards, parityShards int, co
 }
 
 // NewConn establishes a session that speaks KCP over a packet connection.
+// Packets with a source address other than a non-nil *net.UDPAddr are ignored.
 func NewConn(raddr string, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
 	remoteAddr, err := net.ResolveUDPAddr("udp", raddr)
 	if err != nil {

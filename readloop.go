@@ -156,6 +156,8 @@ func (l *Listener) readLoopUnspecifiedGeneric() {
 // conn. fn may modify b but must not keep it after returning. A non-nil err
 // ends reads. Closing a client session, or a Listener once its sessions have
 // closed, sets a nil fn, which must remove the receiver.
+// When err is nil, raddr must be a non-nil *net.UDPAddr; packets with nil or
+// non-UDP source addresses are ignored.
 //
 // SetPacketReceiver is called with internal locks held. Implementations must
 // not call back into kcp from inside SetPacketReceiver — no calls into the
