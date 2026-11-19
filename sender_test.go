@@ -331,7 +331,7 @@ func TestCloseDiscardsDelayedAndQueuedPackets(t *testing.T) {
 		shutdown:      libsync.NewQuit(),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
-		writeDone:     make(chan struct{}),
+		writeErrorCh:  make(chan struct{}),
 		writeGate:     make(chan struct{}, 1),
 		closeGate:     make(chan struct{}, 1),
 		writeDelay:    true,

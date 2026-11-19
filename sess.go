@@ -164,9 +164,9 @@ type (
 		writeEvent chan struct{} // notify Write() can be called without blocking
 
 		// socket error handling
-		readError, writeError       error
-		readDone, writeDone         chan struct{}
-		readDoneOnce, writeDoneOnce sync.Once
+		readError, writeError         error
+		readErrorCh, writeErrorCh     chan struct{}
+		readErrorOnce, writeErrorOnce sync.Once
 
 		// outgoing packet sender
 		sender sender
@@ -234,8 +234,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.shutdown = libsync.NewQuit()
 	sess.readEvent = make(chan struct{}, 1)
 	sess.writeEvent = make(chan struct{}, 1)
-	sess.readDone = make(chan struct{})
-	sess.writeDone = make(chan struct{})
+	sess.readErrorCh = make(chan struct{})
+	sess.writeErrorCh = make(chan struct{})
 	sess.sender.postProcessCalls = libsync.NewQuit()
 	sess.laddr = laddr
 	sess.localAddr = localAddr
@@ -372,7 +372,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 		case <-s.readEvent:
 		case <-s.readDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
-		case <-s.readDone:
+		case <-s.readErrorCh:
 			return 0, s.readError
 		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
@@ -437,7 +437,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	// flush, which callers that probe with Write(nil) paid on every frame.
 	if buffersEmpty(v) {
 		select {
-		case <-s.writeDone:
+		case <-s.writeErrorCh:
 			return 0, s.writeError
 		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
@@ -456,7 +456,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		select {
 		case <-s.writeDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
-		case <-s.writeDone:
+		case <-s.writeErrorCh:
 			return 0, s.writeError
 		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
@@ -472,7 +472,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		case <-s.writeEvent:
 		case <-s.writeDeadline.Done():
 			return 0, errors.WithStack(errTimeout)
-		case <-s.writeDone:
+		case <-s.writeErrorCh:
 			return 0, s.writeError
 		case <-s.shutdown.Signal():
 			return 0, errors.WithStack(io.ErrClosedPipe)
@@ -516,7 +516,7 @@ func (s *UDPSession) waitWriteGate() error {
 			return nil
 		case <-s.writeDeadline.Done():
 			return errors.WithStack(errTimeout)
-		case <-s.writeDone:
+		case <-s.writeErrorCh:
 			return s.writeError
 		case <-s.shutdown.Signal():
 			return errors.WithStack(io.ErrClosedPipe)
@@ -1090,17 +1090,17 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) notifyReadError(err error) {
-	s.readDoneOnce.Do(func() {
+	s.readErrorOnce.Do(func() {
 		s.readError = err
-		close(s.readDone)
+		close(s.readErrorCh)
 	})
 	s.callReadNotify()
 }
 
 func (s *UDPSession) notifyWriteError(err error) {
-	s.writeDoneOnce.Do(func() {
+	s.writeErrorOnce.Do(func() {
 		s.writeError = err
-		close(s.writeDone)
+		close(s.writeErrorCh)
 	})
 }
 
@@ -1843,7 +1843,7 @@ func (s *UDPSession) TryRead(b []byte) (int, error) {
 	}
 
 	select {
-	case <-s.readDone:
+	case <-s.readErrorCh:
 		return 0, s.readError
 	case <-s.shutdown.Signal():
 		return 0, errors.WithStack(io.ErrClosedPipe)

@@ -94,10 +94,10 @@ func TestTryReadWithNotify(t *testing.T) {
 
 func TestConcurrentReadersNotifiedForBufferedData(t *testing.T) {
 	s := &UDPSession{
-		shutdown:  libsync.NewQuit(),
-		readEvent: make(chan struct{}, 1),
-		readDone:  make(chan struct{}),
-		kcp:       NewKCP(1, nil),
+		shutdown:    libsync.NewQuit(),
+		readEvent:   make(chan struct{}, 1),
+		readErrorCh: make(chan struct{}),
+		kcp:         NewKCP(1, nil),
 	}
 	s.input.Reset([]byte("ab"))
 	defer s.shutdown.Wait()
