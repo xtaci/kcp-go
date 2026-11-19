@@ -1,6 +1,7 @@
 // The MIT License (MIT)
 //
 // Copyright (c) 2015 xtaci
+// Copyright (c) 2026 Coia Prant
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,31 +27,52 @@ import (
 	"net"
 
 	"github.com/pkg/errors"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 )
 
-func sameUDPAddr(a, b *net.UDPAddr) bool {
+// isUnicast rejects unspecified, multicast, and limited broadcast destinations.
+func isUnicast(addr libnetip.Addr) bool {
+	if addr.IsUnspecified() {
+		return false
+	}
+
+	if addr.IsMulticast() {
+		return false
+	}
+
+	if addr == libnetip.IPv4Broadcast() {
+		return false
+	}
+
+	return true
+}
+
+// isSameUDPAddr compares UDP addresses, including their IPv6 zones.
+func isSameUDPAddr(a, b *net.UDPAddr) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if a.Port != b.Port || a.Zone != b.Zone {
+
+	if a.Port != b.Port {
 		return false
 	}
-	return a.IP.Equal(b.IP)
+
+	if !a.IP.Equal(b.IP) {
+		return false
+	}
+
+	if a.Zone != b.Zone {
+		return false
+	}
+
+	return true
 }
 
-// defaultReadLoop is the standard procedure for reading from a connection
-func (s *UDPSession) defaultReadLoop() {
+// readLoopGeneric is the standard procedure for reading from a connection
+func (s *UDPSession) readLoopGeneric() {
 	buf := make([]byte, maxPacketSize)
 
-	var src *net.UDPAddr
-	var srcStr string
-	if s.remote != nil {
-		if udp, ok := s.remote.(*net.UDPAddr); ok {
-			src = udp
-		} else {
-			srcStr = s.remote.String()
-		}
-	}
 	for {
 		n, addr, err := s.conn.ReadFrom(buf)
 		if err != nil {
@@ -62,39 +84,65 @@ func (s *UDPSession) defaultReadLoop() {
 			return
 		}
 
+		remoteAddr, ok := addr.(*net.UDPAddr)
+		if !ok || remoteAddr == nil {
+			continue
+		}
+
 		// Ensure the packet comes from the same source.
-		if src == nil && srcStr == "" { // set source address if nil
-			if udp, ok := addr.(*net.UDPAddr); ok {
-				src = udp
-			} else {
-				srcStr = addr.String()
-			}
-		} else if src != nil {
-			udp, ok := addr.(*net.UDPAddr)
-			if !ok || !sameUDPAddr(src, udp) {
-				DefaultSnmp.increaseInErrs()
-				continue
-			}
-		} else if addr.String() != srcStr {
+		if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
 			DefaultSnmp.increaseInErrs()
 			continue
 		}
 
-		s.packetInput(buf[:n])
+		s.dispatch(buf[:n])
 	}
 }
 
-// defaultReadLoop is the standard procedure for reading and accepting connections on a listener
-func (l *Listener) defaultMonitor() {
+// readLoopGeneric is the standard procedure for reading and accepting connections on a listener
+func (l *Listener) readLoopGeneric() {
 	buf := make([]byte, maxPacketSize)
 	for {
-		n, from, err := l.conn.ReadFrom(buf)
+		n, raddr, err := l.conn.ReadFrom(buf)
 		if err != nil {
 			l.notifyReadError(errors.WithStack(err))
 			return
 		}
 
-		l.packetInput(buf[:n], from)
+		remoteAddr, ok := raddr.(*net.UDPAddr)
+		if !ok || remoteAddr == nil {
+			continue
+		}
+
+		l.dispatch(buf[:n], libnetip.AddrInterface{}, nil, remoteAddr)
+	}
+}
+
+// readLoopUnspecifiedGeneric receives packets and their local destination addresses.
+func (l *Listener) readLoopUnspecifiedGeneric() {
+	udpConn := l.conn.(udpConn)
+
+	buf := make([]byte, maxPacketSize)
+	oob := make([]byte, cmsgPacketSize)
+	for {
+		n, nn, _, remoteAddr, err := udpConn.ReadMsgUDP(buf, oob)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		// The destination is required to select the reply source and session key.
+		laddr, err := cmsg.ParseControlMessage(oob[:nn])
+		if err != nil {
+			continue
+		}
+
+		if !isUnicast(laddr.Addr()) {
+			continue
+		}
+
+		localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+		l.dispatch(buf[:n], laddr, localAddr, remoteAddr)
 	}
 }
 
@@ -106,14 +154,21 @@ func (l *Listener) defaultMonitor() {
 //
 // The pusher must not call fn concurrently, just as one goroutine reads a
 // conn. fn may modify b but must not keep it after returning. A non-nil err
-// ends reads. Closing a client session, or a Listener once its sessions have
-// closed, sets a nil fn, which must remove the receiver.
+// ends reads. Closing a client session or Listener sets a nil fn, which must
+// remove the receiver. Closing a Listener also closes its accepted sessions.
+// When err is nil, raddr must be a non-nil *net.UDPAddr; packets with nil or
+// non-UDP source addresses are ignored.
+//
+// SetPacketReceiver is called with internal locks held. Implementations must
+// not call back into kcp from inside SetPacketReceiver — no calls into the
+// owning Listener or session, and no acquisition of any lock reachable from
+// them. Doing so will deadlock.
 type PacketPusher interface {
-	SetPacketReceiver(fn func(b []byte, addr net.Addr, err error))
+	SetPacketReceiver(fn func(b []byte, raddr net.Addr, err error))
 }
 
 // pushedPacket is the PacketPusher callback of a client session.
-func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
+func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 	if err != nil {
 		s.notifyReadError(errors.WithStack(err))
 		return
@@ -121,32 +176,32 @@ func (s *UDPSession) pushedPacket(b []byte, addr net.Addr, err error) {
 	if s.isClosed() {
 		return
 	}
-	// Without a remote address, pin the peer to the first packet as
-	// defaultReadLoop does.
-	src := s.remote
-	if src == nil {
-		if s.pushedFrom == nil {
-			s.pushedFrom = addr
-		}
-		src = s.pushedFrom
+
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok || remoteAddr == nil {
+		return
 	}
-	if udp, ok := src.(*net.UDPAddr); ok {
-		if a, ok := addr.(*net.UDPAddr); !ok || !sameUDPAddr(udp, a) {
-			DefaultSnmp.increaseInErrs()
-			return
-		}
-	} else if addr.String() != src.String() {
+
+	// Ensure the packet comes from the same source.
+	if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
 		DefaultSnmp.increaseInErrs()
 		return
 	}
-	s.packetInput(b)
+
+	s.dispatch(b)
 }
 
 // pushedPacket is the PacketPusher callback of a Listener.
-func (l *Listener) pushedPacket(b []byte, addr net.Addr, err error) {
+func (l *Listener) pushedPacket(b []byte, raddr net.Addr, err error) {
 	if err != nil {
 		l.notifyReadError(errors.WithStack(err))
 		return
 	}
-	l.packetInput(b, addr)
+
+	remoteAddr, ok := raddr.(*net.UDPAddr)
+	if !ok || remoteAddr == nil {
+		return
+	}
+
+	l.dispatch(b, libnetip.AddrInterface{}, nil, remoteAddr)
 }

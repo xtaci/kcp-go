@@ -55,7 +55,7 @@ func TestSendQueue(t *testing.T) {
 	if r, _ := sq.pop(); r.buffer[0] != 0xff {
 		t.Fatalf("last pop: got %v", r.buffer)
 	}
-	if sq.len() != 0 || sq.q != nil {
-		t.Fatalf("drained queue keeps len %d cap %d", sq.len(), cap(sq.q))
+	if sq.len() != 0 || sq.queue != nil {
+		t.Fatalf("drained queue keeps len %d cap %d", sq.len(), cap(sq.queue))
 	}
 }

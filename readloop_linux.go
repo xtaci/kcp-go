@@ -28,6 +28,8 @@ import (
 	"net"
 
 	"github.com/pkg/errors"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 	"golang.org/x/net/ipv4"
 )
 
@@ -38,22 +40,11 @@ const (
 // readLoop is the optimized Linux read loop, using the recvmmsg syscall to
 // receive multiple UDP packets in a single system call.
 func (s *UDPSession) readLoop() {
-	// default version
 	if s.platform.batchConn == nil {
-		s.defaultReadLoop()
+		s.readLoopGeneric()
 		return
 	}
 
-	// x/net version
-	var src *net.UDPAddr
-	var srcStr string
-	if s.remote != nil {
-		if udp, ok := s.remote.(*net.UDPAddr); ok {
-			src = udp
-		} else {
-			srcStr = s.remote.String()
-		}
-	}
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
@@ -73,41 +64,33 @@ func (s *UDPSession) readLoop() {
 		for i := range count {
 			msg := &msgs[i]
 
+			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
+			if !ok || remoteAddr == nil {
+				continue
+			}
+
 			// Ensure the packet comes from the same source.
-			if src == nil && srcStr == "" { // set source address if nil
-				if udp, ok := msg.Addr.(*net.UDPAddr); ok {
-					src = udp
-				} else {
-					srcStr = msg.Addr.String()
-				}
-			} else if src != nil {
-				udp, ok := msg.Addr.(*net.UDPAddr)
-				if !ok || !sameUDPAddr(src, udp) {
-					DefaultSnmp.increaseInErrs()
-					continue
-				}
-			} else if msg.Addr.String() != srcStr {
+			if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
 				DefaultSnmp.increaseInErrs()
 				continue
 			}
 
 			// The source and packet size have been validated.
-			s.packetInput(msg.Buffers[0][:msg.N])
+			s.dispatch(msg.Buffers[0][:msg.N])
 		}
 	}
 }
 
-// monitor is the optimized Linux listener loop, using the recvmmsg syscall.
-func (l *Listener) monitor() {
+// readLoop is the optimized Linux read loop, using the recvmmsg syscall to
+// receive multiple UDP packets in a single system call.
+func (l *Listener) readLoop() {
 	batchConn := newBatchConn(l.conn)
 
-	// default version
 	if batchConn == nil {
-		l.defaultMonitor()
+		l.readLoopGeneric()
 		return
 	}
 
-	// x/net version
 	msgs := make([]ipv4.Message, batchSize)
 	for k := range msgs {
 		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
@@ -122,7 +105,57 @@ func (l *Listener) monitor() {
 
 		for i := range count {
 			msg := &msgs[i]
-			l.packetInput(msg.Buffers[0][:msg.N], msg.Addr)
+
+			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
+			if !ok || remoteAddr == nil {
+				continue
+			}
+
+			l.dispatch(msg.Buffers[0][:msg.N], libnetip.AddrInterface{}, nil, remoteAddr)
+		}
+	}
+}
+
+// readLoopUnspecified reads packet destinations in batches using recvmmsg.
+func (l *Listener) readLoopUnspecified() {
+	batchConn := newBatchConn(l.conn)
+	if batchConn == nil {
+		l.readLoopUnspecifiedGeneric()
+		return
+	}
+
+	msgs := make([]ipv4.Message, batchSize)
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
+		msgs[k].OOB = make([]byte, cmsgPacketSize)
+	}
+
+	for {
+		count, err := batchConn.ReadBatch(msgs, 0)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		for i := range count {
+			msg := &msgs[i]
+
+			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
+			if !ok || remoteAddr == nil {
+				continue
+			}
+
+			laddr, err := cmsg.ParseControlMessage(msg.OOB[:msg.NN])
+			if err != nil {
+				continue
+			}
+
+			if !isUnicast(laddr.Addr()) {
+				continue
+			}
+
+			localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+			l.dispatch(msg.Buffers[0][:msg.N], laddr, localAddr, remoteAddr)
 		}
 	}
 }

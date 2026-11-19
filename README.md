@@ -127,6 +127,7 @@ For optional packet encryption or FEC, use `ListenWithOptions` and `DialWithOpti
 - Optional packet encryption, including AEAD for packet-level integrity and authentication.
 - SNMP statistics are enabled by default. To disable statistics collection, build with `go build -tags kcp_no_snmp ./...`; in this build, `Snmp` is an empty placeholder and its statistics fields and reporting methods are unavailable.
 - A shared timer scheduler and batched, platform-specific UDP I/O to support many sessions efficiently.
+- On Linux, macOS, Windows, FreeBSD, OpenBSD, NetBSD, and DragonFly, wildcard UDP listeners use OS control messages to track each packet's local destination and send replies from that address. Other platforms use generic UDP handling without guaranteed source-address preservation.
 - Designed for high concurrency; capacity depends on workload, configuration, and hardware.
 - Based on [skywind3000's KCP](https://github.com/skywind3000/kcp), with additional features and optimizations.
 

@@ -30,42 +30,47 @@ const sendQueueKeep = 64
 // sendQueue is a bounded FIFO of packets awaiting post-processing. It grows
 // its backing slice on demand and drops oversized storage after draining.
 type sendQueue struct {
-	mu   sync.Mutex
-	q    []sendRequest
-	head int
+	mutex sync.Mutex
+	queue []sendRequest
+	head  int
 }
 
 // push appends r unless devBacklog requests are already queued.
 func (sq *sendQueue) push(r sendRequest) bool {
-	sq.mu.Lock()
-	defer sq.mu.Unlock()
-	if len(sq.q)-sq.head >= devBacklog {
+	sq.mutex.Lock()
+	defer sq.mutex.Unlock()
+
+	if len(sq.queue)-sq.head >= devBacklog {
 		return false
 	}
-	if sq.head > 0 && len(sq.q) == cap(sq.q) {
-		n := copy(sq.q, sq.q[sq.head:])
-		clear(sq.q[n:])
-		sq.q, sq.head = sq.q[:n], 0
+
+	if sq.head > 0 && len(sq.queue) == cap(sq.queue) {
+		n := copy(sq.queue, sq.queue[sq.head:])
+		clear(sq.queue[n:])
+		sq.queue, sq.head = sq.queue[:n], 0
 	}
-	sq.q = append(sq.q, r)
+
+	sq.queue = append(sq.queue, r)
 	return true
 }
 
 // pop removes the oldest packet and releases the backing slice after draining
 // if its capacity exceeds sendQueueKeep.
 func (sq *sendQueue) pop() (sendRequest, bool) {
-	sq.mu.Lock()
-	defer sq.mu.Unlock()
-	if sq.head == len(sq.q) {
+	sq.mutex.Lock()
+	defer sq.mutex.Unlock()
+
+	if sq.head == len(sq.queue) {
 		return sendRequest{}, false
 	}
-	r := sq.q[sq.head]
-	sq.q[sq.head] = sendRequest{}
+
+	r := sq.queue[sq.head]
+	sq.queue[sq.head] = sendRequest{}
 	sq.head++
-	if sq.head == len(sq.q) {
-		sq.q, sq.head = sq.q[:0], 0
-		if cap(sq.q) > sendQueueKeep {
-			sq.q = nil
+	if sq.head == len(sq.queue) {
+		sq.queue, sq.head = sq.queue[:0], 0
+		if cap(sq.queue) > sendQueueKeep {
+			sq.queue = nil
 		}
 	}
 	return r, true
@@ -73,7 +78,8 @@ func (sq *sendQueue) pop() (sendRequest, bool) {
 
 // len returns the number of queued packets.
 func (sq *sendQueue) len() int {
-	sq.mu.Lock()
-	defer sq.mu.Unlock()
-	return len(sq.q) - sq.head
+	sq.mutex.Lock()
+	defer sq.mutex.Unlock()
+
+	return len(sq.queue) - sq.head
 }
