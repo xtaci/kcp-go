@@ -236,7 +236,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.writeEvent = make(chan struct{}, 1)
 	sess.readDone = make(chan struct{})
 	sess.writeDone = make(chan struct{})
-	sess.sender.activeCall = libsync.NewQuit()
+	sess.sender.postProcessCalls = libsync.NewQuit()
 	sess.laddr = laddr
 	sess.localAddr = localAddr
 	sess.remoteAddr = remoteAddr
@@ -550,7 +550,7 @@ func (s *UDPSession) doClose() {
 	s.mutex.Lock()
 	s.mutex.Unlock()
 
-	s.sender.activeCall.Wait()
+	s.sender.postProcessCalls.Wait()
 	s.discardSender()
 
 	DefaultSnmp.decreaseCurrEstab()

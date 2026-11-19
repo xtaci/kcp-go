@@ -103,7 +103,7 @@ func TestSenderWorkerHandoff(t *testing.T) {
 			readDeadline:  deadline.New(),
 			writeDeadline: deadline.New(),
 			sender: sender{
-				activeCall: libsync.NewQuit(),
+				postProcessCalls: libsync.NewQuit(),
 			},
 		}
 
@@ -153,7 +153,7 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
 		sender: sender{
-			activeCall: libsync.NewQuit(),
+			postProcessCalls: libsync.NewQuit(),
 		},
 		closeGate: make(chan struct{}, 1),
 	}
@@ -199,8 +199,8 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 		t.Fatalf("concurrent Close returned %v, want ErrClosedPipe", err)
 	}
 
-	if s.sender.activeCall.Add(1) {
-		s.sender.activeCall.Done()
+	if s.sender.postProcessCalls.Add(1) {
+		s.sender.postProcessCalls.Done()
 		t.Fatal("sender admitted work after Close")
 	}
 	if got := conn.writes.Load(); got != 1 {
@@ -215,7 +215,7 @@ func TestFinishClosedSenderLeavesQueue(t *testing.T) {
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
 		sender: sender{
-			activeCall: libsync.NewQuit(),
+			postProcessCalls: libsync.NewQuit(),
 		},
 	}
 
@@ -247,7 +247,7 @@ func TestCloseDiscardsDelayedAndQueuedPackets(t *testing.T) {
 		writeGate:     make(chan struct{}, 1),
 		closeGate:     make(chan struct{}, 1),
 		writeDelay:    true,
-		sender:        sender{activeCall: libsync.NewQuit()},
+		sender:        sender{postProcessCalls: libsync.NewQuit()},
 	}
 	s.writeGate <- struct{}{}
 	s.closeGate <- struct{}{}
