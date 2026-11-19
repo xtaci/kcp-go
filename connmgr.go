@@ -39,13 +39,14 @@ type connManager interface {
 	Close()
 }
 
+// connKey is a peer endpoint tuple: (remote IP, remote UDP port).
 type connKey = netip.AddrPort
 
 type connManagerImpl struct {
 	connections *xsync.Map[connKey, *UDPSession]
 }
 
-// connKey identifies a session by its remote UDP address.
+// connKey returns the remote endpoint tuple (IP, UDP port).
 func (*connManagerImpl) connKey(remoteAddr *net.UDPAddr) connKey {
 	return remoteAddr.AddrPort()
 }
@@ -84,6 +85,10 @@ func newConnManager() connManager {
 	}
 }
 
+// connKeyUnspecified is the tuple
+// (local destination IP, ingress interface index, remote IP, remote UDP port).
+// Including the local destination keeps sessions from one peer to different
+// local addresses distinct on wildcard listeners.
 type connKeyUnspecified struct {
 	local  libnetip.AddrInterface
 	remote netip.AddrPort
@@ -93,7 +98,7 @@ type connManagerImplUnspecified struct {
 	connections *xsync.Map[connKeyUnspecified, *UDPSession]
 }
 
-// connKey distinguishes sessions by local address, interface, and peer.
+// connKey returns the local-destination and remote-endpoint tuple.
 func (*connManagerImplUnspecified) connKey(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr) connKeyUnspecified {
 	return connKeyUnspecified{
 		local:  laddr,
