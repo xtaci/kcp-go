@@ -165,9 +165,8 @@ type (
 		writeEvent chan struct{} // notify Write() can be called without blocking
 
 		// socket error handling
-		readError, writeError         error
-		readErrorCh, writeErrorCh     chan struct{}
-		readErrorOnce, writeErrorOnce sync.Once
+		readError, writeError     atomic.Pointer[error]
+		readErrorCh, writeErrorCh chan struct{}
 
 		// outgoing packet sender
 		sender sender
@@ -310,8 +309,8 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 // readLocked copies data that is ready into b and reports whether there was
 // any. It must be called with s.mu held.
 func (s *UDPSession) readLocked(b []byte) (int, bool) {
-	// bufptr points to the current position in recvbuf. If the previous read's
-	// buffer was too small, the remaining data is saved in bufptr for the next
+	// input points to the current position in recvbuf. If the previous read's
+	// buffer was too small, the remaining data is saved in input for the next
 	// read.
 	if s.input.Len() > 0 {
 		n, _ := s.input.Read(b)
@@ -361,22 +360,56 @@ func (s *UDPSession) read(b []byte) (n int, ok bool) {
 	return
 }
 
-// Read implements net.Conn
+// checkReadState inspects buffered data, shutdown state, and recorded read errors
+// under s.mutex. It returns nil if data is available or the session is still open
+// without a recorded read error; otherwise it returns io.ErrClosedPipe (when
+// closed and drained) or the stored readError.
+func (s *UDPSession) checkReadState() error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Drain buffered input or KCP receive queue first, even after close or read error.
+	if s.input.Len() > 0 || s.kcp.PeekSize() > 0 {
+		return nil
+	}
+
+	// Holding s.mutex guarantees no in-flight kcpInput() can enqueue more data after close.
+	if s.isClosed() {
+		return errors.WithStack(io.ErrClosedPipe)
+	}
+
+	// If readError is set, no further kcpInput() can be in flight, so returning it is safe.
+	if err := s.readError.Load(); err != nil {
+		return *err
+	}
+
+	// Session is still open with no buffered data or recorded read error yet.
+	return nil
+}
+
+// Read implements net.Conn.
+//
+// Buffered data is drained before reporting a closed session or socket read error.
 func (s *UDPSession) Read(b []byte) (n int, err error) {
 	for {
-		n, ok := s.read(b)
-		if ok {
+		if err = s.checkReadState(); err != nil {
+			return 0, err
+		}
+
+		// Enforce the read deadline before attempting to read.
+		if s.readDeadline.Err() != nil {
+			return 0, errors.WithStack(errTimeout)
+		}
+
+		if n, ok := s.read(b); ok {
 			return n, nil
 		}
 
 		select {
-		case <-s.readEvent:
-		case <-s.readDeadline.Done():
-			return 0, errors.WithStack(errTimeout)
-		case <-s.readErrorCh:
-			return 0, s.readError
 		case <-s.shutdown:
-			return 0, errors.WithStack(io.ErrClosedPipe)
+		case <-s.readErrorCh:
+		case <-s.readDeadline.Done():
+		case <-s.readEvent:
 		}
 	}
 }
@@ -437,14 +470,19 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 	// An empty write only reports the conn's state. It used to run a full
 	// flush, which callers that probe with Write(nil) paid on every frame.
 	if buffersEmpty(v) {
-		select {
-		case <-s.writeErrorCh:
-			return 0, s.writeError
-		case <-s.shutdown:
+		if s.isClosed() {
 			return 0, errors.WithStack(io.ErrClosedPipe)
-		default:
-			return 0, nil
 		}
+
+		if err := s.writeError.Load(); err != nil {
+			return 0, *err
+		}
+
+		if s.writeDeadline.Err() != nil {
+			return 0, errors.WithStack(errTimeout)
+		}
+
+		return 0, nil
 	}
 	err = s.acquireWriteGate()
 	if err != nil {
@@ -454,14 +492,16 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 
 	for {
 		// check for connection close, socket error and deadline
-		select {
-		case <-s.writeDeadline.Done():
-			return 0, errors.WithStack(errTimeout)
-		case <-s.writeErrorCh:
-			return 0, s.writeError
-		case <-s.shutdown:
+		if s.isClosed() {
 			return 0, errors.WithStack(io.ErrClosedPipe)
-		default:
+		}
+
+		if err := s.writeError.Load(); err != nil {
+			return 0, *err
+		}
+
+		if s.writeDeadline.Err() != nil {
+			return 0, errors.WithStack(errTimeout)
 		}
 
 		n, ok := s.writeBuffers(v)
@@ -470,13 +510,10 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		}
 
 		select {
-		case <-s.writeEvent:
-		case <-s.writeDeadline.Done():
-			return 0, errors.WithStack(errTimeout)
-		case <-s.writeErrorCh:
-			return 0, s.writeError
 		case <-s.shutdown:
-			return 0, errors.WithStack(io.ErrClosedPipe)
+		case <-s.writeErrorCh:
+		case <-s.writeDeadline.Done():
+		case <-s.writeEvent:
 		}
 	}
 }
@@ -504,6 +541,7 @@ func (s *UDPSession) acquireWriteGate() error {
 		return nil
 	default:
 	}
+
 	return s.waitWriteGate()
 }
 
@@ -511,16 +549,25 @@ func (s *UDPSession) acquireWriteGate() error {
 // signaled through writeEvent.
 func (s *UDPSession) waitWriteGate() error {
 	for {
+		if s.isClosed() {
+			return errors.WithStack(io.ErrClosedPipe)
+		}
+
+		if err := s.writeError.Load(); err != nil {
+			return *err
+		}
+
+		if s.writeDeadline.Err() != nil {
+			return errors.WithStack(errTimeout)
+		}
+
 		select {
+		case <-s.shutdown:
+		case <-s.writeErrorCh:
+		case <-s.writeDeadline.Done():
 		case <-s.writeEvent:
 		case <-s.writeGate:
 			return nil
-		case <-s.writeDeadline.Done():
-			return errors.WithStack(errTimeout)
-		case <-s.writeErrorCh:
-			return s.writeError
-		case <-s.shutdown:
-			return errors.WithStack(io.ErrClosedPipe)
 		}
 	}
 }
@@ -1094,18 +1141,19 @@ func (s *UDPSession) notifyWriteEvent() {
 }
 
 func (s *UDPSession) notifyReadError(err error) {
-	s.readErrorOnce.Do(func() {
-		s.readError = err
-		close(s.readErrorCh)
-	})
-	s.callReadNotify()
+	defer s.callReadNotify()
+
+	if !s.readError.CompareAndSwap(nil, &err) {
+		return
+	}
+	close(s.readErrorCh)
 }
 
 func (s *UDPSession) notifyWriteError(err error) {
-	s.writeErrorOnce.Do(func() {
-		s.writeError = err
-		close(s.writeErrorCh)
-	})
+	if !s.writeError.CompareAndSwap(nil, &err) {
+		return
+	}
+	close(s.writeErrorCh)
 }
 
 // -----------------------------------------------------------------------
@@ -1319,9 +1367,8 @@ type (
 		shutdown *libsync.Quit // signals closure and tracks active dispatch calls
 
 		// socket error handling
-		readError           error
-		readDone            chan struct{}
-		socketReadErrorOnce sync.Once
+		readError atomic.Pointer[error]
+		readDone  chan struct{}
 
 		acceptDeadline *deadline.Deadline
 	}
@@ -1464,13 +1511,14 @@ func (l *Listener) dispatch(data []byte, laddr libnetip.AddrInterface, localAddr
 }
 
 func (l *Listener) notifyReadError(err error) {
-	l.socketReadErrorOnce.Do(func() {
-		l.readError = err
-		close(l.readDone)
+	if !l.readError.CompareAndSwap(nil, &err) {
+		return
+	}
 
-		l.sessions.Range(func(s *UDPSession) {
-			s.notifyReadError(err)
-		})
+	close(l.readDone)
+
+	l.sessions.Range(func(s *UDPSession) {
+		s.notifyReadError(err)
 	})
 }
 
@@ -1530,25 +1578,48 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
-	select {
-	case <-l.acceptDeadline.Done():
-		return nil, errors.WithStack(errTimeout)
-	case <-l.shutdown.Signal():
+	if l.isClosed() {
 		return nil, errors.WithStack(io.ErrClosedPipe)
-	case <-l.readDone:
-		return nil, l.readError
-	default:
+	}
+
+	if err := l.readError.Load(); err != nil {
+		return nil, *err
+	}
+
+	if l.acceptDeadline.Err() != nil {
+		return nil, errors.WithStack(errTimeout)
 	}
 
 	select {
-	case <-l.acceptDeadline.Done():
-		return nil, errors.WithStack(errTimeout)
-	case c := <-l.acceptCh:
-		return c, nil
-	case <-l.readDone:
-		return nil, l.readError
 	case <-l.shutdown.Signal():
 		return nil, errors.WithStack(io.ErrClosedPipe)
+	case <-l.readDone:
+		if l.isClosed() {
+			return nil, errors.WithStack(io.ErrClosedPipe)
+		}
+		return nil, *l.readError.Load()
+	case <-l.acceptDeadline.Done():
+		if l.isClosed() {
+			return nil, errors.WithStack(io.ErrClosedPipe)
+		}
+
+		if err := l.readError.Load(); err != nil {
+			return nil, *err
+		}
+
+		return nil, errors.WithStack(errTimeout)
+	case c := <-l.acceptCh:
+		if l.isClosed() {
+			c.Close()
+			return nil, errors.WithStack(io.ErrClosedPipe)
+		}
+
+		if err := l.readError.Load(); err != nil {
+			c.Close()
+			return nil, *err
+		}
+
+		return c, nil
 	}
 }
 
@@ -1567,6 +1638,15 @@ func (l *Listener) SetReadDeadline(t time.Time) error {
 // TODO: remove this method in the future, as it is not applicable to a Listener.
 func (l *Listener) SetWriteDeadline(t time.Time) error {
 	return errInvalidOperation
+}
+
+func (l *Listener) isClosed() bool {
+	select {
+	case <-l.shutdown.Signal():
+		return true
+	default:
+		return false
+	}
 }
 
 // Close stops listening on the UDP address and closes the socket if the
@@ -1855,20 +1935,23 @@ func (s *UDPSession) notifyReadIfAvailableLocked() {
 // TryRead is Read without waiting. It returns 0 and no error when no data is
 // ready, and the session's error once it is closed or its socket failed and
 // no data is left.
+//
+// ReadDeadline is not applied for TryRead.
 func (s *UDPSession) TryRead(b []byte) (int, error) {
 	n, ok := s.read(b)
 	if ok {
 		return n, nil
 	}
 
-	select {
-	case <-s.readErrorCh:
-		return 0, s.readError
-	case <-s.shutdown:
+	if s.isClosed() {
 		return 0, errors.WithStack(io.ErrClosedPipe)
-	default:
-		return 0, nil
 	}
+
+	if err := s.readError.Load(); err != nil {
+		return 0, *err
+	}
+
+	return 0, nil
 }
 
 // SetReadNotify sets fn to be called whenever data may have become ready for

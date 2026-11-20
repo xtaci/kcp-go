@@ -26,6 +26,8 @@ import (
 	"bytes"
 	"testing"
 	"time"
+
+	"github.com/pion/transport/v5/deadline"
 )
 
 // A consumer can read a session through SetReadNotify and TryRead alone.
@@ -92,10 +94,11 @@ func TestTryReadWithNotify(t *testing.T) {
 
 func TestConcurrentReadersNotifiedForBufferedData(t *testing.T) {
 	s := &UDPSession{
-		shutdown:    make(chan struct{}),
-		readEvent:   make(chan struct{}, 1),
-		readErrorCh: make(chan struct{}),
-		kcp:         NewKCP(1, nil),
+		shutdown:     make(chan struct{}),
+		readEvent:    make(chan struct{}, 1),
+		readErrorCh:  make(chan struct{}),
+		readDeadline: deadline.New(),
+		kcp:          NewKCP(1, nil),
 	}
 	s.input.Reset([]byte("ab"))
 	defer close(s.shutdown)

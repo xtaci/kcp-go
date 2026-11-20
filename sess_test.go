@@ -433,6 +433,7 @@ func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	s := new(UDPSession)
 	s.shutdown = make(chan struct{})
 	s.writeErrorCh = make(chan struct{})
+	s.writeDeadline = deadline.New()
 	s.kcp = NewKCP(1, func([]byte, int) { outputs.Add(1) })
 	// A queued segment that any flush would send.
 	s.kcp.Send([]byte("x"))
