@@ -27,6 +27,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 )
 
 // SystemTimedSched is the library-level timed scheduler, shared by all sessions.
@@ -101,9 +103,7 @@ type TimedSched struct {
 	shards []tsShard
 	next   atomic.Uint32
 
-	wg      sync.WaitGroup
-	dieOnce sync.Once
-	die     chan struct{}
+	activeCall *libsync.Quit
 }
 
 type tsShard struct {
@@ -117,18 +117,22 @@ type tsShard struct {
 // NewTimedSched starts a scheduler with parallel shards.
 func NewTimedSched(parallel int) *TimedSched {
 	ts := &TimedSched{
-		shards: make([]tsShard, max(parallel, 1)),
-		die:    make(chan struct{}),
+		shards:     make([]tsShard, max(parallel, 1)),
+		activeCall: libsync.NewQuit(),
 	}
+
+	ts.activeCall.Add(len(ts.shards))
 	for i := range ts.shards {
 		sh := &ts.shards[i]
 		sh.wake = make(chan struct{}, 1)
-		ts.wg.Go(func() { ts.run(sh) })
+		go ts.run(sh)
 	}
 	return ts
 }
 
 func (ts *TimedSched) run(sh *tsShard) {
+	defer ts.activeCall.Done()
+
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	var due []timedFunc
@@ -183,7 +187,7 @@ func (ts *TimedSched) run(sh *tsShard) {
 				default:
 				}
 			}
-		case <-ts.die:
+		case <-ts.activeCall.Signal():
 			timer.Stop()
 			return
 		}
@@ -209,8 +213,5 @@ func (ts *TimedSched) Put(f func(), deadline time.Time) {
 
 // Close stops the scheduler and waits for all shard goroutines to exit. Pending tasks are dropped.
 func (ts *TimedSched) Close() {
-	ts.dieOnce.Do(func() {
-		close(ts.die)
-	})
-	ts.wg.Wait()
+	ts.activeCall.Wait()
 }
