@@ -101,6 +101,7 @@ type TimedSched struct {
 	shards []tsShard
 	next   atomic.Uint32
 
+	wg      sync.WaitGroup
 	dieOnce sync.Once
 	die     chan struct{}
 }
@@ -120,8 +121,9 @@ func NewTimedSched(parallel int) *TimedSched {
 		die:    make(chan struct{}),
 	}
 	for i := range ts.shards {
-		ts.shards[i].wake = make(chan struct{}, 1)
-		go ts.run(&ts.shards[i])
+		sh := &ts.shards[i]
+		sh.wake = make(chan struct{}, 1)
+		ts.wg.Go(func() { ts.run(sh) })
 	}
 	return ts
 }
@@ -130,9 +132,13 @@ func (ts *TimedSched) run(sh *tsShard) {
 	timer := time.NewTimer(time.Hour)
 	timer.Stop()
 	var due []timedFunc
+	allowSlack := true
 	for {
 		sh.mu.Lock()
-		limit := time.Now().Add(schedSlack)
+		limit := time.Now()
+		if allowSlack {
+			limit = limit.Add(schedSlack)
+		}
 		for len(sh.tasks) > 0 && !sh.tasks[0].ts.After(limit) {
 			due = append(due, sh.tasks.pop())
 		}
@@ -155,6 +161,7 @@ func (ts *TimedSched) run(sh *tsShard) {
 				due[k] = timedFunc{}
 			}
 			due = due[:0]
+			allowSlack = false
 			continue
 		}
 
@@ -167,7 +174,9 @@ func (ts *TimedSched) run(sh *tsShard) {
 		}
 		select {
 		case <-fire:
+			allowSlack = true
 		case <-sh.wake:
+			allowSlack = false
 			if fire != nil && !timer.Stop() {
 				select {
 				case <-timer.C:
@@ -198,5 +207,10 @@ func (ts *TimedSched) Put(f func(), deadline time.Time) {
 	}
 }
 
-// Close stops the scheduler. Pending tasks are dropped.
-func (ts *TimedSched) Close() { ts.dieOnce.Do(func() { close(ts.die) }) }
+// Close stops the scheduler and waits for all shard goroutines to exit. Pending tasks are dropped.
+func (ts *TimedSched) Close() {
+	ts.dieOnce.Do(func() {
+		close(ts.die)
+	})
+	ts.wg.Wait()
+}
