@@ -34,7 +34,7 @@ var errBufferSizeMismatch = errors.New("buffer size mismatch")
 // to mitigate high-frequency memory allocation of packets.
 var defaultBufferPool = newPacketBufferPool()
 
-type packetBuf = [maxPacketSize]byte
+type packetBuffer = [maxPacketSize]byte
 
 type packetBufferPool struct {
 	xmitBuf sync.Pool
@@ -45,7 +45,7 @@ func newPacketBufferPool() *packetBufferPool {
 	return &packetBufferPool{
 		xmitBuf: sync.Pool{
 			New: func() any {
-				return new(packetBuf)
+				return new(packetBuffer)
 			},
 		},
 	}
@@ -53,7 +53,7 @@ func newPacketBufferPool() *packetBufferPool {
 
 // Get retrieves a buffer from the pool.
 func (bp *packetBufferPool) Get() []byte {
-	return (*bp.xmitBuf.Get().(*packetBuf))[:]
+	return (*bp.xmitBuf.Get().(*packetBuffer))[:]
 }
 
 // Put returns a buffer to the pool.
@@ -62,7 +62,7 @@ func (bp *packetBufferPool) Put(buf []byte) error {
 	if cap(buf) != maxPacketSize {
 		return errBufferSizeMismatch
 	}
-	bp.xmitBuf.Put((*packetBuf)(buf[:maxPacketSize]))
+	bp.xmitBuf.Put((*packetBuffer)(buf[:maxPacketSize]))
 	return nil
 }
 
