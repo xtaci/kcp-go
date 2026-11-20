@@ -179,7 +179,7 @@ type (
 		bucket atomic.Pointer[ratelimit.Bucket]
 
 		mutex     sync.Mutex    // protects KCP and related session state
-		shutdown  *libsync.Quit // signals session shutdown
+		shutdown  chan struct{} // signals session shutdown
 		writeGate chan struct{} // serializes non-empty writes
 		closeGate chan struct{} // serializes closure and signals its completion
 
@@ -232,7 +232,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	sess.writeGate <- struct{}{}
 	sess.closeGate = make(chan struct{}, 1)
 	sess.closeGate <- struct{}{}
-	sess.shutdown = libsync.NewQuit()
+	sess.shutdown = make(chan struct{})
 	sess.readEvent = make(chan struct{}, 1)
 	sess.writeEvent = make(chan struct{}, 1)
 	sess.readErrorCh = make(chan struct{})
@@ -375,7 +375,7 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		case <-s.readErrorCh:
 			return 0, s.readError
-		case <-s.shutdown.Signal():
+		case <-s.shutdown:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -440,7 +440,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 		select {
 		case <-s.writeErrorCh:
 			return 0, s.writeError
-		case <-s.shutdown.Signal():
+		case <-s.shutdown:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
 			return 0, nil
@@ -459,7 +459,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		case <-s.writeErrorCh:
 			return 0, s.writeError
-		case <-s.shutdown.Signal():
+		case <-s.shutdown:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		default:
 		}
@@ -475,7 +475,7 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		case <-s.writeErrorCh:
 			return 0, s.writeError
-		case <-s.shutdown.Signal():
+		case <-s.shutdown:
 			return 0, errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -519,7 +519,7 @@ func (s *UDPSession) waitWriteGate() error {
 			return errors.WithStack(errTimeout)
 		case <-s.writeErrorCh:
 			return s.writeError
-		case <-s.shutdown.Signal():
+		case <-s.shutdown:
 			return errors.WithStack(io.ErrClosedPipe)
 		}
 	}
@@ -532,7 +532,7 @@ func (s *UDPSession) releaseWriteGate() {
 
 func (s *UDPSession) isClosed() bool {
 	select {
-	case <-s.shutdown.Signal():
+	case <-s.shutdown:
 		return true
 	default:
 		return false
@@ -541,7 +541,7 @@ func (s *UDPSession) isClosed() bool {
 
 // doClose stops producers and senders, then discards queued packets.
 func (s *UDPSession) doClose() {
-	s.shutdown.Wait()
+	close(s.shutdown)
 
 	// A producer may have checked the close signal while holding this mutex
 	// before shutdown began, and may still enqueue packets. Acquiring the mutex
@@ -932,7 +932,7 @@ func (s *UDPSession) postProcess(w *txWorker) (more bool) {
 // update advances the KCP protocol state.
 func (s *UDPSession) update() {
 	select {
-	case <-s.shutdown.Signal():
+	case <-s.shutdown:
 	default:
 		s.mutex.Lock()
 		if s.isClosed() {
@@ -1060,7 +1060,7 @@ func (s *UDPSession) SendOOB(data []byte) error {
 	// Enqueue the packet for post-processing.
 	// Performs OOB framing, encryption, and transmission, bypassing FEC and KCP.
 	select {
-	case <-s.shutdown.Signal():
+	case <-s.shutdown:
 		// Session is closing.
 		defaultBufferPool.Put(buf)
 		return errors.WithStack(io.ErrClosedPipe)
@@ -1864,7 +1864,7 @@ func (s *UDPSession) TryRead(b []byte) (int, error) {
 	select {
 	case <-s.readErrorCh:
 		return 0, s.readError
-	case <-s.shutdown.Signal():
+	case <-s.shutdown:
 		return 0, errors.WithStack(io.ErrClosedPipe)
 	default:
 		return 0, nil

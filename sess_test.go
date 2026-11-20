@@ -48,7 +48,6 @@ import (
 	"github.com/puzpuzpuz/xsync/v4"
 	"github.com/xtaci/kcp-go/v5/internal/cmsg"
 	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
-	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 	"golang.org/x/crypto/pbkdf2"
 )
 
@@ -432,7 +431,7 @@ func TestTimeout(t *testing.T) {
 func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	var outputs atomic.Int64
 	s := new(UDPSession)
-	s.shutdown = libsync.NewQuit()
+	s.shutdown = make(chan struct{})
 	s.writeErrorCh = make(chan struct{})
 	s.kcp = NewKCP(1, func([]byte, int) { outputs.Add(1) })
 	// A queued segment that any flush would send.
@@ -446,7 +445,7 @@ func TestEmptyWriteDoesNotFlush(t *testing.T) {
 	if got := outputs.Load(); got != before {
 		t.Fatalf("Write(nil) flushed %d times", got-before)
 	}
-	s.shutdown.Wait()
+	close(s.shutdown)
 	if _, err := s.Write(nil); err == nil {
 		t.Fatal("Write(nil) on a closed session returned no error")
 	}
@@ -759,7 +758,7 @@ func newRateLimitTestSession(bucket *ratelimit.Bucket) *UDPSession {
 	s := &UDPSession{
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
-		shutdown:      libsync.NewQuit(),
+		shutdown:      make(chan struct{}),
 		writeGate:     make(chan struct{}, 1),
 		writeEvent:    make(chan struct{}, 1),
 		writeErrorCh:  make(chan struct{}),

@@ -26,8 +26,6 @@ import (
 	"bytes"
 	"testing"
 	"time"
-
-	libsync "github.com/xtaci/kcp-go/v5/internal/lib/sync"
 )
 
 // A consumer can read a session through SetReadNotify and TryRead alone.
@@ -94,13 +92,13 @@ func TestTryReadWithNotify(t *testing.T) {
 
 func TestConcurrentReadersNotifiedForBufferedData(t *testing.T) {
 	s := &UDPSession{
-		shutdown:    libsync.NewQuit(),
+		shutdown:    make(chan struct{}),
 		readEvent:   make(chan struct{}, 1),
 		readErrorCh: make(chan struct{}),
 		kcp:         NewKCP(1, nil),
 	}
 	s.input.Reset([]byte("ab"))
-	defer s.shutdown.Wait()
+	defer close(s.shutdown)
 
 	type result struct {
 		value byte

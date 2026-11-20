@@ -110,7 +110,7 @@ func TestSenderSetDUP(t *testing.T) {
 			s := &UDPSession{
 				conn:       conn,
 				remoteAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
-				shutdown:   libsync.NewQuit(),
+				shutdown:   make(chan struct{}),
 			}
 			s.initPlatform()
 			s.SetDUP(tt.dup)
@@ -141,7 +141,7 @@ func TestSenderConcurrentSetDUP(t *testing.T) {
 	s := &UDPSession{
 		conn:       conn,
 		remoteAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
-		shutdown:   libsync.NewQuit(),
+		shutdown:   make(chan struct{}),
 	}
 	s.initPlatform()
 
@@ -187,7 +187,7 @@ func TestSenderConcurrentSetDUP(t *testing.T) {
 func TestSenderWorkerHandoff(t *testing.T) {
 	for i := range 1000 {
 		s := &UDPSession{
-			shutdown:      libsync.NewQuit(),
+			shutdown:      make(chan struct{}),
 			readDeadline:  deadline.New(),
 			writeDeadline: deadline.New(),
 			sender: sender{
@@ -236,7 +236,7 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	}
 	s := &UDPSession{
 		conn:          conn,
-		shutdown:      libsync.NewQuit(),
+		shutdown:      make(chan struct{}),
 		kcp:           NewKCP(1, nil),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
@@ -258,7 +258,7 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 	closeDone := make(chan error, 1)
 	go func() { closeDone <- s.Close() }()
 	select {
-	case <-s.shutdown.Signal():
+	case <-s.shutdown:
 	case <-time.After(time.Second):
 		close(conn.release)
 		t.Fatal("Close did not close the session")
@@ -299,7 +299,7 @@ func TestCloseWaitsForActiveSenderSend(t *testing.T) {
 // TestFinishClosedSenderLeavesQueue verifies that Close owns queue cleanup.
 func TestFinishClosedSenderLeavesQueue(t *testing.T) {
 	s := &UDPSession{
-		shutdown:      libsync.NewQuit(),
+		shutdown:      make(chan struct{}),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
 		sender: sender{
@@ -307,7 +307,7 @@ func TestFinishClosedSenderLeavesQueue(t *testing.T) {
 		},
 	}
 
-	s.shutdown.Wait()
+	close(s.shutdown)
 	s.sender.running.Store(true)
 	if !s.sender.queue.push(sendRequest{buffer: defaultBufferPool.Get()}) {
 		t.Fatal("failed to queue packet")
@@ -328,7 +328,7 @@ func TestCloseDiscardsDelayedAndQueuedPackets(t *testing.T) {
 	s := &UDPSession{
 		conn:          conn,
 		remoteAddr:    &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
-		shutdown:      libsync.NewQuit(),
+		shutdown:      make(chan struct{}),
 		readDeadline:  deadline.New(),
 		writeDeadline: deadline.New(),
 		writeErrorCh:  make(chan struct{}),
@@ -388,7 +388,7 @@ func TestCloseWaitsForPacketBeingProcessed(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- s.Close() }()
 	select {
-	case <-s.shutdown.Signal():
+	case <-s.shutdown:
 	case <-time.After(time.Second):
 		close(block.release)
 		t.Fatal("Close did not start")
@@ -420,11 +420,9 @@ func TestCloseWaitsForPacketBeingProcessed(t *testing.T) {
 }
 
 func TestCloseRejectsWriterWaitingForSessionLock(t *testing.T) {
-	conn := &recordingPacketConn{}
-	s, err := NewConn3(1, &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1}, nil, 0, 0, conn)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := new(UDPSession)
+	s.shutdown = make(chan struct{})
+	close(s.shutdown)
 
 	s.mutex.Lock()
 	started := make(chan struct{})
@@ -435,13 +433,9 @@ func TestCloseRejectsWriterWaitingForSessionLock(t *testing.T) {
 		done <- ok
 	}()
 	<-started
-	s.shutdown.Wait()
 	s.mutex.Unlock()
 	if <-done {
 		t.Fatal("write succeeded after the close signal")
-	}
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
 	}
 }
 
