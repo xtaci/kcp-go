@@ -32,47 +32,49 @@ var errBufferSizeMismatch = errors.New("buffer size mismatch")
 
 // A system-wide packet buffer shared among sending, receiving and FEC
 // to mitigate high-frequency memory allocation of packets.
-var defaultBufferPool = newBufferPool(maxPacketSize)
+var defaultBufferPool = newPacketBufferPool()
 
-type bufferPool struct {
+type packetBuffer = [maxPacketSize]byte
+
+type packetBufferPool struct {
 	xmitBuf sync.Pool
 }
 
-// newBufferPool creates a new buffer pool with buffers of the given size.
-func newBufferPool(size int) *bufferPool {
-	return &bufferPool{
+// newPacketBufferPool creates a new packet buffer pool with fixed maxPacketSize buffers.
+func newPacketBufferPool() *packetBufferPool {
+	return &packetBufferPool{
 		xmitBuf: sync.Pool{
 			New: func() any {
-				return make([]byte, size)
+				return new(packetBuffer)
 			},
 		},
 	}
 }
 
 // Get retrieves a buffer from the pool.
-func (bp *bufferPool) Get() []byte {
-	return bp.xmitBuf.Get().([]byte)
+func (bp *packetBufferPool) Get() []byte {
+	return (*bp.xmitBuf.Get().(*packetBuffer))[:]
 }
 
 // Put returns a buffer to the pool.
-func (bp *bufferPool) Put(buf []byte) error {
+func (bp *packetBufferPool) Put(buf []byte) error {
 	// Only put back buffers whose capacity matches maxPacketSize.
 	if cap(buf) != maxPacketSize {
 		return errBufferSizeMismatch
 	}
-	bp.xmitBuf.Put(buf[:cap(buf)]) // reset slice length to full capacity
+	bp.xmitBuf.Put((*packetBuffer)(buf[:maxPacketSize]))
 	return nil
 }
 
 // Puts returns some buffers to the pool.
-func (bp *bufferPool) Puts(buffers [][]byte) {
+func (bp *packetBufferPool) Puts(buffers [][]byte) {
 	for _, buf := range buffers {
 		bp.Put(buf)
 	}
 }
 
-// Puts returns some buffers to the pool.
-func (bp *bufferPool) PutPkts(buffers []fecPacket) {
+// PutPkts returns some FEC packet buffers to the pool.
+func (bp *packetBufferPool) PutPkts(buffers []fecPacket) {
 	for _, buf := range buffers {
 		bp.Put(buf)
 	}
