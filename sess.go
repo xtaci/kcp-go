@@ -1140,6 +1140,7 @@ func (s *UDPSession) notifyWriteEvent() {
 	}
 }
 
+// The first socket error is retained; closing the channel wakes waiters once.
 func (s *UDPSession) notifyReadError(err error) {
 	defer s.callReadNotify()
 
@@ -1578,6 +1579,7 @@ func (l *Listener) Accept() (net.Conn, error) {
 
 // AcceptKCP accepts a KCP connection
 func (l *Listener) AcceptKCP() (*UDPSession, error) {
+	// Check terminal states first because select may choose any ready case.
 	if l.isClosed() {
 		return nil, errors.WithStack(io.ErrClosedPipe)
 	}
@@ -1609,6 +1611,8 @@ func (l *Listener) AcceptKCP() (*UDPSession, error) {
 
 		return nil, errors.WithStack(errTimeout)
 	case c := <-l.acceptCh:
+		// The accept case may win while shutdown or a read error is also ready.
+		// Close the dequeued session before returning that terminal state.
 		if l.isClosed() {
 			c.Close()
 			return nil, errors.WithStack(io.ErrClosedPipe)
