@@ -112,7 +112,7 @@ func TestSenderSetDUP(t *testing.T) {
 				remoteAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
 				shutdown:   make(chan struct{}),
 			}
-			s.initPlatform()
+			s.initBatchConn()
 			s.SetDUP(tt.dup)
 
 			buf := defaultBufferPool.Get()[:IKCP_OVERHEAD]
@@ -143,7 +143,7 @@ func TestSenderConcurrentSetDUP(t *testing.T) {
 		remoteAddr: &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: 1},
 		shutdown:   make(chan struct{}),
 	}
-	s.initPlatform()
+	s.initBatchConn()
 
 	const packets = 512
 	for range packets {
@@ -340,7 +340,7 @@ func TestCloseDiscardsDelayedAndQueuedPackets(t *testing.T) {
 	s.writeGate <- struct{}{}
 	s.closeGate <- struct{}{}
 	s.kcp = NewKCP(1, s.output)
-	s.initPlatform()
+	s.initBatchConn()
 	DefaultSnmp.increaseCurrEstab()
 
 	if _, err := s.Write([]byte("delayed data")); err != nil {
