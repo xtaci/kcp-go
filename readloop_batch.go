@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build linux
-
 package kcp
 
 import (
@@ -29,6 +27,7 @@ import (
 
 	"github.com/pkg/errors"
 	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	"github.com/xtaci/kcp-go/v5/internal/lib/net/netio/batch"
 	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 	"golang.org/x/net/ipv4"
 )
@@ -37,12 +36,11 @@ const (
 	batchSize = 256 // max packets per recvmmsg/sendmmsg call
 )
 
-// readLoop is the optimized Linux read loop, using the recvmmsg syscall to
+// readLoopBatch using the recvmmsg syscall to
 // receive multiple UDP packets in a single system call.
-func (s *UDPSession) readLoop() {
-	if s.platform.batchConn == nil {
-		s.readLoopGeneric()
-		return
+func (s *UDPSession) readLoopBatch() bool {
+	if s.batchConn == nil {
+		return false
 	}
 
 	msgs := make([]ipv4.Message, batchSize)
@@ -51,14 +49,14 @@ func (s *UDPSession) readLoop() {
 	}
 
 	for {
-		count, err := s.platform.batchConn.ReadBatch(msgs, 0)
+		count, err := s.batchConn.ReadBatch(msgs, 0)
 		if err != nil {
 			s.notifyReadError(errors.WithStack(err))
-			return
+			break
 		}
 
 		if s.isClosed() {
-			return
+			break
 		}
 
 		for i := range count {
@@ -79,16 +77,15 @@ func (s *UDPSession) readLoop() {
 			s.dispatch(msg.Buffers[0][:msg.N])
 		}
 	}
+	return true
 }
 
-// readLoop is the optimized Linux read loop, using the recvmmsg syscall to
+// readLoopBatch uses the recvmmsg or similar syscall to
 // receive multiple UDP packets in a single system call.
-func (l *Listener) readLoop() {
-	batchConn := newBatchConn(l.conn)
-
-	if batchConn == nil {
-		l.readLoopGeneric()
-		return
+func (l *Listener) readLoopBatch() bool {
+	batchConn, err := batch.NewPacketConn(l.conn)
+	if err != nil {
+		return false
 	}
 
 	msgs := make([]ipv4.Message, batchSize)
@@ -100,7 +97,7 @@ func (l *Listener) readLoop() {
 		count, err := batchConn.ReadBatch(msgs, 0)
 		if err != nil {
 			l.notifyReadError(errors.WithStack(err))
-			return
+			return true
 		}
 
 		for i := range count {
@@ -116,12 +113,11 @@ func (l *Listener) readLoop() {
 	}
 }
 
-// readLoopUnspecified reads packet destinations in batches using recvmmsg.
-func (l *Listener) readLoopUnspecified() {
-	batchConn := newBatchConn(l.conn)
-	if batchConn == nil {
-		l.readLoopUnspecifiedGeneric()
-		return
+// readLoopBatchUnspecified reads packet destinations in batches using recvmmsg or similar syscalls.
+func (l *Listener) readLoopBatchUnspecified() bool {
+	batchConn, err := batch.NewPacketConn(l.conn)
+	if err != nil {
+		return false
 	}
 
 	msgs := make([]ipv4.Message, batchSize)
@@ -134,7 +130,7 @@ func (l *Listener) readLoopUnspecified() {
 		count, err := batchConn.ReadBatch(msgs, 0)
 		if err != nil {
 			l.notifyReadError(errors.WithStack(err))
-			return
+			return true
 		}
 
 		for i := range count {

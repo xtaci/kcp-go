@@ -20,20 +20,89 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build !linux
-
 package kcp
 
-func (s *UDPSession) readLoop() {
-	s.readLoopGeneric()
+import (
+	"net"
+
+	"github.com/pkg/errors"
+	"github.com/xtaci/kcp-go/v5/internal/cmsg"
+	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
+)
+
+// readLoopGeneric is the standard procedure for reading from a connection
+func (s *UDPSession) readLoopGeneric() {
+	buf := make([]byte, maxPacketSize)
+
+	for {
+		n, addr, err := s.conn.ReadFrom(buf)
+		if err != nil {
+			s.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		if s.isClosed() {
+			return
+		}
+
+		remoteAddr, ok := addr.(*net.UDPAddr)
+		if !ok || remoteAddr == nil {
+			continue
+		}
+
+		// Ensure the packet comes from the same source.
+		if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+			DefaultSnmp.increaseInErrs()
+			continue
+		}
+
+		s.dispatch(buf[:n])
+	}
 }
 
-// readLoop receives listener packets without platform-specific batch I/O.
-func (l *Listener) readLoop() {
-	l.readLoopGeneric()
+// readLoopGeneric is the standard procedure for reading and accepting connections on a listener
+func (l *Listener) readLoopGeneric() {
+	buf := make([]byte, maxPacketSize)
+	for {
+		n, raddr, err := l.conn.ReadFrom(buf)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		remoteAddr, ok := raddr.(*net.UDPAddr)
+		if !ok || remoteAddr == nil {
+			continue
+		}
+
+		l.dispatch(buf[:n], libnetip.AddrInterface{}, nil, remoteAddr)
+	}
 }
 
-// readLoopUnspecified reads destination control messages without batch I/O.
-func (l *Listener) readLoopUnspecified() {
-	l.readLoopUnspecifiedGeneric()
+// readLoopUnspecifiedGeneric receives packets and their local destination addresses.
+func (l *Listener) readLoopUnspecifiedGeneric() {
+	udpConn := l.conn.(udpConn)
+
+	buf := make([]byte, maxPacketSize)
+	oob := make([]byte, cmsgPacketSize)
+	for {
+		n, nn, _, remoteAddr, err := udpConn.ReadMsgUDP(buf, oob)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		// The destination is required to select the reply source and session key.
+		laddr, err := cmsg.ParseControlMessage(oob[:nn])
+		if err != nil {
+			continue
+		}
+
+		if !isUnicast(laddr.Addr()) {
+			continue
+		}
+
+		localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+		l.dispatch(buf[:n], laddr, localAddr, remoteAddr)
+	}
 }
