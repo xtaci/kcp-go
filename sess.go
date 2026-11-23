@@ -1377,6 +1377,12 @@ type (
 
 // getConn finds or atomically creates the session for an incoming packet.
 func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
+	if sess, ok := l.sessions.Load(laddr, remoteAddr); ok {
+		if !hasConv || conv == sess.kcp.conv {
+			return sess, false
+		}
+	}
+
 	var created bool
 	// Compute serializes replacement with other operations on the same session key.
 	sess, _ := l.sessions.Compute(laddr, remoteAddr, func(sess *UDPSession, ok bool) (*UDPSession, xsync.ComputeOp) {

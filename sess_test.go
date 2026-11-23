@@ -184,6 +184,13 @@ func TestWildcardSessionKeys(t *testing.T) {
 	if !loaded || got != firstSession || manager.Size() != 3 {
 		t.Fatalf("first session = %p, loaded = %v, total = %d", got, loaded, manager.Size())
 	}
+	if got, ok := manager.Load(otherIP, remote); !ok || got != secondSession {
+		t.Fatalf("Load(otherIP) = (%p, %v), want (%p, true)", got, ok, secondSession)
+	}
+	unregistered := libnetip.AddrInterfaceFrom(libnetip.AddrFrom4([4]byte{192, 0, 2, 4}), 1)
+	if got, ok := manager.Load(unregistered, remote); ok || got != nil {
+		t.Fatalf("Load(unregistered) = (%p, %v), want (nil, false)", got, ok)
+	}
 }
 
 var (

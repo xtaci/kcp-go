@@ -33,6 +33,7 @@ import (
 // NOTE: We don't use generic because typed connKey() can be inlined calls.
 
 type connManager interface {
+	Load(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool)
 	Compute(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool)
 	Range(func(conn *UDPSession))
 	Size() int
@@ -49,6 +50,12 @@ type connManagerImpl struct {
 // connKey returns the remote endpoint tuple (IP, UDP port).
 func (*connManagerImpl) connKey(remoteAddr *net.UDPAddr) connKey {
 	return remoteAddr.AddrPort()
+}
+
+// Load returns the session associated with the remote address, if present.
+func (manager *connManagerImpl) Load(_ libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool) {
+	key := manager.connKey(remoteAddr)
+	return manager.connections.Load(key)
 }
 
 // Compute atomically updates the session associated with the remote address.
@@ -104,6 +111,12 @@ func (*connManagerImplUnspecified) connKey(laddr libnetip.AddrInterface, remoteA
 		local:  laddr,
 		remote: remoteAddr.AddrPort(),
 	}
+}
+
+// Load returns the session associated with the local and remote addresses, if present.
+func (manager *connManagerImplUnspecified) Load(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool) {
+	key := manager.connKey(laddr, remoteAddr)
+	return manager.connections.Load(key)
 }
 
 // Compute atomically updates the session for the local and remote addresses.
