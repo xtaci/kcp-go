@@ -25,6 +25,8 @@
 package kcp
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -57,5 +59,48 @@ func TestSNMP(t *testing.T) {
 		if value != "0" {
 			t.Fatalf("ToSlice()[%d] = %q after Reset, want %q", i, value, "0")
 		}
+	}
+}
+
+func TestNewSnmpCurrEstabIsolation(t *testing.T) {
+	baseCurr := atomic.LoadUint64(&DefaultSnmp.CurrEstab)
+	baseMax := atomic.LoadUint64(&DefaultSnmp.MaxConn)
+
+	snmp := newSnmp()
+	const workers = 8
+	const perWorker = 16
+
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for range perWorker {
+				snmp.increaseCurrEstab()
+			}
+		}()
+	}
+	wg.Wait()
+
+	want := uint64(workers * perWorker)
+	if got := atomic.LoadUint64(&snmp.CurrEstab); got != want {
+		t.Fatalf("snmp.CurrEstab = %d, want %d", got, want)
+	}
+	if got := atomic.LoadUint64(&snmp.MaxConn); got != want {
+		t.Fatalf("snmp.MaxConn = %d, want %d", got, want)
+	}
+	if got := atomic.LoadUint64(&DefaultSnmp.CurrEstab); got != baseCurr {
+		t.Fatalf("DefaultSnmp.CurrEstab mutated: %d -> %d", baseCurr, got)
+	}
+	if got := atomic.LoadUint64(&DefaultSnmp.MaxConn); got != baseMax {
+		t.Fatalf("DefaultSnmp.MaxConn mutated: %d -> %d", baseMax, got)
+	}
+
+	snmp.decreaseCurrEstab()
+	if got := atomic.LoadUint64(&snmp.CurrEstab); got != want-1 {
+		t.Fatalf("snmp.CurrEstab after decrease = %d, want %d", got, want-1)
+	}
+	if got := atomic.LoadUint64(&snmp.MaxConn); got != want {
+		t.Fatalf("snmp.MaxConn dropped after decrease: %d, want %d", got, want)
 	}
 }
