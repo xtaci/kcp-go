@@ -39,40 +39,40 @@ type connManager interface {
 	Close()
 }
 
-// connKey is a peer endpoint tuple: (remote IP, remote UDP port).
-type connKey = netip.AddrPort
+// connKeyDefault is a peer endpoint tuple: (remote IP, remote UDP port).
+type connKeyDefault = netip.AddrPort
 
-type connManagerImpl struct {
-	connections *xsync.Map[connKey, *UDPSession]
+type connManagerImplDefault struct {
+	connections *xsync.Map[connKeyDefault, *UDPSession]
 }
 
 // connKey returns the remote endpoint tuple (IP, UDP port).
-func (*connManagerImpl) connKey(remoteAddr *net.UDPAddr) connKey {
+func (*connManagerImplDefault) connKey(remoteAddr *net.UDPAddr) connKeyDefault {
 	return remoteAddr.AddrPort()
 }
 
 // Compute atomically updates the session associated with the remote address.
-func (manager *connManagerImpl) Compute(_ libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool) {
+func (manager *connManagerImplDefault) Compute(_ libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool) {
 	key := manager.connKey(remoteAddr)
 	return manager.connections.Compute(key, valueFn)
 }
 
 // Range visits the currently registered sessions without removing them.
-func (manager *connManagerImpl) Range(fn func(conn *UDPSession)) {
-	manager.connections.DeleteMatching(func(_ connKey, conn *UDPSession) (bool, bool) {
+func (manager *connManagerImplDefault) Range(fn func(conn *UDPSession)) {
+	manager.connections.DeleteMatching(func(_ connKeyDefault, conn *UDPSession) (bool, bool) {
 		fn(conn)
 		return false, false
 	})
 }
 
 // Size returns the number of registered sessions.
-func (manager *connManagerImpl) Size() int {
+func (manager *connManagerImplDefault) Size() int {
 	return manager.connections.Size()
 }
 
 // Close releases and removes all registered sessions.
-func (manager *connManagerImpl) Close() {
-	manager.connections.DeleteMatching(func(_ connKey, conn *UDPSession) (bool, bool) {
+func (manager *connManagerImplDefault) Close() {
+	manager.connections.DeleteMatching(func(_ connKeyDefault, conn *UDPSession) (bool, bool) {
 		conn.release()
 		return true, false
 	})
@@ -80,8 +80,8 @@ func (manager *connManagerImpl) Close() {
 
 // newConnManager creates a manager that keys sessions by remote address only.
 func newConnManager() connManager {
-	return &connManagerImpl{
-		connections: xsync.NewMap[connKey, *UDPSession](),
+	return &connManagerImplDefault{
+		connections: xsync.NewMap[connKeyDefault, *UDPSession](),
 	}
 }
 
@@ -137,5 +137,35 @@ func (manager *connManagerImplUnspecified) Close() {
 func newConnManagerUnspecified() connManager {
 	return &connManagerImplUnspecified{
 		connections: xsync.NewMap[connKeyUnspecified, *UDPSession](),
+	}
+}
+
+// connManagerImpl wraps the underlying implementation so callers can treat
+// default and unspecified managers uniformly under a single type.
+// It asserts that the underlying implementation matches a known concrete type
+// (panicking otherwise), allowing the compiler to prove no heap escape occurs.
+type connManagerImpl struct {
+	connManager
+}
+
+func (manager *connManagerImpl) Compute(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool) {
+	switch manager := manager.connManager.(type) {
+	case *connManagerImplDefault:
+		return manager.Compute(laddr, remoteAddr, valueFn)
+	case *connManagerImplUnspecified:
+		return manager.Compute(laddr, remoteAddr, valueFn)
+	default:
+		panic("unreachable")
+	}
+}
+
+func (manager *connManagerImpl) Range(fn func(conn *UDPSession)) {
+	switch manager := manager.connManager.(type) {
+	case *connManagerImplDefault:
+		manager.Range(fn)
+	case *connManagerImplUnspecified:
+		manager.Range(fn)
+	default:
+		panic("unreachable")
 	}
 }
