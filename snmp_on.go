@@ -51,10 +51,15 @@ func (snmp *Snmp) increasePassiveOpens() {
 }
 
 func (snmp *Snmp) increaseCurrEstab() {
-	currestab := atomic.AddUint64(&DefaultSnmp.CurrEstab, 1)
-	maxconn := atomic.LoadUint64(&DefaultSnmp.MaxConn)
-	if currestab > maxconn {
-		atomic.CompareAndSwapUint64(&DefaultSnmp.MaxConn, maxconn, currestab)
+	currestab := atomic.AddUint64(&snmp.CurrEstab, 1)
+	for {
+		maxconn := atomic.LoadUint64(&snmp.MaxConn)
+		if currestab <= maxconn {
+			return
+		}
+		if atomic.CompareAndSwapUint64(&snmp.MaxConn, maxconn, currestab) {
+			return
+		}
 	}
 }
 
