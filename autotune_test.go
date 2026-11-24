@@ -1062,7 +1062,7 @@ func feedFECGroupWithMutations(t *testing.T, encoder *fecEncoder, decoder *fecDe
 	t.Helper()
 	encoder.tsLatestPacket = time.Now().UnixMilli()
 	for dataShard := range encoder.dataShards {
-		packet := make([]byte, fecHeaderSizePlus2+32)
+		packet := make([]byte, fecPacketHeaderSize+32)
 		parity := encoder.encode(packet, ^uint32(0))
 		if dataShard != dropDataShard {
 			recycleRecoveredShards(decoder.decode(packet))

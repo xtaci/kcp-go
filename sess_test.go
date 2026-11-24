@@ -1583,11 +1583,11 @@ func TestSetMTU(t *testing.T) {
 	}
 	defer cli.Close()
 
-	// Session headerSize = cryptHeaderSize(20) + fecHeaderSizePlus2(8) = 28
+	// Session headerSize = cryptHeaderSize(20) + fecPacketHeaderSize(8) = 28
 	// UDPSession.SetMtu subtracts headerSize before calling kcp.SetMtu,
 	// so the minimum user-facing MTU that yields kcp mtu = IKCP_OVERHEAD+1 is:
 	//   IKCP_OVERHEAD + 1 + headerSize = 25 + 28 = 53
-	sessionOverhead := cryptHeaderSize + fecHeaderSizePlus2
+	sessionOverhead := cryptHeaderSize + fecPacketHeaderSize
 	minValidMTU := IKCP_OVERHEAD + sessionOverhead + 1
 
 	tests := []struct {

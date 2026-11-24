@@ -50,12 +50,11 @@ import (
 
 // FEC (Forward Error Correction) protocol constants
 const (
-	fecHeaderSize      = 6                 // FEC header: seqid(4B) + type(2B)
-	fecHeaderSizePlus2 = fecHeaderSize + 2 // FEC header + 2B payload size field
-	typeData           = 0xf1              // FEC packet type: data shard
-	typeParity         = 0xf2              // FEC packet type: parity shard
-	typeOOB            = 0xf3              // FEC packet type: out-of-band (unreliable)
-	maxShardSets       = 3                 // discard sets more than this many shard-set intervals behind the newest
+	fecHeaderSize = 6    // FEC header: seqid(4B) + type(2B)
+	typeData      = 0xf1 // FEC packet type: data shard
+	typeParity    = 0xf2 // FEC packet type: parity shard
+	typeOOB       = 0xf3 // FEC packet type: out-of-band (unreliable)
+	maxShardSets  = 3    // discard sets more than this many shard-set intervals behind the newest
 )
 
 // fecPacket is a decoded FEC packet

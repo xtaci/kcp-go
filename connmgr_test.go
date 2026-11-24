@@ -90,8 +90,8 @@ func BenchmarkConnManagerImplAllocs(b *testing.B) {
 
 func TestConnManagerLoad(t *testing.T) {
 	remote := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 10), Port: 54321}
-	local := libnetip.AddrInterfaceFrom(libnetip.AddrFrom4([4]byte{192, 0, 2, 1}), 1)
-	want := &UDPSession{}
+	local := libnetip.AddrInterface{}
+	want := new(UDPSession)
 
 	for _, tc := range []struct {
 		name    string
@@ -115,4 +115,3 @@ func TestConnManagerLoad(t *testing.T) {
 		})
 	}
 }
-
