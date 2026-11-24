@@ -171,7 +171,7 @@ func TestFECDecoderAutoTuneResetsShardState(t *testing.T) {
 
 	for range 4 {
 		for range newDataShards {
-			packet := make([]byte, fecHeaderSizePlus2+32)
+			packet := make([]byte, fecPacketHeaderSize+32)
 			parity := encoder.encode(packet, ^uint32(0))
 			checkPacket(packet)
 			for _, shard := range parity {
@@ -249,8 +249,8 @@ func TestFECDecodeVariablePacketSizes(t *testing.T) {
 
 		for shard := range dataShards {
 			payloadLen := minPayload + rnd.Intn(maxPayload-minPayload+1)
-			buf := make([]byte, fecHeaderSizePlus2+payloadLen)
-			payload := buf[fecHeaderSizePlus2:]
+			buf := make([]byte, fecPacketHeaderSize+payloadLen)
+			payload := buf[fecPacketHeaderSize:]
 			binary.LittleEndian.PutUint32(payload, uint32(group))
 			binary.LittleEndian.PutUint32(payload[4:], uint32(shard))
 			for i := 8; i < len(payload); i++ {
