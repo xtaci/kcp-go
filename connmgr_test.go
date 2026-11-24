@@ -88,3 +88,31 @@ func BenchmarkConnManagerImplAllocs(b *testing.B) {
 	}
 }
 
+func TestConnManagerLoad(t *testing.T) {
+	remote := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 10), Port: 54321}
+	local := libnetip.AddrInterfaceFrom(libnetip.AddrFrom4([4]byte{192, 0, 2, 1}), 1)
+	want := &UDPSession{}
+
+	for _, tc := range []struct {
+		name    string
+		manager connManagerImpl
+	}{
+		{name: "default", manager: connManagerImpl{connManager: newConnManager()}},
+		{name: "unspecified", manager: connManagerImpl{connManager: newConnManagerUnspecified()}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, ok := tc.manager.Load(local, remote); ok || got != nil {
+				t.Fatalf("Load(missing) = (%p, %v), want (nil, false)", got, ok)
+			}
+
+			tc.manager.Compute(local, remote, func(_ *UDPSession, _ bool) (*UDPSession, xsync.ComputeOp) {
+				return want, xsync.UpdateOp
+			})
+
+			if got, ok := tc.manager.Load(local, remote); !ok || got != want {
+				t.Fatalf("Load(present) = (%p, %v), want (%p, true)", got, ok, want)
+			}
+		})
+	}
+}
+

@@ -33,6 +33,7 @@ import (
 // NOTE: We don't use generic because typed connKey() can be inlined calls.
 
 type connManager interface {
+	Load(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool)
 	Compute(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool)
 	Range(func(conn *UDPSession))
 	Size() int
@@ -49,6 +50,12 @@ type connManagerImplDefault struct {
 // connKey returns the remote endpoint tuple (IP, UDP port).
 func (*connManagerImplDefault) connKey(remoteAddr *net.UDPAddr) connKeyDefault {
 	return remoteAddr.AddrPort()
+}
+
+// Load returns the session associated with the remote address, if present.
+func (manager *connManagerImplDefault) Load(_ libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool) {
+	key := manager.connKey(remoteAddr)
+	return manager.connections.Load(key)
 }
 
 // Compute atomically updates the session associated with the remote address.
@@ -106,6 +113,12 @@ func (*connManagerImplUnspecified) connKey(laddr libnetip.AddrInterface, remoteA
 	}
 }
 
+// Load returns the session associated with the local and remote addresses, if present.
+func (manager *connManagerImplUnspecified) Load(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool) {
+	key := manager.connKey(laddr, remoteAddr)
+	return manager.connections.Load(key)
+}
+
 // Compute atomically updates the session for the local and remote addresses.
 func (manager *connManagerImplUnspecified) Compute(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool) {
 	key := manager.connKey(laddr, remoteAddr)
@@ -146,6 +159,17 @@ func newConnManagerUnspecified() connManager {
 // (panicking otherwise), allowing the compiler to prove no heap escape occurs.
 type connManagerImpl struct {
 	connManager
+}
+
+func (manager *connManagerImpl) Load(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr) (*UDPSession, bool) {
+	switch manager := manager.connManager.(type) {
+	case *connManagerImplDefault:
+		return manager.Load(laddr, remoteAddr)
+	case *connManagerImplUnspecified:
+		return manager.Load(laddr, remoteAddr)
+	default:
+		panic("unreachable")
+	}
 }
 
 func (manager *connManagerImpl) Compute(laddr libnetip.AddrInterface, remoteAddr *net.UDPAddr, valueFn func(oldValue *UDPSession, loaded bool) (*UDPSession, xsync.ComputeOp)) (*UDPSession, bool) {
