@@ -38,7 +38,7 @@ func (*Snmp) increaseInErrs()                  {}
 func (*Snmp) increaseInCsumErrors()            {}
 func (*Snmp) addKCPInErrors(delta uint64)      {}
 func (*Snmp) addInSegs(delta uint64)           {}
-func (*Snmp) increaseOutSegs()                 {}
+func (*Snmp) addOutSegs(delta uint64)          {}
 func (*Snmp) addInBytes(delta int)             {}
 func (*Snmp) addOutBytes(delta int)            {}
 func (*Snmp) addRetransSegs(delta uint64)      {}
