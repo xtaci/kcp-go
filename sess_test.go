@@ -193,6 +193,74 @@ func TestWildcardSessionKeys(t *testing.T) {
 	}
 }
 
+// TestGetConnAsyncReleaseOutsideLock verifies that replacing a session via sn == 0
+// releases the old session asynchronously outside the session-map bucket lock.
+func TestGetConnAsyncReleaseOutsideLock(t *testing.T) {
+	l, err := ListenWithOptions("127.0.0.1:0", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	localAddr := l.Addr().(*net.UDPAddr)
+	remoteAddr := &net.UDPAddr{IP: net.IPv4(192, 0, 2, 10), Port: 40001}
+	oldSess, created := l.getConn(libnetip.AddrInterface{}, localAddr, remoteAddr, true, 1, 0)
+	if oldSess == nil || !created {
+		t.Fatalf("initial getConn = (%v, %v), want (non-nil, true)", oldSess, created)
+	}
+
+	// Hold oldSess.mutex so synchronous release() inside Compute would block getConn
+	// and hold the bucket lock.
+	released := make(chan struct{})
+	oldSess.SetReadNotify(func() { close(released) })
+	oldSess.mutex.Lock()
+	replaced := make(chan struct{})
+	var newSess *UDPSession
+	var newCreated bool
+	go func() {
+		newSess, newCreated = l.getConn(libnetip.AddrInterface{}, localAddr, remoteAddr, true, 2, 0)
+		close(replaced)
+	}()
+
+	select {
+	case <-replaced:
+	case <-time.After(time.Second):
+		oldSess.mutex.Unlock()
+		t.Fatal("getConn blocked while old session mutex was held")
+	}
+	if newSess == nil || !newCreated || newSess == oldSess {
+		oldSess.mutex.Unlock()
+		t.Fatalf("replacement getConn = (%p, %v), want distinct new session", newSess, newCreated)
+	}
+
+	// Verify the bucket lock is not held: closeSession on oldSess must return immediately.
+	closeSessionDone := make(chan struct{})
+	go func() {
+		l.closeSession(oldSess)
+		close(closeSessionDone)
+	}()
+	select {
+	case <-closeSessionDone:
+	case <-time.After(time.Second):
+		oldSess.mutex.Unlock()
+		t.Fatal("closeSession blocked while old session release was waiting")
+	}
+
+	select {
+	case <-released:
+		oldSess.mutex.Unlock()
+		t.Fatal("async release finished while oldSess.mutex was still held")
+	default:
+	}
+
+	oldSess.mutex.Unlock()
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("async release did not complete after mutex unlock")
+	}
+}
+
 var (
 	baseport = uint32(10000)
 	key      = []byte("testkey")

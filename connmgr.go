@@ -79,10 +79,7 @@ func (manager *connManagerImplDefault) Size() int {
 
 // Close releases and removes all registered sessions.
 func (manager *connManagerImplDefault) Close() {
-	manager.connections.DeleteMatching(func(_ connKeyDefault, conn *UDPSession) (bool, bool) {
-		conn.release()
-		return true, false
-	})
+	closeConnections(manager.connections)
 }
 
 // newConnManager creates a manager that keys sessions by remote address only.
@@ -140,10 +137,18 @@ func (manager *connManagerImplUnspecified) Size() int {
 
 // Close releases and removes all registered sessions.
 func (manager *connManagerImplUnspecified) Close() {
-	manager.connections.DeleteMatching(func(_ connKeyUnspecified, conn *UDPSession) (bool, bool) {
-		conn.release()
+	closeConnections(manager.connections)
+}
+
+func closeConnections[K comparable](connections *xsync.Map[K, *UDPSession]) {
+	var sessions []*UDPSession
+	connections.DeleteMatching(func(_ K, conn *UDPSession) (bool, bool) {
+		sessions = append(sessions, conn)
 		return true, false
 	})
+	for _, conn := range sessions {
+		conn.release()
+	}
 }
 
 // newConnManagerUnspecified creates a manager for a wildcard listener.

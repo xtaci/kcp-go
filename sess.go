@@ -1384,6 +1384,7 @@ func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *
 	}
 
 	var created bool
+	var oldSess *UDPSession
 	// Compute serializes replacement with other operations on the same session key.
 	sess, _ := l.sessions.Compute(laddr, remoteAddr, func(sess *UDPSession, ok bool) (*UDPSession, xsync.ComputeOp) {
 		if ok {
@@ -1398,8 +1399,9 @@ func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *
 				return nil, xsync.CancelOp
 			}
 
-			// release the existing session, so we can create a new session with the same addr and replace it below.
-			sess.release()
+			// Defer release until Compute drops the bucket lock so replacing a session
+			// neither holds the bucket lock nor stalls the reader loop.
+			oldSess = sess
 		}
 
 		// The connection does not exist, try to create a new one.
@@ -1418,6 +1420,9 @@ func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *
 		created = true
 		return newUDPSession(conv, l.dataShards, l.parityShards, l, l.conn, false, laddr, localAddr, remoteAddr, l.block), xsync.UpdateOp
 	})
+	if oldSess != nil {
+		go oldSess.release()
+	}
 	return sess, created
 }
 
