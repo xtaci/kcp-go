@@ -83,8 +83,8 @@ func (snmp *Snmp) addInSegs(delta uint64) {
 	atomic.AddUint64(&snmp.InSegs, delta)
 }
 
-func (snmp *Snmp) increaseOutSegs() {
-	atomic.AddUint64(&snmp.OutSegs, 1)
+func (snmp *Snmp) addOutSegs(delta uint64) {
+	atomic.AddUint64(&snmp.OutSegs, delta)
 }
 
 func (snmp *Snmp) addInBytes(delta int) {
