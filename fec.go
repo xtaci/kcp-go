@@ -40,7 +40,6 @@
 package kcp
 
 import (
-	"container/heap"
 	"encoding/binary"
 	"sync/atomic"
 	"time"
@@ -64,43 +63,38 @@ func (bts fecPacket) seqid() uint32 { return binary.LittleEndian.Uint32(bts) }
 func (bts fecPacket) flag() uint16  { return binary.LittleEndian.Uint16(bts[4:]) }
 func (bts fecPacket) data() []byte  { return bts[6:] }
 
-// shardHeap holds the FEC shards belonging to one shard set.
-type shardHeap struct {
+// shardGroup holds the deduplicated FEC shards belonging to one shard set.
+// Ordering is unnecessary because shards are placed into decodeCache slots by
+// seqid % shardSize once enough shards arrive.
+type shardGroup struct {
 	elements []fecPacket
 	marks    map[uint32]struct{} // to avoid duplicates
 }
 
-func newShardHeap() *shardHeap {
-	h := &shardHeap{
+func newShardGroup() *shardGroup {
+	return &shardGroup{
 		marks: make(map[uint32]struct{}),
 	}
-	heap.Init(h)
-	return h
 }
 
-func (h *shardHeap) Len() int { return len(h.elements) }
+func (g *shardGroup) Len() int { return len(g.elements) }
 
-func (h *shardHeap) Less(i, j int) bool {
-	return _itimediff(h.elements[j].seqid(), h.elements[i].seqid()) > 0
+func (g *shardGroup) Push(pkt fecPacket) {
+	g.elements = append(g.elements, pkt)
+	g.marks[pkt.seqid()] = struct{}{}
 }
 
-func (h *shardHeap) Swap(i, j int) { h.elements[i], h.elements[j] = h.elements[j], h.elements[i] }
-func (h *shardHeap) Push(x any) {
-	h.elements = append(h.elements, x.(fecPacket))
-	h.marks[x.(fecPacket).seqid()] = struct{}{}
-}
-
-func (h *shardHeap) Pop() any {
-	n := len(h.elements)
-	x := h.elements[n-1]
-	h.elements[n-1] = nil // clear to avoid memory leak
-	h.elements = h.elements[:n-1]
-	delete(h.marks, x.seqid())
+func (g *shardGroup) Pop() fecPacket {
+	n := len(g.elements)
+	x := g.elements[n-1]
+	g.elements[n-1] = nil // clear to avoid memory leak
+	g.elements = g.elements[:n-1]
+	delete(g.marks, x.seqid())
 	return x
 }
 
-func (h *shardHeap) Has(sn uint32) bool {
-	_, exists := h.marks[sn]
+func (g *shardGroup) Has(sn uint32) bool {
+	_, exists := g.marks[sn]
 	return exists
 }
 
@@ -111,7 +105,7 @@ type fecDecoder struct {
 	dataShards   int
 	parityShards int
 	shardSize    int
-	shardSet     map[uint32]*shardHeap // shardMap[initial shard id] = shardHeap
+	shardSet     map[uint32]*shardGroup // shardSet[shard id] = shardGroup
 	paws         uint32                // Protect Against Wrapped Sequence numbers
 
 	// newestShardId tracks the newest shard set observed; sufficiently older
@@ -144,7 +138,7 @@ func newFECDecoder(dataShards, parityShards int) *fecDecoder {
 	dec.dataShards = dataShards
 	dec.parityShards = parityShards
 	dec.shardSize = dataShards + parityShards
-	dec.shardSet = make(map[uint32]*shardHeap)
+	dec.shardSet = make(map[uint32]*shardGroup)
 	dec.paws = 0xffffffff / uint32(dec.shardSize) * uint32(dec.shardSize)
 	codec, err := reedsolomon.New(dataShards, parityShards)
 	if err != nil {
@@ -158,6 +152,11 @@ func newFECDecoder(dataShards, parityShards int) *fecDecoder {
 
 // decode a fec packet
 func (dec *fecDecoder) decode(in fecPacket) [][]byte {
+	// guard against packets exceeding the buffer pool capacity
+	if len(in) > maxPacketSize {
+		return nil
+	}
+
 	// Sample the packet type for auto-tuning
 	if in.flag() == typeData {
 		dec.autoTune.Sample(true, in.seqid())
@@ -200,7 +199,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 						defaultBufferPool.Put(pkt)
 					}
 				}
-				dec.shardSet = make(map[uint32]*shardHeap) // empty the shard set
+				dec.shardSet = make(map[uint32]*shardGroup) // empty the shard set
 				codec, err := reedsolomon.New(autoDS, autoPS)
 				if err != nil {
 					return nil
@@ -220,11 +219,11 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 		return nil
 	}
 
-	// get the shard heap for this shard id
+	// get the shard group for this shard id
 	shardId := dec.getShardId(in.seqid())
 	shard, ok := dec.shardSet[shardId]
 	if !ok {
-		shard = newShardHeap()
+		shard = newShardGroup()
 		dec.shardSet[shardId] = shard
 		DefaultSnmp.increaseFECShardSet()
 	}
@@ -239,7 +238,7 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 		DefaultSnmp.increaseFECParityShards()
 	}
 
-	// push the packet into the shard heap
+	// push the packet into the shard group
 	pkt := fecPacket(defaultBufferPool.Get()[:len(in)])
 	copy(pkt, in)
 	shard.Push(pkt)
@@ -268,10 +267,10 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 		shardsflag[k] = false
 	}
 
-	// pop all shards from the heap and fill into the decode cache
+	// pop all shards from the group and fill into the decode cache
 	var pkts []fecPacket
 	for shard.Len() > 0 {
-		pkt := shard.Pop().(fecPacket)
+		pkt := shard.Pop()
 		pkts = append(pkts, pkt)
 		seqid := pkt.seqid()
 		shards[seqid%uint32(dec.shardSize)] = pkt.data()
