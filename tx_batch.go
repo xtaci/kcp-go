@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-//go:build linux
-
 package kcp
 
 import (
@@ -29,20 +27,17 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// tx is the optimized Linux transmit path, using the sendmmsg syscall to send
+// txBatch is the optimized transmit path, using the sendmmsg syscall to send
 // multiple UDP packets in a single system call.
-func (s *UDPSession) tx(txqueue []ipv4.Message) {
-	// default version
-	if s.platform.batchConn == nil {
-		s.defaultTx(txqueue)
-		return
+func (s *UDPSession) txBatch(txqueue []ipv4.Message) bool {
+	if s.batchConn == nil {
+		return false
 	}
 
-	// x/net version
 	nbytes := 0
 	npkts := 0
 	for len(txqueue) > 0 {
-		n, err := s.platform.batchConn.WriteBatch(txqueue, 0)
+		n, err := s.batchConn.WriteBatch(txqueue, 0)
 		if err != nil {
 			s.notifyWriteError(errors.WithStack(err))
 			break
@@ -57,4 +52,5 @@ func (s *UDPSession) tx(txqueue []ipv4.Message) {
 
 	DefaultSnmp.addOutPkts(npkts)
 	DefaultSnmp.addOutBytes(nbytes)
+	return true
 }
