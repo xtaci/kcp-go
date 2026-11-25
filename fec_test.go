@@ -565,8 +565,10 @@ func TestFECDecodeOversizedPacket(t *testing.T) {
 		t.Fatal("failed to create FEC decoder")
 	}
 
+	// Oversized packet (> maxPacketSize) with mismatched flag must be rejected
+	// before autoTune sampling or shard allocation.
 	oversized := make([]byte, maxPacketSize+1)
-	binary.LittleEndian.PutUint32(oversized, 0)
+	binary.LittleEndian.PutUint32(oversized, 2) // parity slot in 2+1
 	binary.LittleEndian.PutUint16(oversized[4:], typeData)
 
 	if recovered := decoder.decode(fecPacket(oversized)); recovered != nil {
@@ -574,5 +576,8 @@ func TestFECDecodeOversizedPacket(t *testing.T) {
 	}
 	if len(decoder.shardSet) != 0 {
 		t.Fatalf("expected oversized packet not to allocate a shard set, got %d", len(decoder.shardSet))
+	}
+	if decoder.shouldTune {
+		t.Fatal("expected oversized packet not to trigger auto-tuning")
 	}
 }

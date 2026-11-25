@@ -152,6 +152,11 @@ func newFECDecoder(dataShards, parityShards int) *fecDecoder {
 
 // decode a fec packet
 func (dec *fecDecoder) decode(in fecPacket) [][]byte {
+	// guard against packets exceeding the buffer pool capacity
+	if len(in) > maxPacketSize {
+		return nil
+	}
+
 	// Sample the packet type for auto-tuning
 	if in.flag() == typeData {
 		dec.autoTune.Sample(true, in.seqid())
@@ -211,11 +216,6 @@ func (dec *fecDecoder) decode(in fecPacket) [][]byte {
 			// to avoid permanent blocking when detected parameters match current ones
 			dec.shouldTune = false
 		}
-		return nil
-	}
-
-	// guard against packets exceeding the buffer pool capacity
-	if len(in) > maxPacketSize {
 		return nil
 	}
 
