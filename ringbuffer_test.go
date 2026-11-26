@@ -345,3 +345,70 @@ func TestRingForEachReverse(t *testing.T) {
 		t.Errorf("Expected count to be 10, got %d", count)
 	}
 }
+
+func TestRingBufferGrowMethod(t *testing.T) {
+	t.Run("non-positive and already sufficient are no-ops", func(t *testing.T) {
+		r := NewRingBuffer[int](16)
+		initMax := r.MaxLen()
+		r.Grow(0)
+		r.Grow(-10)
+		r.Grow(initMax)
+		if r.MaxLen() != initMax || r.Len() != 0 {
+			t.Fatalf("MaxLen=%d Len=%d, want %d and 0", r.MaxLen(), r.Len(), initMax)
+		}
+	})
+
+	t.Run("grow from empty preserves empty state and avoids further growth", func(t *testing.T) {
+		r := NewRingBuffer[int](8)
+		r.Grow(500)
+		if r.Len() != 0 {
+			t.Fatalf("Len after Grow on empty = %d, want 0", r.Len())
+		}
+		capAfter := r.MaxLen()
+		if capAfter < 500 {
+			t.Fatalf("MaxLen = %d, want >= 500", capAfter)
+		}
+		for i := range 500 {
+			r.Push(i)
+		}
+		if r.MaxLen() != capAfter {
+			t.Fatalf("MaxLen changed during Push: %d -> %d", capAfter, r.MaxLen())
+		}
+		for i := range 500 {
+			got, ok := r.Pop()
+			if !ok || got != i {
+				t.Fatalf("Pop() = (%d, %v), want (%d, true)", got, ok, i)
+			}
+		}
+	})
+
+	t.Run("grow wrapped preserves element order", func(t *testing.T) {
+		r := NewRingBuffer[int](8)
+		for i := range 6 {
+			r.Push(i)
+		}
+		for range 4 {
+			r.Pop()
+		}
+		for i := 6; i < 11; i++ {
+			r.Push(i)
+		}
+		if r.head <= r.tail {
+			t.Fatalf("expected wrapped ring (head=%d, tail=%d)", r.head, r.tail)
+		}
+		r.Grow(100)
+		capAfter := r.MaxLen()
+		for i := 11; i < 111; i++ {
+			r.Push(i)
+		}
+		if r.MaxLen() != capAfter {
+			t.Fatalf("MaxLen changed after Grow: %d -> %d", capAfter, r.MaxLen())
+		}
+		for want := 4; want < 111; want++ {
+			got, ok := r.Pop()
+			if !ok || got != want {
+				t.Fatalf("Pop() = (%d, %v), want (%d, true)", got, ok, want)
+			}
+		}
+	})
+}

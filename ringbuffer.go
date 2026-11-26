@@ -214,12 +214,30 @@ func (r *RingBuffer[T]) IsFull() bool {
 	return (r.tail+1)%len(r.elements) == r.head
 }
 
+// Grow ensures that the ring buffer can accept at least n additional elements
+// via Push without reallocating.
+func (r *RingBuffer[T]) Grow(n int) {
+	if n <= 0 {
+		return
+	}
+	if r.MaxLen()-r.Len() >= n {
+		return
+	}
+	r.growTo(r.Len() + n + 1)
+}
+
 // grow increases the ring buffer's backing-slice length when full.
+func (r *RingBuffer[T]) grow() {
+	r.growTo(len(r.elements) + 1)
+}
+
+// growTo increases the ring buffer's backing-slice length to at least minSize.
 // Growth policy:
 //   - If the backing-slice length is below RINGBUFFER_MIN: grow to RINGBUFFER_MIN
 //   - If it is below RINGBUFFER_EXP: double it
 //   - If it is at or above RINGBUFFER_EXP: increase it by 10% (rounded up)
-func (r *RingBuffer[T]) grow() {
+//   - If the policy step is still below minSize: use minSize directly
+func (r *RingBuffer[T]) growTo(minSize int) {
 	currentLength := r.Len()
 	currentSize := len(r.elements)
 	var newSize int
@@ -232,17 +250,22 @@ func (r *RingBuffer[T]) grow() {
 	default:
 		newSize = currentSize + (currentSize+9)/10 // +10%, rounded up
 	}
+	if newSize < minSize {
+		newSize = minSize
+	}
 
 	newElements := make([]T, newSize)
 
 	// Copy elements to new buffer preserving logical order
-	if r.head < r.tail {
-		// Contiguous data: [head ... tail)
-		copy(newElements, r.elements[r.head:r.tail])
-	} else {
-		// Wrapped data: [head ... end) + [0 ... tail)
-		n := copy(newElements, r.elements[r.head:])
-		copy(newElements[n:], r.elements[:r.tail])
+	if currentLength > 0 {
+		if r.head < r.tail {
+			// Contiguous data: [head ... tail)
+			copy(newElements, r.elements[r.head:r.tail])
+		} else {
+			// Wrapped data: [head ... end) + [0 ... tail)
+			n := copy(newElements, r.elements[r.head:])
+			copy(newElements[n:], r.elements[:r.tail])
+		}
 	}
 
 	r.head = 0
