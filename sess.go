@@ -290,6 +290,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	sess.kcp = NewKCP(conv, sess.output)
+	sess.kcp.SetFramingMode(FramingChunked)
 
 	// Set Default MTU
 	if !sess.SetMtu(IKCP_MTU_DEF) {
@@ -424,46 +425,42 @@ func (s *UDPSession) Read(b []byte) (n int, err error) {
 	}
 }
 
-func (s *UDPSession) writeBuffersLocked(v [][]byte) (int, bool) {
+func (s *UDPSession) writeBuffersLocked(v [][]byte) (int, bool, error) {
 	if s.isClosed() {
-		return 0, false
-	}
-
-	// make sure write do not overflow the max sliding window on both side
-	waitsnd := s.kcp.WaitSnd()
-	if waitsnd >= int(s.kcp.snd_wnd) {
-		return 0, false
+		return 0, false, nil
 	}
 
 	var n int
-	// Transmit data sequentially, keeping each packet within mss.
 	for _, b := range v {
 		n += len(b)
-		// handle each slice for packet splitting
-		for {
-			if len(b) <= int(s.kcp.mss) {
-				s.kcp.Send(b)
-				break
-			}
-
-			s.kcp.Send(b[:s.kcp.mss])
-			b = b[s.kcp.mss:]
-		}
 	}
 
-	waitsnd = s.kcp.WaitSnd()
-	if waitsnd >= int(s.kcp.snd_wnd) || !s.writeDelay {
+	mss := int(s.kcp.mss)
+	if s.kcp.framing == FramingMessage && (mss <= 0 || (n+mss-1)/mss > IKCP_FRG_MAX) {
+		return 0, false, ErrMessageTooLarge
+	}
+
+	// make sure write do not overflow the max sliding window on both side
+	if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) {
+		return 0, false, nil
+	}
+
+	if s.kcp.sendVector(v, n) == -2 {
+		return 0, false, ErrMessageTooLarge
+	}
+
+	if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
 		// put the packets on wire immediately if the inflight window is full
 		// or if write delay is disabled (no merging of outgoing bytes),
 		// so we do not have to wait for the periodic update to uncork.
 		s.kcp.flush(IKCP_FLUSH_FULL)
 	}
-	return n, true
+	return n, true, nil
 }
 
-func (s *UDPSession) writeBuffers(v [][]byte) (n int, ok bool) {
+func (s *UDPSession) writeBuffers(v [][]byte) (n int, ok bool, err error) {
 	s.mutex.Lock()
-	n, ok = s.writeBuffersLocked(v)
+	n, ok, err = s.writeBuffersLocked(v)
 	s.mutex.Unlock()
 
 	if !ok {
@@ -514,7 +511,11 @@ func (s *UDPSession) WriteBuffers(v [][]byte) (n int, err error) {
 			return 0, errors.WithStack(errTimeout)
 		}
 
-		n, ok := s.writeBuffers(v)
+		var ok bool
+		n, ok, err = s.writeBuffers(v)
+		if err != nil {
+			return 0, err
+		}
 		if ok {
 			return n, nil
 		}
@@ -723,16 +724,20 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 	return ret == 0
 }
 
-// Deprecated: toggles the stream mode on/off
-func (s *UDPSession) SetStreamMode(enable bool) {
+// SetFramingMode sets how UDPSession frames writes into KCP segments.
+// Invalid mode values are ignored.
+func (s *UDPSession) SetFramingMode(mode FramingMode) {
 	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.kcp.SetFramingMode(mode)
+	s.mutex.Unlock()
+}
 
-	switch enable {
-	case true:
-		s.kcp.stream = 1
-	default:
-		s.kcp.stream = 0
+// Deprecated: use SetFramingMode instead.
+func (s *UDPSession) SetStreamMode(enable bool) {
+	if enable {
+		s.SetFramingMode(FramingStream)
+	} else {
+		s.SetFramingMode(FramingChunked)
 	}
 }
 

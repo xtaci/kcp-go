@@ -449,3 +449,144 @@ func TestSetMtuRetainsBufferForQueuedOldMssSegment(t *testing.T) {
 		})
 	}
 }
+
+func TestKCPSendVector(t *testing.T) {
+	t.Run("message mode multi-fragment", func(t *testing.T) {
+		var wire [][]byte
+		a := NewKCP(7, func(buf []byte, size int) {
+			wire = append(wire, append([]byte(nil), buf[:size]...))
+		})
+		b := NewKCP(7, func(buf []byte, size int) {})
+		a.SetMtu(100)
+		b.SetMtu(100)
+		a.NoDelay(1, 10, 2, 1)
+		b.NoDelay(1, 10, 2, 1)
+
+		hdr := []byte{0x03}
+		body := bytes.Repeat([]byte("abcdef0123"), 20) // 200 bytes -> 3 fragments at mss=76
+		if ret := a.SendVector([][]byte{nil, hdr, {}, body}); ret != 0 {
+			t.Fatalf("SendVector = %d, want 0", ret)
+		}
+		a.flush(IKCP_FLUSH_FULL)
+
+		for _, pkt := range wire {
+			if ret := b.Input(pkt, IKCP_PACKET_REGULAR, false); ret != 0 {
+				t.Fatalf("Input = %d, want 0", ret)
+			}
+		}
+
+		want := append(append([]byte(nil), hdr...), body...)
+		if got := b.PeekSize(); got != len(want) {
+			t.Fatalf("PeekSize = %d, want %d", got, len(want))
+		}
+		out := make([]byte, len(want))
+		if n := b.Recv(out); n != len(want) {
+			t.Fatalf("Recv = %d, want %d", n, len(want))
+		}
+		if !bytes.Equal(out, want) {
+			t.Fatalf("payload mismatch")
+		}
+	})
+
+	t.Run("stream mode coalescing", func(t *testing.T) {
+		a := NewKCP(9, func(buf []byte, size int) {})
+		a.SetFramingMode(FramingStream)
+		a.SetMtu(100) // mss = 76
+		if ret := a.SendVector([][]byte{[]byte("hello "), []byte("world")}); ret != 0 {
+			t.Fatalf("first SendVector = %d", ret)
+		}
+		if ret := a.SendVector([][]byte{[]byte("!"), []byte("!!")}); ret != 0 {
+			t.Fatalf("second SendVector = %d", ret)
+		}
+		if a.snd_queue.Len() != 1 {
+			t.Fatalf("snd_queue.Len() = %d, want 1", a.snd_queue.Len())
+		}
+		seg, _ := a.snd_queue.Peek()
+		if string(seg.data) != "hello world!!!" {
+			t.Fatalf("coalesced data = %q, want %q", string(seg.data), "hello world!!!")
+		}
+	})
+
+	t.Run("empty and oversized", func(t *testing.T) {
+		a := NewKCP(1, func(buf []byte, size int) {})
+		if ret := a.SendVector(nil); ret != -1 {
+			t.Fatalf("empty SendVector = %d, want -1", ret)
+		}
+		if ret := a.SendVector([][]byte{{}, {}}); ret != -1 {
+			t.Fatalf("all-empty SendVector = %d, want -1", ret)
+		}
+		tooBig := make([]byte, a.MSS()*IKCP_FRG_MAX+1)
+		if ret := a.SendVector([][]byte{tooBig}); ret != -2 {
+			t.Fatalf("oversized SendVector = %d, want -2", ret)
+		}
+
+		// Stream mode is not constrained by IKCP_FRG_MAX and does not mutate input slices.
+		a.SetFramingMode(FramingStream)
+		part1 := []byte("prefix-")
+		part2 := make([]byte, a.MSS()*(IKCP_FRG_MAX+5))
+		for i := range part2 {
+			part2[i] = byte(i)
+		}
+		vec := [][]byte{part1, part2}
+		if ret := a.SendVector(vec); ret != 0 {
+			t.Fatalf("stream mode large SendVector = %d, want 0", ret)
+		}
+		if len(vec[0]) != len(part1) || len(vec[1]) != len(part2) {
+			t.Fatal("SendVector mutated caller slice headers")
+		}
+		for seg := range a.snd_queue.ForEach {
+			if seg.frg != 0 {
+				t.Fatalf("stream mode seg.frg = %d, want 0", seg.frg)
+			}
+		}
+	})
+}
+
+func BenchmarkWriteBuffersChunkedVector(b *testing.B) {
+	s := &UDPSession{
+		shutdown:   make(chan struct{}),
+		writeDelay: true,
+		kcp:        NewKCP(1, func(buf []byte, size int) {}),
+	}
+	s.SetFramingMode(FramingChunked)
+	s.kcp.WndSize(1024, 1024)
+	v := [][]byte{
+		make([]byte, 16),
+		make([]byte, 64),
+		make([]byte, 128),
+		make([]byte, 256),
+	}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		s.writeBuffersLocked(v)
+		for {
+			seg, ok := s.kcp.snd_queue.Pop()
+			if !ok {
+				break
+			}
+			s.kcp.recycleSegment(&seg)
+		}
+	}
+}
+
+func BenchmarkSendVectorLargePrealloc(b *testing.B) {
+	payload := make([]byte, 512*1024)
+	v := [][]byte{payload[:128], payload[128:]}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		k := NewKCP(1, func(buf []byte, size int) {})
+		k.SetFramingMode(FramingStream)
+		k.SendVector(v)
+		for {
+			seg, ok := k.snd_queue.Pop()
+			if !ok {
+				break
+			}
+			k.recycleSegment(&seg)
+		}
+	}
+}

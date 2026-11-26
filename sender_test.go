@@ -429,7 +429,7 @@ func TestCloseRejectsWriterWaitingForSessionLock(t *testing.T) {
 	done := make(chan bool, 1)
 	go func() {
 		close(started)
-		_, ok := s.writeBuffers([][]byte{[]byte("late write")})
+		_, ok, _ := s.writeBuffers([][]byte{[]byte("late write")})
 		done <- ok
 	}()
 	<-started
