@@ -29,6 +29,71 @@ import (
 	"testing"
 )
 
+func TestShardGroupMarks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start uint32
+		size  uint32
+	}{
+		{name: "cross_word_and_bitmap_boundary", start: 247, size: 13},
+		{name: "maximum_group", start: 256, size: 256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			group := newShardGroup()
+			for i := tc.size; i > 0; i-- {
+				seq := tc.start + i - 1
+				if group.Has(seq) {
+					t.Fatalf("sequence %d unexpectedly present", seq)
+				}
+				packet := make(fecPacket, fecHeaderSize)
+				binary.LittleEndian.PutUint32(packet, seq)
+				group.Push(packet)
+			}
+			for i := uint32(0); i < tc.size; i++ {
+				seq := tc.start + i
+				if !group.Has(seq) {
+					t.Fatalf("sequence %d missing", seq)
+				}
+				if got := group.Pop().seqid(); got != seq {
+					t.Fatalf("popped sequence %d, want %d", got, seq)
+				}
+				if group.Has(seq) {
+					t.Fatalf("popped sequence %d still present", seq)
+				}
+			}
+		})
+	}
+}
+
+func TestFECDecodeDuplicateShard(t *testing.T) {
+	decoder := newFECDecoder(3, 1)
+	packet := make(fecPacket, fecHeaderSize+2)
+	binary.LittleEndian.PutUint16(packet[4:], typeData)
+	for _, seq := range []uint32{0, 0, 1} {
+		binary.LittleEndian.PutUint32(packet, seq)
+		decoder.decode(packet)
+	}
+	group := decoder.shardSet[0]
+	if group == nil || group.Len() != 2 {
+		t.Fatalf("duplicate shard changed group size: %v", group)
+	}
+
+	binary.LittleEndian.PutUint32(packet, 2)
+	decoder.decode(packet)
+	if group.Len() != 0 {
+		t.Fatalf("completed group has %d shards, want 0", group.Len())
+	}
+
+	binary.LittleEndian.PutUint32(packet, 0)
+	decoder.decode(packet)
+	if group.Len() != 1 {
+		t.Fatalf("reused group has %d shards, want 1", group.Len())
+	}
+	for group.Len() > 0 {
+		defaultBufferPool.Put(group.Pop())
+	}
+}
+
 func TestFECEncodeConsecutive(t *testing.T) {
 	const (
 		dataShards   = 10

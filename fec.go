@@ -68,20 +68,22 @@ func (bts fecPacket) data() []byte  { return bts[6:] }
 // seqid % shardSize once enough shards arrive.
 type shardGroup struct {
 	elements []fecPacket
-	marks    map[uint32]struct{} // to avoid duplicates
+	// A group spans at most 256 consecutive sequence IDs, so their low
+	// 8 bits uniquely identify its shards.
+	marks [32]byte
 }
 
 func newShardGroup() *shardGroup {
-	return &shardGroup{
-		marks: make(map[uint32]struct{}),
-	}
+	return &shardGroup{}
 }
 
 func (g *shardGroup) Len() int { return len(g.elements) }
 
 func (g *shardGroup) Push(pkt fecPacket) {
 	g.elements = append(g.elements, pkt)
-	g.marks[pkt.seqid()] = struct{}{}
+	sn := pkt.seqid()
+	// Bits 3-7 select the byte; bits 0-2 select the bit to set.
+	g.marks[(sn>>3)&31] |= byte(1) << (sn & 7)
 }
 
 func (g *shardGroup) Pop() fecPacket {
@@ -89,13 +91,15 @@ func (g *shardGroup) Pop() fecPacket {
 	x := g.elements[n-1]
 	g.elements[n-1] = nil // clear to avoid memory leak
 	g.elements = g.elements[:n-1]
-	delete(g.marks, x.seqid())
+	sn := x.seqid()
+	// Clear the bit corresponding to the removed shard.
+	g.marks[(sn>>3)&31] &^= byte(1) << (sn & 7)
 	return x
 }
 
 func (g *shardGroup) Has(sn uint32) bool {
-	_, exists := g.marks[sn]
-	return exists
+	// A set bit indicates that this shard is present.
+	return g.marks[(sn>>3)&31]&(byte(1)<<(sn&7)) != 0
 }
 
 // fecDecoder decodes incoming packets.
@@ -106,7 +110,7 @@ type fecDecoder struct {
 	parityShards int
 	shardSize    int
 	shardSet     map[uint32]*shardGroup // shardSet[shard id] = shardGroup
-	paws         uint32                // Protect Against Wrapped Sequence numbers
+	paws         uint32                 // Protect Against Wrapped Sequence numbers
 
 	// newestShardId tracks the newest shard set observed; sufficiently older
 	// sets are discarded.
