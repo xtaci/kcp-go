@@ -263,75 +263,95 @@ The results below are historical and hardware-specific, not performance guarante
 <summary>Linux amd64 — AMD Ryzen 9 5950X</summary>
 
 ```
-2025/11/26 11:12:51 beginning tests, encryption:salsa20, fec:10/3
 goos: linux
 goarch: amd64
 pkg: github.com/xtaci/kcp-go/v5
 cpu: AMD Ryzen 9 5950X 16-Core Processor
+BenchmarkPacketBufferPoolGetPut
+BenchmarkPacketBufferPoolGetPut/ArrayPointer
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Serial
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Serial-32          98010116                12.37 ns/op            0 B/op         0 allocs/op
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Parallel
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Parallel-32                1000000000               0.7148 ns/op          0 B/op          0 allocs/op
+BenchmarkPacketBufferPoolGetPut/Slice
+BenchmarkPacketBufferPoolGetPut/Slice/Serial
+BenchmarkPacketBufferPoolGetPut/Slice/Serial-32                         37707745                27.47 ns/op           24 B/op          1 allocs/op
+BenchmarkPacketBufferPoolGetPut/Slice/Parallel
+BenchmarkPacketBufferPoolGetPut/Slice/Parallel-32                       81515508                14.07 ns/op           24 B/op          1 allocs/op
+BenchmarkConnManagerAllocs
+BenchmarkConnManagerAllocs-32                                           28268137                41.17 ns/op           17 B/op          2 allocs/op
+BenchmarkConnManagerImplAllocs
+BenchmarkConnManagerImplAllocs-32                                       39315105                29.40 ns/op            0 B/op          0 allocs/op
 BenchmarkSM4
-BenchmarkSM4-32                            56077             21672 ns/op         138.43 MB/s           0 B/op          0 allocs/op
+BenchmarkSM4-32                                                            60841             19203 ns/op         153.31 MB/s           0 B/op          0 allocs/op
 BenchmarkAES128
-BenchmarkAES128-32                        525854              2228 ns/op        1346.69 MB/s           0 B/op          0 allocs/op
+BenchmarkAES128-32                                                        559143              2145 ns/op        1372.49 MB/s           0 B/op          0 allocs/op
 BenchmarkAES192
-BenchmarkAES192-32                        473692              2429 ns/op        1234.95 MB/s           0 B/op          0 allocs/op
+BenchmarkAES192-32                                                        475938              2442 ns/op        1205.33 MB/s           0 B/op          0 allocs/op
 BenchmarkAES256
-BenchmarkAES256-32                        427497              2725 ns/op        1101.06 MB/s           0 B/op          0 allocs/op
+BenchmarkAES256-32                                                        455337              2633 ns/op        1118.05 MB/s           0 B/op          0 allocs/op
 BenchmarkTEA
-BenchmarkTEA-32                           149976              8085 ns/op         371.06 MB/s           0 B/op          0 allocs/op
+BenchmarkTEA-32                                                           141236              8534 ns/op         344.97 MB/s           0 B/op          0 allocs/op
 BenchmarkXOR
-BenchmarkXOR-32                         12333190                92.35 ns/op     32485.16 MB/s          0 B/op          0 allocs/op
+BenchmarkXOR-32                                                         24354942                49.34 ns/op     59669.95 MB/s          0 B/op          0 allocs/op
 BenchmarkBlowfish
-BenchmarkBlowfish-32                       70762             16983 ns/op         176.65 MB/s           0 B/op          0 allocs/op
+BenchmarkBlowfish-32                                                       71466             16737 ns/op         175.89 MB/s           0 B/op          0 allocs/op
 BenchmarkNone
-BenchmarkNone-32                        47325206                24.49 ns/op     122482.39 MB/s         0 B/op          0 allocs/op
+BenchmarkNone-32                                                        52308901                23.10 ns/op     127424.75 MB/s         0 B/op          0 allocs/op
 BenchmarkCast5
-BenchmarkCast5-32                          66837             18035 ns/op         166.35 MB/s           0 B/op          0 allocs/op
+BenchmarkCast5-32                                                          65563             18238 ns/op         161.42 MB/s           0 B/op          0 allocs/op
 Benchmark3DES
-Benchmark3DES-32                           18402             64349 ns/op          46.62 MB/s           0 B/op          0 allocs/op
+Benchmark3DES-32                                                           18531             64510 ns/op          45.64 MB/s           0 B/op          0 allocs/op
 BenchmarkTwofish
-BenchmarkTwofish-32                        56440             21380 ns/op         140.32 MB/s           0 B/op          0 allocs/op
+BenchmarkTwofish-32                                                        55621             21628 ns/op         136.12 MB/s           0 B/op          0 allocs/op
 BenchmarkXTEA
-BenchmarkXTEA-32                           45616             26124 ns/op         114.84 MB/s           0 B/op          0 allocs/op
+BenchmarkXTEA-32                                                           46226             25930 ns/op         113.54 MB/s           0 B/op          0 allocs/op
 BenchmarkSalsa20
-BenchmarkSalsa20-32                       525685              2199 ns/op        1363.97 MB/s           0 B/op          0 allocs/op
+BenchmarkSalsa20-32                                                       574081              2006 ns/op        1467.64 MB/s           0 B/op          0 allocs/op
 BenchmarkCRC32
-BenchmarkCRC32-32                       19418395                59.05 ns/op     17341.83 MB/s
+BenchmarkCRC32-32                                                       20230149                58.73 ns/op     17436.55 MB/s
+BenchmarkCFB_AES_128_CRC32
+BenchmarkCFB_AES_128_CRC32-32                                             982596              1220 ns/op        1147.27 MB/s
+BenchmarkAEAD_AES_128_GCM
+BenchmarkAEAD_AES_128_GCM-32                                             4050789               297.7 ns/op      4702.75 MB/s
+BenchmarkCFB_Salsa20_CRC32
+BenchmarkCFB_Salsa20_CRC32-32                                            1000000              1008 ns/op        1389.40 MB/s
+BenchmarkAEAD_Chacha20_Poly1035
+BenchmarkAEAD_Chacha20_Poly1035-32                                       2515954               476.0 ns/op      2941.38 MB/s
 BenchmarkCsprngSystem
-BenchmarkCsprngSystem-32                 2912889               404.3 ns/op        39.58 MB/s
-BenchmarkCsprngMD5
-BenchmarkCsprngMD5-32                   15063580                79.23 ns/op      201.95 MB/s
-BenchmarkCsprngSHA1
-BenchmarkCsprngSHA1-32                  20186407                60.04 ns/op      333.08 MB/s
-BenchmarkCsprngNonceMD5
-BenchmarkCsprngNonceMD5-32              13863704                85.11 ns/op      187.98 MB/s
-BenchmarkCsprngNonceAES128
-BenchmarkCsprngNonceAES128-32           97239751                12.56 ns/op     1274.09 MB/s
+BenchmarkCsprngSystem-32                                                 2676769               448.1 ns/op        35.71 MB/s
+BenchmarkCsprngAES128
+BenchmarkCsprngAES128-32                                                81380560                14.79 ns/op     1082.14 MB/s
+BenchmarkCsprngChacha8
+BenchmarkCsprngChacha8-32                                               99872712                12.03 ns/op      664.95 MB/s
 BenchmarkFECDecode
-BenchmarkFECDecode-32                    1808791               679.1 ns/op      2208.94 MB/s        1641 B/op          3 allocs/op
+BenchmarkFECDecode-32                                                    3835436               315.0 ns/op      4673.44 MB/s         246 B/op          1 allocs/op
 BenchmarkFECEncode
-BenchmarkFECEncode-32                    6671982               181.4 ns/op      8270.76 MB/s           2 B/op          0 allocs/op
+BenchmarkFECEncode-32                                                    6003200               200.2 ns/op      7353.66 MB/s           2 B/op          0 allocs/op
 BenchmarkFlush
-BenchmarkFlush-32                         322982              3809 ns/op               0 B/op          0 allocs/op
+BenchmarkFlush-32                                                         367267              3268 ns/op               0 B/op          0 allocs/op
 BenchmarkDebugLog
-BenchmarkDebugLog-32                    1000000000               0.2146 ns/op
+BenchmarkDebugLog-32                                                    1000000000               1.042 ns/op
 BenchmarkEchoSpeed4K
-BenchmarkEchoSpeed4K-32                    35583             32875 ns/op         124.59 MB/s       18223 B/op        148 allocs/op
+BenchmarkEchoSpeed4K-32                                                    53157             22127 ns/op         185.11 MB/s        1772 B/op         22 allocs/op
 BenchmarkEchoSpeed64K
-BenchmarkEchoSpeed64K-32                    1995            510301 ns/op         128.43 MB/s      284233 B/op       2297 allocs/op
+BenchmarkEchoSpeed64K-32                                                    3157            346416 ns/op         189.18 MB/s       27677 B/op        358 allocs/op
 BenchmarkEchoSpeed512K
-BenchmarkEchoSpeed512K-32                    259           4058131 ns/op         129.19 MB/s     2243058 B/op      18148 allocs/op
+BenchmarkEchoSpeed512K-32                                                    426           2787072 ns/op         188.11 MB/s      222284 B/op       2843 allocs/op
 BenchmarkEchoSpeed1M
-BenchmarkEchoSpeed1M-32                      145           8561996 ns/op         122.47 MB/s     4464227 B/op      36009 allocs/op
+BenchmarkEchoSpeed1M-32                                                      208           5521962 ns/op         189.89 MB/s      449980 B/op       5684 allocs/op
 BenchmarkSinkSpeed4K
-BenchmarkSinkSpeed4K-32                   194648             42136 ns/op          97.21 MB/s        2073 B/op         50 allocs/op
+BenchmarkSinkSpeed4K-32                                                   126181             10293 ns/op         397.93 MB/s         316 B/op          6 allocs/op
 BenchmarkSinkSpeed64K
-BenchmarkSinkSpeed64K-32                   10000            113038 ns/op         579.77 MB/s       29242 B/op        741 allocs/op
+BenchmarkSinkSpeed64K-32                                                    7675            164723 ns/op         397.86 MB/s        5182 B/op         97 allocs/op
 BenchmarkSinkSpeed256K
-BenchmarkSinkSpeed256K-32                   1555            843724 ns/op         621.40 MB/s      229558 B/op       5850 allocs/op
+BenchmarkSinkSpeed256K-32                                                    994           1209617 ns/op         433.43 MB/s       41641 B/op        777 allocs/op
 BenchmarkSinkSpeed1M
-BenchmarkSinkSpeed1M-32                      667           1783214 ns/op         588.03 MB/s      462691 B/op      11694 allocs/op
+BenchmarkSinkSpeed1M-32                                                      448           2627570 ns/op         399.07 MB/s       90851 B/op       1551 allocs/op
+BenchmarkTimedFuncHeap
+BenchmarkTimedFuncHeap-32                                               13520214                88.25 ns/op            0 B/op          0 allocs/op
 PASS
-ok      github.com/xtaci/kcp-go/v5      49.978s
+ok      github.com/xtaci/kcp-go/v5      51.387s
 ```
 </details>
 
@@ -339,112 +359,156 @@ ok      github.com/xtaci/kcp-go/v5      49.978s
 <summary>macOS arm64 — Apple M4 Pro</summary>
 
 ```
-macOS 26.6.2
+macOS 26.7.3
 Apple M4 Pro
 12 CPUs, 24 GiB memory
-Go 1.27.3
+Go 1.27.4
 
 $ go test -run='^$' -bench . -benchmem -count=1
 goos: darwin
 goarch: arm64
 pkg: github.com/xtaci/kcp-go/v5
 cpu: Apple M4 Pro
-BenchmarkSM4-12                       	   51745	     21525 ns/op	 136.77 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES128-12                    	  766851	      1597 ns/op	1843.20 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES192-12                    	  711027	      1714 ns/op	1717.21 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAES256-12                    	  660265	      1835 ns/op	1604.65 MB/s	       0 B/op	       0 allocs/op
-BenchmarkTEA-12                       	  160390	      7446 ns/op	 395.40 MB/s	       0 B/op	       0 allocs/op
-BenchmarkXOR-12                       	27940386	        43.37 ns/op	67884.26 MB/s	       0 B/op	       0 allocs/op
-BenchmarkBlowfish-12                  	   82837	     14560 ns/op	 202.20 MB/s	       0 B/op	       0 allocs/op
-BenchmarkNone-12                      	47629758	        26.09 ns/op	112842.22 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCast5-12                     	   82333	     14530 ns/op	 202.62 MB/s	       0 B/op	       0 allocs/op
-Benchmark3DES-12                      	   20512	     57895 ns/op	  50.85 MB/s	       0 B/op	       0 allocs/op
-BenchmarkTwofish-12                   	   62769	     19188 ns/op	 153.43 MB/s	       0 B/op	       0 allocs/op
-BenchmarkXTEA-12                      	   47636	     25590 ns/op	 115.04 MB/s	       0 B/op	       0 allocs/op
-BenchmarkSalsa20-12                   	  303675	      3944 ns/op	 746.49 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCRC32-12                     	14890838	        80.91 ns/op	12656.36 MB/s
-BenchmarkCFB_AES_128_CRC32-12         	 1213918	       988.2 ns/op	1416.79 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAEAD_AES_128_GCM-12          	 6249505	       194.4 ns/op	7203.41 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCFB_Salsa20_CRC32-12         	  607309	      1970 ns/op	 710.74 MB/s	       0 B/op	       0 allocs/op
-BenchmarkAEAD_Chacha20_Poly1035-12    	 1000000	      1124 ns/op	1245.71 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCsprngSystem-12              	 6860886	       175.9 ns/op	  90.98 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCsprngAES128-12              	100000000	        10.75 ns/op	1488.95 MB/s	       0 B/op	       0 allocs/op
-BenchmarkCsprngChacha8-12             	133251962	         9.005 ns/op	 888.41 MB/s	       0 B/op	       0 allocs/op
-BenchmarkFECDecode-12                 	 5951834	       198.6 ns/op	7412.60 MB/s	     290 B/op	       2 allocs/op
-BenchmarkFECEncode-12                 	 6632745	       178.9 ns/op	8228.76 MB/s	       2 B/op	       0 allocs/op
-BenchmarkFlush-12                     	  572144	      1966 ns/op	       0 B/op	       0 allocs/op
-BenchmarkDebugLog-12                  	752248714	         1.594 ns/op	       0 B/op	       0 allocs/op
-BenchmarkEchoSpeed4K-12               	   15751	     73867 ns/op	  55.45 MB/s	    6054 B/op	     132 allocs/op
-BenchmarkEchoSpeed64K-12              	    1231	    990333 ns/op	  66.18 MB/s	   82028 B/op	    1788 allocs/op
-BenchmarkEchoSpeed512K-12             	     153	   7894735 ns/op	  66.41 MB/s	  663806 B/op	   14314 allocs/op
-BenchmarkEchoSpeed1M-12               	     100	  15527693 ns/op	  67.53 MB/s	 1388181 B/op	   28534 allocs/op
-BenchmarkSinkSpeed4K-12               	   73106	     17769 ns/op	 230.51 MB/s	    1537 B/op	      34 allocs/op
-BenchmarkSinkSpeed64K-12              	    4190	    279547 ns/op	 234.44 MB/s	   24571 B/op	     552 allocs/op
-BenchmarkSinkSpeed256K-12             	     583	   2224163 ns/op	 235.72 MB/s	  193812 B/op	    4387 allocs/op
-BenchmarkSinkSpeed1M-12               	     235	   4496335 ns/op	 233.21 MB/s	  409976 B/op	    8730 allocs/op
-BenchmarkTimedFuncHeap-12             	22539919	        53.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Serial-12  	183539385	         6.432 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Parallel-12         	1000000000	         0.8019 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPacketBufferPoolGetPut/Slice/Serial-12                  	80577022	        13.55 ns/op	      24 B/op	       1 allocs/op
+BenchmarkPacketBufferPoolGetPut/Slice/Parallel-12                	143337536	         8.575 ns/op	      24 B/op	       1 allocs/op
+BenchmarkConnManagerAllocs-12                                    	53025882	        21.56 ns/op	      17 B/op	       2 allocs/op
+BenchmarkConnManagerImplAllocs-12                                	95109146	        12.82 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSM4-12                                                  	   66414	     18070 ns/op	 162.93 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES128-12                                               	  794239	      1510 ns/op	1949.97 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES192-12                                               	  743060	      1615 ns/op	1823.37 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES256-12                                               	  681664	      1750 ns/op	1682.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTEA-12                                                  	  165542	      7192 ns/op	 409.32 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXOR-12                                                  	29704960	        40.67 ns/op	72385.73 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBlowfish-12                                             	   85344	     14004 ns/op	 210.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkNone-12                                                 	48431604	        24.73 ns/op	119041.32 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCast5-12                                                	   83814	     14178 ns/op	 207.64 MB/s	       0 B/op	       0 allocs/op
+Benchmark3DES-12                                                 	   21549	     55677 ns/op	  52.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTwofish-12                                              	   66288	     18091 ns/op	 162.73 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXTEA-12                                                 	   48271	     24919 ns/op	 118.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSalsa20-12                                              	  322832	      3680 ns/op	 800.02 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCRC32-12                                                	15187437	        79.03 ns/op	12956.84 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCFB_AES_128_CRC32-12                                    	 1298352	       924.7 ns/op	1514.03 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAEAD_AES_128_GCM-12                                     	 6335162	       189.4 ns/op	7390.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCFB_Salsa20_CRC32-12                                    	  638697	      1867 ns/op	 749.94 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAEAD_Chacha20_Poly1035-12                               	 1000000	      1132 ns/op	1236.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCsprngSystem-12                                         	 7053890	       171.6 ns/op	  93.26 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCsprngAES128-12                                         	100000000	        10.19 ns/op	1569.91 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCsprngChacha8-12                                        	139098945	         8.617 ns/op	 928.36 MB/s	       0 B/op	       0 allocs/op
+BenchmarkFECDecode-12                                            	 6912384	       170.9 ns/op	8612.18 MB/s	     245 B/op	       1 allocs/op
+BenchmarkFECEncode-12                                            	 7130154	       168.2 ns/op	8752.22 MB/s	       2 B/op	       0 allocs/op
+BenchmarkFlush-12                                                	  626137	      1727 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDebugLog-12                                             	760116879	         1.578 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEchoSpeed4K-12                                          	   15106	     79711 ns/op	  51.39 MB/s	    2821 B/op	      41 allocs/op
+BenchmarkEchoSpeed64K-12                                         	    1159	   1090530 ns/op	  60.10 MB/s	   38344 B/op	     567 allocs/op
+BenchmarkEchoSpeed512K-12                                        	     139	   8656694 ns/op	  60.56 MB/s	  317701 B/op	    4515 allocs/op
+BenchmarkEchoSpeed1M-12                                          	      93	  17486371 ns/op	  59.97 MB/s	  683001 B/op	    9089 allocs/op
+BenchmarkSinkSpeed4K-12                                          	   62803	     18231 ns/op	 224.68 MB/s	     462 B/op	       6 allocs/op
+BenchmarkSinkSpeed64K-12                                         	    4075	    289811 ns/op	 226.13 MB/s	    7419 B/op	      97 allocs/op
+BenchmarkSinkSpeed256K-12                                        	     562	   2299120 ns/op	 228.04 MB/s	   55895 B/op	     775 allocs/op
+BenchmarkSinkSpeed1M-12                                          	     237	   4684709 ns/op	 223.83 MB/s	  131504 B/op	    1547 allocs/op
+BenchmarkTimedFuncHeap-12                                        	22095123	        53.56 ns/op	       0 B/op	       0 allocs/op
 PASS
-ok  	github.com/xtaci/kcp-go/v5	47.161s
+ok  	github.com/xtaci/kcp-go/v5	53.959s
 ```
 </details>
 
 <details>
-<summary>Linux arm — Raspberry Pi 4</summary>
+<summary>Linux arm64 — Raspberry Pi 4</summary>
 
 ```
-=== Raspberry Pi 4 ===
-
-➜  kcp-go git:(master) cat /proc/cpuinfo
-processor	: 0
-model name	: ARMv7 Processor rev 3 (v7l)
-BogoMIPS	: 108.00
-Features	: half thumb fastmult vfp edsp neon vfpv3 tls vfpv4 idiva idivt vfpd32 lpae evtstrm crc32
-CPU implementer	: 0x41
-CPU architecture: 7
-CPU variant	: 0x0
-CPU part	: 0xd08
-CPU revision	: 3
-
-➜  kcp-go git:(master)  go test -run=^$ -bench .
-2020/01/05 19:25:13 beginning tests, encryption:salsa20, fec:10/3
+$ go test -v -run='^$' -bench .
 goos: linux
-goarch: arm
+goarch: arm64
 pkg: github.com/xtaci/kcp-go/v5
-BenchmarkSM4-4                     20000             86475 ns/op          34.69 MB/s           0 B/op          0 allocs/op
-BenchmarkAES128-4                  20000             62254 ns/op          48.19 MB/s           0 B/op          0 allocs/op
-BenchmarkAES192-4                  20000             71802 ns/op          41.78 MB/s           0 B/op          0 allocs/op
-BenchmarkAES256-4                  20000             80570 ns/op          37.23 MB/s           0 B/op          0 allocs/op
-BenchmarkTEA-4                     50000             37343 ns/op          80.34 MB/s           0 B/op          0 allocs/op
-BenchmarkXOR-4                    100000             22266 ns/op         134.73 MB/s           0 B/op          0 allocs/op
-BenchmarkBlowfish-4                20000             66123 ns/op          45.37 MB/s           0 B/op          0 allocs/op
-BenchmarkNone-4                  3000000               518 ns/op        5786.77 MB/s           0 B/op          0 allocs/op
-BenchmarkCast5-4                   20000             76705 ns/op          39.11 MB/s           0 B/op          0 allocs/op
-Benchmark3DES-4                     5000            418868 ns/op           7.16 MB/s           0 B/op          0 allocs/op
-BenchmarkTwofish-4                  5000            326896 ns/op           9.18 MB/s           0 B/op          0 allocs/op
-BenchmarkXTEA-4                    10000            114418 ns/op          26.22 MB/s           0 B/op          0 allocs/op
-BenchmarkSalsa20-4                 50000             36736 ns/op          81.66 MB/s           0 B/op          0 allocs/op
-BenchmarkCRC32-4                 1000000              1735 ns/op         589.98 MB/s
-BenchmarkCsprngSystem-4          1000000              2179 ns/op           7.34 MB/s
-BenchmarkCsprngMD5-4             2000000               811 ns/op          19.71 MB/s
-BenchmarkCsprngSHA1-4            2000000               862 ns/op          23.19 MB/s
-BenchmarkCsprngNonceMD5-4        2000000               878 ns/op          18.22 MB/s
-BenchmarkCsprngNonceAES128-4     5000000               326 ns/op          48.97 MB/s
-BenchmarkFECDecode-4              200000              9081 ns/op         165.16 MB/s         140 B/op          1 allocs/op
-BenchmarkFECEncode-4              100000             12039 ns/op         124.59 MB/s          11 B/op          0 allocs/op
-BenchmarkFlush-4                  100000             21704 ns/op               0 B/op          0 allocs/op
-BenchmarkEchoSpeed4K-4              2000            981182 ns/op           4.17 MB/s       12384 B/op        424 allocs/op
-BenchmarkEchoSpeed64K-4              100          10503324 ns/op           6.24 MB/s      123616 B/op       3779 allocs/op
-BenchmarkEchoSpeed512K-4              20         138633802 ns/op           3.78 MB/s     1606584 B/op      29233 allocs/op
-BenchmarkEchoSpeed1M-4                 5         372903568 ns/op           2.81 MB/s     4080504 B/op      63600 allocs/op
-BenchmarkSinkSpeed4K-4             10000            121239 ns/op          33.78 MB/s        4647 B/op        104 allocs/op
-BenchmarkSinkSpeed64K-4             1000           1587906 ns/op          41.27 MB/s       50914 B/op       1115 allocs/op
-BenchmarkSinkSpeed256K-4             100          16277830 ns/op          32.21 MB/s      453027 B/op       9296 allocs/op
-BenchmarkSinkSpeed1M-4               100          31040703 ns/op          33.78 MB/s      898097 B/op      18932 allocs/op
+BenchmarkPacketBufferPoolGetPut
+BenchmarkPacketBufferPoolGetPut/ArrayPointer
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Serial
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Serial-4  	19112130	        61.81 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Parallel
+BenchmarkPacketBufferPoolGetPut/ArrayPointer/Parallel-4         	78086307	        15.33 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPacketBufferPoolGetPut/Slice
+BenchmarkPacketBufferPoolGetPut/Slice/Serial
+BenchmarkPacketBufferPoolGetPut/Slice/Serial-4                  	 6565906	       186.1 ns/op	      24 B/op	       1 allocs/op
+BenchmarkPacketBufferPoolGetPut/Slice/Parallel
+BenchmarkPacketBufferPoolGetPut/Slice/Parallel-4                	22321516	        54.60 ns/op	      24 B/op	       1 allocs/op
+BenchmarkConnManagerAllocs
+BenchmarkConnManagerAllocs-4                                    	 3888459	       305.6 ns/op	      17 B/op	       2 allocs/op
+BenchmarkConnManagerImplAllocs
+BenchmarkConnManagerImplAllocs-4                                	 6677256	       179.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSM4
+BenchmarkSM4-4                                                  	   18790	     63911 ns/op	  46.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES128
+BenchmarkAES128-4                                               	   21913	     54753 ns/op	  53.77 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES192
+BenchmarkAES192-4                                               	   18849	     63614 ns/op	  46.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkAES256
+BenchmarkAES256-4                                               	   16566	     72443 ns/op	  40.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTEA
+BenchmarkTEA-4                                                  	   33770	     35531 ns/op	  82.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXOR
+BenchmarkXOR-4                                                  	 2232950	       519.5 ns/op	5667.11 MB/s	       0 B/op	       0 allocs/op
+BenchmarkBlowfish
+BenchmarkBlowfish-4                                             	   19405	     61841 ns/op	  47.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkNone
+BenchmarkNone-4                                                 	 4342510	       276.7 ns/op	10638.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCast5
+BenchmarkCast5-4                                                	   18013	     66630 ns/op	  44.18 MB/s	       0 B/op	       0 allocs/op
+Benchmark3DES
+Benchmark3DES-4                                                 	    4147	    296576 ns/op	   9.93 MB/s	       0 B/op	       0 allocs/op
+BenchmarkTwofish
+BenchmarkTwofish-4                                              	   10000	    114816 ns/op	  25.64 MB/s	       0 B/op	       0 allocs/op
+BenchmarkXTEA
+BenchmarkXTEA-4                                                 	   10000	    112777 ns/op	  26.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkSalsa20
+BenchmarkSalsa20-4                                              	   42936	     27950 ns/op	 105.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCRC32
+BenchmarkCRC32-4                                                	 6691806	       184.1 ns/op	5561.39 MB/s
+BenchmarkCFB_AES_128_CRC32
+BenchmarkCFB_AES_128_CRC32-4                                    	   46272	     25938 ns/op	  53.98 MB/s
+BenchmarkAEAD_AES_128_GCM
+BenchmarkAEAD_AES_128_GCM-4                                     	   14922	     80422 ns/op	  17.41 MB/s
+BenchmarkCFB_Salsa20_CRC32
+BenchmarkCFB_Salsa20_CRC32-4                                    	   88452	     13558 ns/op	 103.26 MB/s
+BenchmarkAEAD_Chacha20_Poly1035
+BenchmarkAEAD_Chacha20_Poly1035-4                               	  133792	      8965 ns/op	 156.16 MB/s
+BenchmarkCsprngSystem
+BenchmarkCsprngSystem-4                                         	 3153832	       357.6 ns/op	  44.74 MB/s
+BenchmarkCsprngAES128
+BenchmarkCsprngAES128-4                                         	 3395547	       353.5 ns/op	  45.27 MB/s
+BenchmarkCsprngChacha8
+BenchmarkCsprngChacha8-4                                        	11190523	       107.2 ns/op	  74.60 MB/s
+BenchmarkFECDecode
+BenchmarkFECDecode-4                                            	  523029	      2079 ns/op	 708.19 MB/s	     246 B/op	       1 allocs/op
+BenchmarkFECEncode
+BenchmarkFECEncode-4                                            	  571377	      2186 ns/op	 673.41 MB/s	       2 B/op	       0 allocs/op
+BenchmarkFlush
+BenchmarkFlush-4                                                	   86679	     13829 ns/op	       0 B/op	       0 allocs/op
+BenchmarkDebugLog
+BenchmarkDebugLog-4                                             	206342220	         5.804 ns/op
+BenchmarkEchoSpeed4K
+BenchmarkEchoSpeed4K-4                                          	    5937	    199945 ns/op	  20.49 MB/s	    3136 B/op	      27 allocs/op
+BenchmarkEchoSpeed64K
+BenchmarkEchoSpeed64K-4                                         	     332	   3273746 ns/op	  20.02 MB/s	   45978 B/op	     436 allocs/op
+BenchmarkEchoSpeed512K
+BenchmarkEchoSpeed512K-4                                        	      44	  27707225 ns/op	  18.92 MB/s	  480992 B/op	    3727 allocs/op
+BenchmarkEchoSpeed1M
+BenchmarkEchoSpeed1M-4                                          	      22	  52303019 ns/op	  20.05 MB/s	 1051987 B/op	    7221 allocs/op
+BenchmarkSinkSpeed4K
+BenchmarkSinkSpeed4K-4                                          	   29979	     39688 ns/op	 103.20 MB/s	     871 B/op	       6 allocs/op
+BenchmarkSinkSpeed64K
+BenchmarkSinkSpeed64K-4                                         	    1743	    674399 ns/op	  97.18 MB/s	   14168 B/op	      97 allocs/op
+BenchmarkSinkSpeed256K
+BenchmarkSinkSpeed256K-4                                        	     236	   5448550 ns/op	  96.23 MB/s	  110260 B/op	     778 allocs/op
+BenchmarkSinkSpeed1M
+BenchmarkSinkSpeed1M-4                                          	     100	  14779277 ns/op	  70.95 MB/s	  280937 B/op	    1563 allocs/op
+BenchmarkTimedFuncHeap
+BenchmarkTimedFuncHeap-4                                        	 2711781	       440.9 ns/op	       0 B/op	       0 allocs/op
 PASS
-ok      github.com/xtaci/kcp-go/v5      64.151s
+ok  	github.com/xtaci/kcp-go/v5	51.272s
 ```
 </details>
-
 
 ## Typical Flame Graph
 ![Typical flame graph](assets/flame.png)
