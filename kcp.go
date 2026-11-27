@@ -28,10 +28,8 @@ import (
 	"time"
 )
 
-var (
-	// ErrMessageTooLarge indicates that a message exceeds IKCP_FRG_MAX fragments.
-	ErrMessageTooLarge = errors.New("kcp: message too large")
-)
+// ErrMessageTooLarge indicates that a message exceeds IKCP_FRG_MAX fragments.
+var ErrMessageTooLarge = errors.New("kcp: message too large")
 
 // KCP Protocol Constants
 const (
@@ -478,29 +476,32 @@ func (kcp *KCP) sendVector(v [][]byte, remaining int) int {
 	mss := int(kcp.mss)
 	var dst []byte
 
-	// append to previous segment in streaming mode (if possible)
-	if kcp.framing == FramingStream && kcp.snd_queue.Len() > 0 {
-		seg := kcp.snd_queue.At(kcp.snd_queue.Len() - 1)
-		if len(seg.data) < mss {
-			extend := min(remaining, mss-len(seg.data))
-			oldlen := len(seg.data)
-			seg.data = seg.data[:oldlen+extend]
-			dst = seg.data[oldlen:]
-			remaining -= extend
-		}
-	}
-
-	fragment := kcp.framing == FramingMessage
 	count := 0
-	if remaining > 0 {
-		freeSlots := kcp.snd_queue.MaxLen() - kcp.snd_queue.Len()
-		if fragment || int64(remaining) > int64(freeSlots)*int64(mss) {
-			count = (remaining + mss - 1) / mss
-			if fragment && count > IKCP_FRG_MAX {
-				return -2
+	fragment := kcp.framing == FramingMessage
+	if !fragment {
+		// append to previous segment in streaming mode (if possible)
+		if kcp.snd_queue.Len() > 0 {
+			seg := kcp.snd_queue.At(kcp.snd_queue.Len() - 1)
+			if len(seg.data) < mss {
+				extend := min(remaining, mss-len(seg.data))
+				oldlen := len(seg.data)
+				seg.data = seg.data[:oldlen+extend]
+				dst = seg.data[oldlen:]
+				remaining -= extend
 			}
-			kcp.snd_queue.Grow(count)
 		}
+		if remaining > 0 {
+			freeSlots := kcp.snd_queue.MaxLen() - kcp.snd_queue.Len()
+			if int64(remaining) > int64(freeSlots)*int64(mss) {
+				kcp.snd_queue.Grow((remaining + mss - 1) / mss)
+			}
+		}
+	} else {
+		count = (remaining + mss - 1) / mss
+		if count > IKCP_FRG_MAX {
+			return -2
+		}
+		kcp.snd_queue.Grow(count)
 	}
 
 	for _, b := range v {
