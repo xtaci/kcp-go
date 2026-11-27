@@ -32,21 +32,24 @@ const maxAutoTuneSamples = 512 // two 256-shard sets, aligned to bitmap words
 // numbers. Older samples outside the window are ignored, and duplicates do
 // not advance it. Missing and conflicting samples break continuity.
 //
-// Each ring position uses two bits (present, bits): 00 means missing, 10 is
-// parity, 11 is data, and 01 is a conflicting duplicate. A conflict remains
-// unusable until that position leaves the window.
+// Each ring position uses two adjacent bits (present, signal): 00 means
+// missing, 10 is parity, 11 is data, and 01 is a conflicting duplicate.
+// A conflict remains unusable until that position leaves the window.
 type autoTune struct {
-	bits    [maxAutoTuneSamples / 64]uint64
-	present [maxAutoTuneSamples / 64]uint64
+	samples [maxAutoTuneSamples / 32]uint64
 	base    uint32 // sequence number at head
 	head    int    // ring index of base
 	count   int    // sequence positions in the window, including gaps
 }
 
+// clear resets a ring position to the missing state before reuse.
 func (tune *autoTune) clear(index int) {
-	mask := uint64(1) << (index % 64)
-	tune.bits[index/64] &^= mask
-	tune.present[index/64] &^= mask
+	tune.samples[index/32] &^= uint64(3) << (2 * (index % 32))
+}
+
+// sampleAt returns the two-bit state of a ring position.
+func (tune *autoTune) sampleAt(index int) uint64 {
+	return (tune.samples[index/32] >> (2 * (index % 32))) & 3
 }
 
 // Sample adds a signal sample to the sequence-number window. Sequence
@@ -76,8 +79,7 @@ func (tune *autoTune) Sample(bit bool, seq uint32) {
 		advance := offset - maxAutoTuneSamples + 1
 		if advance >= int64(tune.count) {
 			// The new window no longer overlaps any existing sample.
-			tune.bits = [len(tune.bits)]uint64{}
-			tune.present = [len(tune.present)]uint64{}
+			tune.samples = [len(tune.samples)]uint64{}
 			tune.head = 0
 			tune.base = seq
 			tune.count = 1
@@ -98,19 +100,19 @@ func (tune *autoTune) Sample(bit bool, seq uint32) {
 		tune.count = int(offset) + 1
 	}
 	index := (tune.head + int(offset)) % maxAutoTuneSamples
-	mask := uint64(1) << (index % 64)
-	word := index / 64
-	if tune.present[word]&mask != 0 {
-		if (tune.bits[word]&mask != 0) != bit {
-			// Conflicts remain distinct from missing slots on later arrivals.
-			tune.present[word] &^= mask
-			tune.bits[word] |= mask
-		}
-	} else if tune.bits[word]&mask == 0 {
-		tune.present[word] |= mask
-		if bit {
-			tune.bits[word] |= mask
-		}
+	shift := 2 * (index % 32)
+	word := index / 32
+	value := uint64(2)
+	if bit {
+		value |= 1
+	}
+	state := tune.sampleAt(index)
+	if state == 0 {
+		tune.samples[word] |= value << shift
+	} else if state&2 != 0 && state != value {
+		// Conflicts remain distinct from missing slots on later arrivals.
+		tune.samples[word] &^= uint64(2) << shift
+		tune.samples[word] |= uint64(1) << shift
 	}
 }
 
@@ -149,14 +151,14 @@ func (tune *autoTune) FindPeriod(bit bool) int {
 	havePrevious := false
 	for i := 0; i < tune.count; i++ {
 		index := (tune.head + i) % maxAutoTuneSamples
-		mask := uint64(1) << (index % 64)
-		if tune.present[index/64]&mask == 0 {
+		state := tune.sampleAt(index)
+		if state&2 == 0 {
 			// A missing or conflicting sample can hide a transition.
 			left = -1
 			havePrevious = false
 			continue
 		}
-		current := tune.bits[index/64]&mask != 0
+		current := state&1 != 0
 		if havePrevious && previous != bit && current == bit {
 			left = i
 		} else if left >= 0 && current != bit {

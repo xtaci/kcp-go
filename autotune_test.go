@@ -63,11 +63,11 @@ func logAutoTunePattern(t *testing.T, tune *autoTune) {
 	var pattern strings.Builder
 	for i := range tune.count {
 		index := (tune.head + i) % maxAutoTuneSamples
-		mask := uint64(1) << (index % 64)
+		state := tune.sampleAt(index)
 		switch {
-		case tune.present[index/64]&mask == 0:
+		case state&2 == 0:
 			pattern.WriteByte('.')
-		case tune.bits[index/64]&mask != 0:
+		case state&1 != 0:
 			pattern.WriteByte('#')
 		default:
 			pattern.WriteByte('_')
@@ -189,6 +189,37 @@ func TestAutoTuneWindowCapacity(t *testing.T) {
 	assert.Equal(t, 1, tune.FindPeriod(true))
 	tune.Sample(false, 512)
 	assert.Equal(t, -1, tune.FindPeriod(true))
+}
+
+// TestAutoTunePackedBoundaries checks adjacent slots across word and ring boundaries.
+func TestAutoTunePackedBoundaries(t *testing.T) {
+	t.Run("word", func(t *testing.T) {
+		tune := autoTune{}
+		for _, sample := range []pulse{
+			{false, 0}, {false, 30}, {true, 31}, {false, 32},
+			{true, 33}, {false, 34},
+		} {
+			tune.Sample(sample.bit, sample.seq)
+		}
+		assert.Equal(t, 1, tune.FindPeriod(true))
+		tune.Sample(false, 31)
+		assert.Equal(t, 1, tune.FindPeriod(true))
+		tune.Sample(false, 33)
+		assert.Equal(t, -1, tune.FindPeriod(true))
+	})
+	t.Run("ring", func(t *testing.T) {
+		tune := autoTune{}
+		tune.Sample(false, 0)
+		tune.Sample(false, 510)
+		tune.Sample(true, 511)
+		tune.Sample(false, 512)
+		assert.Equal(t, 1, tune.FindPeriod(true))
+		tune.Sample(false, 511)
+		assert.Equal(t, -1, tune.FindPeriod(true))
+		tune.Sample(true, 513)
+		tune.Sample(false, 514)
+		assert.Equal(t, 1, tune.FindPeriod(true))
+	})
 }
 
 // TestAutoTuneSlidingWindowAgainstReference compares each update with a
