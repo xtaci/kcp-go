@@ -28,6 +28,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha1"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log/slog"
@@ -2331,4 +2332,361 @@ func TestSendOOB_Errors(t *testing.T) {
 	if err == nil || err.Error() != "OOB payload too large" {
 		t.Errorf("expected 'OOB payload too large', got %v", err)
 	}
+}
+
+func newUpdaterTestSession(updateFn func()) *UDPSession {
+	return &UDPSession{
+		kcp:      NewKCP(1, func([]byte, int) {}),
+		shutdown: make(chan struct{}),
+		updateFn: updateFn,
+	}
+}
+
+func notifyUpdater(called chan<- struct{}) {
+	select {
+	case called <- struct{}{}:
+	default:
+	}
+}
+
+func updaterTestKCPPacket(payload []byte) []byte {
+	packet := make([]byte, IKCP_OVERHEAD+len(payload))
+	binary.LittleEndian.PutUint32(packet, 1)
+	packet[4] = IKCP_CMD_PUSH
+	binary.LittleEndian.PutUint16(packet[6:], uint16(IKCP_WND_RCV))
+	binary.LittleEndian.PutUint32(packet[8:], 1)
+	binary.LittleEndian.PutUint32(packet[20:], uint32(len(payload)))
+	copy(packet[IKCP_OVERHEAD:], payload)
+	return packet
+}
+
+func waitForUpdaterCall(t *testing.T, called <-chan struct{}) {
+	t.Helper()
+
+	select {
+	case <-called:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for updater callback")
+	}
+}
+
+func TestUDPSessionUpdateParksWhenIdle(t *testing.T) {
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.NoDelay(1, 10, 0, 0)
+
+	s.update()
+
+	if !s.updaterParked.Load() {
+		t.Fatal("idle session updater was not parked")
+	}
+	select {
+	case <-called:
+		t.Fatal("idle session scheduled another update")
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestUDPSessionUpdateDoesNotParkWithOutstandingData(t *testing.T) {
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.NoDelay(1, 10, 0, 1)
+	if ret := s.kcp.Send([]byte("pending")); ret != 0 {
+		t.Fatalf("KCP Send returned %d", ret)
+	}
+
+	s.update()
+
+	if got := s.kcp.snd_buf.Len(); got != 1 {
+		t.Fatalf("in-flight send buffer has %d segments, want 1", got)
+	}
+	if s.updaterParked.Load() {
+		t.Fatal("session with outstanding data was parked")
+	}
+	waitForUpdaterCall(t, called)
+}
+
+func TestUDPSessionUpdateDoesNotParkWithZeroRemoteWindow(t *testing.T) {
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.kcp.rmt_wnd = 0
+
+	s.update()
+
+	if s.updaterParked.Load() {
+		t.Fatal("session with a zero remote window was parked")
+	}
+	waitForUpdaterCall(t, called)
+}
+
+func TestUDPSessionUpdateFlushesPendingControlPacketsBeforeParking(t *testing.T) {
+	var outputs atomic.Int32
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp = NewKCP(1, func([]byte, int) { outputs.Add(1) })
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.kcp.acklist = append(s.kcp.acklist, ackItem{sn: 0})
+	s.kcp.probe = IKCP_ASK_TELL
+
+	s.update()
+
+	if len(s.kcp.acklist) != 0 {
+		t.Fatalf("pending ACKs remain after update: %d", len(s.kcp.acklist))
+	}
+	if s.kcp.probe != 0 {
+		t.Fatalf("pending probes remain after update: %d", s.kcp.probe)
+	}
+	if got := outputs.Load(); got == 0 {
+		t.Fatal("update did not flush pending ACK/probe packets")
+	}
+	if !s.updaterParked.Load() {
+		t.Fatal("session was not parked after flushing pending control packets")
+	}
+	select {
+	case <-called:
+		t.Fatal("session scheduled another update after flushing pending control packets")
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestUDPSessionKickUpdaterDoesNothingWhenRunning(t *testing.T) {
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+
+	s.kickUpdater()
+
+	select {
+	case <-called:
+		t.Fatal("kick on a running updater scheduled an update")
+	case <-time.After(30 * time.Millisecond):
+	}
+}
+
+func TestUDPSessionKickUpdaterConcurrent(t *testing.T) {
+	const callers = 64
+
+	called := make(chan struct{}, callers)
+	var calls atomic.Int32
+	s := newUpdaterTestSession(func() {
+		calls.Add(1)
+		notifyUpdater(called)
+	})
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.update()
+	if !s.updaterParked.Load() {
+		t.Fatal("updater was not parked before concurrent kicks")
+	}
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(callers)
+	for range callers {
+		go func() {
+			defer wg.Done()
+			<-start
+			s.kickUpdater()
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	waitForUpdaterCall(t, called)
+	// All kicks have returned. Allow any incorrectly scheduled duplicate tasks
+	// to run before checking the callback count.
+	select {
+	case <-called:
+		t.Fatal("concurrent kicks scheduled more than one update")
+	case <-time.After(50 * time.Millisecond):
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("updater callback called %d times, want 1", got)
+	}
+	if s.updaterParked.Load() {
+		t.Fatal("updater remained parked after a successful kick")
+	}
+}
+
+func TestUDPSessionUpdateAndWriteDoNotLoseWakeup(t *testing.T) {
+	const iterations = 128
+
+	for range iterations {
+		s := newUpdaterTestSession(func() {})
+		s.kcp.NoDelay(1, 10, 0, 1)
+
+		start := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			<-start
+			s.update()
+		}()
+		go func() {
+			defer wg.Done()
+			<-start
+			if n, ok := s.writeBuffers([][]byte{[]byte("x")}); !ok || n != 1 {
+				t.Errorf("writeBuffers = (%d, %v), want (1, true)", n, ok)
+			}
+		}()
+		close(start)
+		wg.Wait()
+
+		if got := s.kcp.WaitSnd(); got != 1 {
+			t.Fatalf("WaitSnd() = %d, want 1", got)
+		}
+		if s.updaterParked.Load() {
+			t.Fatal("updater remained parked with an outstanding write")
+		}
+	}
+}
+
+func TestUDPSessionKickUpdaterRestartsUpdateLoop(t *testing.T) {
+	updated := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() {})
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.updateFn = func() {
+		// Prevent a failed assertion from leaving a self-rescheduling test callback.
+		s.updateFn = func() {}
+		s.update()
+		notifyUpdater(updated)
+	}
+
+	s.update()
+	if !s.updaterParked.Load() {
+		t.Fatal("updater was not parked before kick")
+	}
+
+	s.kickUpdater()
+	waitForUpdaterCall(t, updated)
+
+	if !s.updaterParked.Load() {
+		t.Fatal("update loop did not park again after processing an idle session")
+	}
+}
+
+func TestUDPSessionReadKicksUpdaterOnlyWhenReadingFromKCP(t *testing.T) {
+	var calls atomic.Int32
+	called := make(chan struct{}, 1)
+	updateFn := func() {
+		calls.Add(1)
+		notifyUpdater(called)
+	}
+
+	// Reading bytes already buffered in s.input must not wake the updater.
+	buffered := newUpdaterTestSession(updateFn)
+	buffered.kcp.NoDelay(1, 10, 0, 0)
+	buffered.input.Reset([]byte("buffered"))
+	buffered.update()
+	if !buffered.updaterParked.Load() {
+		t.Fatal("buffered session updater was not parked")
+	}
+	if n, ok := buffered.read(make([]byte, 4)); !ok || n != 4 {
+		t.Fatalf("read buffered input = (%d, %v), want (4, true)", n, ok)
+	}
+	if !buffered.updaterParked.Load() {
+		t.Fatal("reading buffered input unexpectedly woke the updater")
+	}
+	if got := calls.Load(); got != 0 {
+		t.Fatalf("buffered read scheduled %d updater callbacks", got)
+	}
+
+	// A KCP Recv from a full receive queue can schedule IKCP_ASK_TELL.
+	fromKCP := newUpdaterTestSession(updateFn)
+	fromKCP.kcp.NoDelay(1, 10, 0, 0)
+	fromKCP.kcp.rcv_wnd = 1
+	fromKCP.kcp.rcv_queue.Push(segment{data: []byte("data")})
+	fromKCP.update()
+	if !fromKCP.updaterParked.Load() {
+		t.Fatal("KCP session updater was not parked")
+	}
+	if n, ok := fromKCP.read(make([]byte, 4)); !ok || n != 4 {
+		t.Fatalf("read KCP data = (%d, %v), want (4, true)", n, ok)
+	}
+	if fromKCP.kcp.probe&IKCP_ASK_TELL == 0 {
+		t.Fatal("KCP Recv did not schedule the expected window-update probe")
+	}
+	if fromKCP.updaterParked.Load() {
+		t.Fatal("reading from KCP did not wake the parked updater")
+	}
+	waitForUpdaterCall(t, called)
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("updater callback called %d times, want 1", got)
+	}
+}
+
+func TestUDPSessionWriteKicksUpdater(t *testing.T) {
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.update()
+	if !s.updaterParked.Load() {
+		t.Fatal("updater was not parked before write")
+	}
+
+	n, ok := s.writeBuffers([][]byte{[]byte("write")})
+	if !ok || n != len("write") {
+		t.Fatalf("writeBuffers = (%d, %v), want (%d, true)", n, ok, len("write"))
+	}
+	if s.updaterParked.Load() {
+		t.Fatal("writeBuffers did not wake the parked updater")
+	}
+	waitForUpdaterCall(t, called)
+}
+
+func TestUDPSessionKCPInputKicksUpdater(t *testing.T) {
+	payload := []byte("input")
+	packet := updaterTestKCPPacket(payload)
+
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.update()
+	if !s.updaterParked.Load() {
+		t.Fatal("updater was not parked before KCP input")
+	}
+
+	s.kcpInput(packet)
+
+	if got := len(s.kcp.acklist); got == 0 {
+		t.Fatal("KCP input did not queue an ACK")
+	}
+	if got := s.kcp.PeekSize(); got != len(payload) {
+		t.Fatalf("KCP receive queue size = %d, want %d", got, len(payload))
+	}
+	if s.updaterParked.Load() {
+		t.Fatal("kcpInput did not wake the parked updater")
+	}
+	waitForUpdaterCall(t, called)
+}
+
+func TestUDPSessionFECInputKicksUpdater(t *testing.T) {
+	payload := []byte("fec input")
+	kcpPacket := updaterTestKCPPacket(payload)
+	packet := make([]byte, fecPacketHeaderSize+len(kcpPacket))
+	binary.LittleEndian.PutUint32(packet, 0) // FEC sequence ID
+	binary.LittleEndian.PutUint16(packet[4:], typeData)
+	binary.LittleEndian.PutUint16(packet[6:], uint16(2+len(kcpPacket)))
+	copy(packet[fecPacketHeaderSize:], kcpPacket)
+
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.NoDelay(1, 10, 0, 0)
+	s.update()
+	if !s.updaterParked.Load() {
+		t.Fatal("updater was not parked before FEC input")
+	}
+
+	s.kcpInput(packet)
+
+	if got := len(s.kcp.acklist); got == 0 {
+		t.Fatal("FEC KCP input did not queue an ACK")
+	}
+	if got := s.kcp.PeekSize(); got != len(payload) {
+		t.Fatalf("KCP receive queue size = %d, want %d", got, len(payload))
+	}
+	if s.updaterParked.Load() {
+		t.Fatal("FEC kcpInput did not wake the parked updater")
+	}
+	waitForUpdaterCall(t, called)
 }
