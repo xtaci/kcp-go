@@ -24,6 +24,7 @@ package kcp
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 	"time"
 
@@ -135,4 +136,84 @@ func TestConcurrentReadersNotifiedForBufferedData(t *testing.T) {
 	if !seen['a'] || !seen['b'] {
 		t.Fatalf("read bytes a=%t b=%t, want both", seen['a'], seen['b'])
 	}
+}
+
+func TestUDPSessionStreamFraming(t *testing.T) {
+	newSession := func() *UDPSession {
+		s := &UDPSession{
+			shutdown:   make(chan struct{}),
+			writeDelay: true,
+			kcp:        NewKCP(1, func(buf []byte, size int) {}),
+		}
+		s.kcp.SetFramingMode(FramingStream)
+		s.kcp.SetMtu(100) // mss = 76
+		return s
+	}
+
+	t.Run("defaults: NewKCP uses FramingMessage, newUDPSession uses FramingStream", func(t *testing.T) {
+		k := NewKCP(1, func(buf []byte, size int) {})
+		if k.framing != FramingMessage {
+			t.Fatalf("NewKCP framing = %v, want FramingMessage", k.framing)
+		}
+
+		port := nextPort()
+		l, err := ListenWithOptions(fmt.Sprintf("127.0.0.1:%d", port), nil, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer l.Close()
+
+		cli, err := DialWithOptions(fmt.Sprintf("127.0.0.1:%d", port), nil, 0, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer cli.Close()
+		if cli.kcp.framing != FramingStream {
+			t.Fatalf("DialWithOptions framing = %v, want FramingStream", cli.kcp.framing)
+		}
+	})
+
+	t.Run("UDPSession packs vector, coalesces across writes, allows large writes, and keeps SetStreamMode in stream mode", func(t *testing.T) {
+		s := newSession()
+		if s.kcp.framing != FramingStream {
+			t.Fatalf("framing = %v, want FramingStream", s.kcp.framing)
+		}
+		s.writeBuffersLocked([][]byte{[]byte("ab"), []byte("cd")})
+		s.writeBuffersLocked([][]byte{[]byte("ef")})
+		if s.kcp.snd_queue.Len() != 1 {
+			t.Fatalf("snd_queue.Len() = %d, want 1", s.kcp.snd_queue.Len())
+		}
+		if got := string(s.kcp.snd_queue.At(0).data); got != "abcdef" {
+			t.Fatalf("coalesced = %q, want %q", got, "abcdef")
+		}
+
+		// Oversized write (> IKCP_FRG_MAX segments) succeeds with frg=0.
+		s2 := newSession()
+		s2.kcp.WndSize(512, 512)
+		large := make([]byte, s2.kcp.MSS()*(IKCP_FRG_MAX+3))
+		if n, ok := s2.writeBuffersLocked([][]byte{{0x01}, large}); !ok || n != 1+len(large) {
+			t.Fatalf("large stream write = (%d, %v), want (%d, true)", n, ok, 1+len(large))
+		}
+		for seg := range s2.kcp.snd_queue.ForEach {
+			if seg.frg != 0 {
+				t.Fatalf("stream seg.frg = %d, want 0", seg.frg)
+			}
+		}
+
+		// Invalid KCP framing mode is ignored.
+		s.kcp.SetFramingMode(FramingMode(99))
+		if s.kcp.framing != FramingStream {
+			t.Fatalf("invalid mode mutated state: framing=%v", s.kcp.framing)
+		}
+
+		// Deprecated SetStreamMode always keeps FramingStream regardless of enable.
+		s.SetStreamMode(false)
+		if s.kcp.framing != FramingStream {
+			t.Fatalf("SetStreamMode(false) -> framing=%v, want FramingStream", s.kcp.framing)
+		}
+		s.SetStreamMode(true)
+		if s.kcp.framing != FramingStream {
+			t.Fatalf("SetStreamMode(true) -> framing=%v, want FramingStream", s.kcp.framing)
+		}
+	})
 }

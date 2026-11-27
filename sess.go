@@ -290,6 +290,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	sess.kcp = NewKCP(conv, sess.output)
+	sess.kcp.SetFramingMode(FramingStream)
 
 	// Set Default MTU
 	if !sess.SetMtu(IKCP_MTU_DEF) {
@@ -430,29 +431,18 @@ func (s *UDPSession) writeBuffersLocked(v [][]byte) (int, bool) {
 	}
 
 	// make sure write do not overflow the max sliding window on both side
-	waitsnd := s.kcp.WaitSnd()
-	if waitsnd >= int(s.kcp.snd_wnd) {
+	if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) {
 		return 0, false
 	}
 
 	var n int
-	// Transmit data sequentially, keeping each packet within mss.
 	for _, b := range v {
 		n += len(b)
-		// handle each slice for packet splitting
-		for {
-			if len(b) <= int(s.kcp.mss) {
-				s.kcp.Send(b)
-				break
-			}
-
-			s.kcp.Send(b[:s.kcp.mss])
-			b = b[s.kcp.mss:]
-		}
 	}
 
-	waitsnd = s.kcp.WaitSnd()
-	if waitsnd >= int(s.kcp.snd_wnd) || !s.writeDelay {
+	s.kcp.sendVector(v, n)
+
+	if s.kcp.WaitSnd() >= int(s.kcp.snd_wnd) || !s.writeDelay {
 		// put the packets on wire immediately if the inflight window is full
 		// or if write delay is disabled (no merging of outgoing bytes),
 		// so we do not have to wait for the periodic update to uncork.
@@ -723,17 +713,13 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 	return ret == 0
 }
 
-// Deprecated: toggles the stream mode on/off
+// SetStreamMode is a no-op kept for backward compatibility.
+//
+// Deprecated: UDPSession implements net.Conn and always operates in stream mode.
 func (s *UDPSession) SetStreamMode(enable bool) {
 	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	switch enable {
-	case true:
-		s.kcp.stream = 1
-	default:
-		s.kcp.stream = 0
-	}
+	s.kcp.SetFramingMode(FramingStream)
+	s.mutex.Unlock()
 }
 
 // SetACKNoDelay controls ACK flushing. When true, ACKs are flushed immediately.

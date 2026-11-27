@@ -60,6 +60,7 @@ const (
 	IKCP_PROBE_INIT  = 500    // initial window probe timeout (ms)
 	IKCP_PROBE_LIMIT = 120000 // maximum window probe timeout (ms), 120 seconds
 	IKCP_SN_OFFSET   = 12     // byte offset of sequence number (sn) within the segment header
+	IKCP_FRG_MAX     = 255    // maximum fragments per message in message mode
 )
 
 type PacketType int8
@@ -74,6 +75,20 @@ type FlushType int8
 const (
 	IKCP_FLUSH_ACKONLY FlushType = 1 << iota
 	IKCP_FLUSH_FULL
+)
+
+// FramingMode controls how writes are framed into KCP segments.
+type FramingMode uint8
+
+const (
+	// FramingMessage enables strict message-boundary framing: writes do not
+	// coalesce, segments carry frg counters for reassembly, and a single write
+	// is limited to IKCP_FRG_MAX fragments.
+	FramingMessage FramingMode = iota
+	// FramingStream enables stream mode: writes may coalesce into the trailing
+	// segment in the send queue, each segment has frg=0, and single writes have
+	// no fragment limit.
+	FramingStream
 )
 
 type KCPLogType int32
@@ -258,10 +273,10 @@ type KCP struct {
 	updated  uint32 // whether Update() has been called at least once
 
 	// Reliability
-	dead_link  uint32 // transmission count at which the link is considered dead
-	fastresend int32  // fast retransmit trigger count, 0 = disabled
-	nocwnd     int32  // 1 = disable congestion control
-	stream     int32  // 1 = stream mode (no message boundaries), 0 = message mode
+	dead_link  uint32      // transmission count at which the link is considered dead
+	fastresend int32       // fast retransmit trigger count, 0 = disabled
+	nocwnd     int32       // 1 = disable congestion control
+	framing    FramingMode // how writes are framed into KCP segments
 
 	// Logging
 	logmask KCPLogType
@@ -305,6 +320,7 @@ func NewKCP(conv uint32, output output_callback) *KCP {
 	kcp.ts_flush = IKCP_INTERVAL
 	kcp.ssthresh = IKCP_THRESH_INIT
 	kcp.dead_link = IKCP_DEADLINK
+	kcp.framing = FramingMessage
 	kcp.output = output
 	kcp.snd_buf = NewRingBuffer[segment](IKCP_WND_SND * 2)
 	kcp.rcv_queue = NewRingBuffer[segment](IKCP_WND_RCV * 2)
@@ -401,7 +417,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 		kcp.recycleSegment(&seg)
 		if seg.frg == 0 {
 			if kcpTrace {
-				kcp.debugLog(IKCP_LOG_RECV, "stream", kcp.stream, "conv", kcp.conv, "sn", seg.sn, "ts", seg.ts, "datalen", n)
+				kcp.debugLog(IKCP_LOG_RECV, "framing", kcp.framing, "conv", kcp.conv, "sn", seg.sn, "ts", seg.ts, "datalen", n)
 			}
 			break
 		}
@@ -418,69 +434,89 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 	return
 }
 
+// SetFramingMode sets how KCP frames writes into segments.
+// Invalid mode values are ignored.
+func (kcp *KCP) SetFramingMode(mode FramingMode) {
+	switch mode {
+	case FramingMessage, FramingStream:
+		kcp.framing = mode
+	}
+}
+
 // Send sends data from the user level and returns a negative value on error.
 func (kcp *KCP) Send(buffer []byte) int {
-	var count int
-	if len(buffer) == 0 {
+	v := [1][]byte{buffer}
+	return kcp.sendVector(v[:], len(buffer))
+}
+
+// SendVector sends a scatter-gather slice vector as a single logical write
+// without intermediate concatenation. Returns 0 on success, -1 if empty, or -2
+// in FramingMessage mode if the write exceeds IKCP_FRG_MAX segments.
+func (kcp *KCP) SendVector(v [][]byte) int {
+	remaining := 0
+	for _, b := range v {
+		remaining += len(b)
+	}
+	return kcp.sendVector(v, remaining)
+}
+
+func (kcp *KCP) sendVector(v [][]byte, remaining int) int {
+	if remaining == 0 {
 		return -1
 	}
 
 	if kcpTrace {
-		kcp.debugLog(IKCP_LOG_SEND, "stream", kcp.stream, "conv", kcp.conv, "datalen", len(buffer))
+		kcp.debugLog(IKCP_LOG_SEND, "framing", kcp.framing, "conv", kcp.conv, "datalen", remaining)
 	}
 
-	// append to previous segment in streaming mode (if possible)
-	if kcp.stream != 0 {
-		if n := kcp.snd_queue.Len(); n > 0 {
-			for ri := kcp.snd_queue.Len() - 1; ri >= 0; ri-- {
-				seg := kcp.snd_queue.At(ri)
-				if len(seg.data) < int(kcp.mss) {
-					capacity := int(kcp.mss) - len(seg.data)
-					extend := min(len(buffer), capacity)
+	mss := int(kcp.mss)
+	var dst []byte
 
-					// grow slice, the underlying cap is guaranteed to
-					// be larger than kcp.mss
-					oldlen := len(seg.data)
-					seg.data = seg.data[:oldlen+extend]
-					copy(seg.data[oldlen:], buffer)
-					buffer = buffer[extend:]
-				}
-				break
+	count := 0
+	fragment := kcp.framing == FramingMessage
+	if !fragment {
+		// append to previous segment in streaming mode (if possible)
+		if kcp.snd_queue.Len() > 0 {
+			seg := kcp.snd_queue.At(kcp.snd_queue.Len() - 1)
+			if len(seg.data) < mss {
+				extend := min(remaining, mss-len(seg.data))
+				oldlen := len(seg.data)
+				seg.data = seg.data[:oldlen+extend]
+				dst = seg.data[oldlen:]
+				remaining -= extend
 			}
 		}
-
-		if len(buffer) == 0 {
-			return 0
+		if remaining > 0 {
+			freeSlots := kcp.snd_queue.MaxLen() - kcp.snd_queue.Len()
+			if int64(remaining) > int64(freeSlots)*int64(mss) {
+				kcp.snd_queue.Grow((remaining + mss - 1) / mss)
+			}
 		}
-	}
-
-	if len(buffer) <= int(kcp.mss) {
-		count = 1
 	} else {
-		count = (len(buffer) + int(kcp.mss) - 1) / int(kcp.mss)
-	}
-
-	if count > 255 {
-		return -2
-	}
-
-	if count == 0 {
-		count = 1
-	}
-
-	for i := 0; i < count; i++ {
-		var size int
-		size = min(len(buffer), int(kcp.mss))
-		seg := kcp.newSegment(size)
-		copy(seg.data, buffer[:size])
-		if kcp.stream == 0 { // message mode
-			seg.frg = uint8(count - i - 1)
-		} else { // stream mode
-			seg.frg = 0
+		count = (remaining + mss - 1) / mss
+		if count > IKCP_FRG_MAX {
+			return -2
 		}
+		kcp.snd_queue.Grow(count)
+	}
 
-		kcp.snd_queue.Push(seg)
-		buffer = buffer[size:]
+	for _, b := range v {
+		for len(b) > 0 {
+			if len(dst) == 0 {
+				size := min(remaining, mss)
+				seg := kcp.newSegment(size)
+				if fragment {
+					count--
+					seg.frg = uint8(count)
+				}
+				kcp.snd_queue.Push(seg)
+				dst = seg.data
+				remaining -= size
+			}
+			n := copy(dst, b)
+			dst = dst[n:]
+			b = b[n:]
+		}
 	}
 	return 0
 }
@@ -1227,4 +1263,9 @@ func (kcp *KCP) ResetRTO() {
 		segment.rto = kcp.rx_rto
 		segment.resendts = current
 	}
+}
+
+// MSS returns the current maximum segment payload size in bytes.
+func (kcp *KCP) MSS() int {
+	return int(kcp.mss)
 }
