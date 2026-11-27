@@ -2690,3 +2690,106 @@ func TestUDPSessionFECInputKicksUpdater(t *testing.T) {
 	}
 	waitForUpdaterCall(t, called)
 }
+
+func TestUDPSessionResetRTO(t *testing.T) {
+	s := newUpdaterTestSession(func() {})
+	s.kcp.NoDelay(1, 10, 0, 1)
+
+	// Keep one segment queued while three others are in flight.
+	const inFlight = 3
+	s.kcp.WndSize(inFlight, 0)
+
+	for i := 0; i < inFlight+1; i++ {
+		if ret := s.kcp.Send([]byte{byte(i)}); ret != 0 {
+			t.Fatalf("KCP Send returned %d for segment %d", ret, i)
+		}
+	}
+	s.kcp.flush(IKCP_FLUSH_FULL)
+
+	if got := s.kcp.snd_buf.Len(); got != inFlight {
+		t.Fatalf("send buffer contains %d segments, want %d", got, inFlight)
+	}
+	if got := s.kcp.snd_queue.Len(); got != 1 {
+		t.Fatalf("send queue contains %d segments, want 1", got)
+	}
+
+	// Save the queued segment state. ResetRTO must not modify it.
+	queued := s.kcp.snd_queue.At(0)
+	queuedRTO := queued.rto
+	queuedResendts := queued.resendts
+
+	const wantRTO = uint32(750)
+	s.kcp.rx_rto = wantRTO
+	futureResendts := currentMs() + IKCP_RTO_MAX
+	xmitBefore := make([]uint32, inFlight)
+
+	for i := 0; i < inFlight; i++ {
+		seg := s.kcp.snd_buf.At(i)
+		xmitBefore[i] = seg.xmit
+		seg.rto = wantRTO + uint32(i+1)*100
+		seg.resendts = futureResendts
+	}
+
+	before := currentMs()
+	s.ResetRTO()
+	after := currentMs()
+
+	// ResetRTO should update every in-flight segment without
+	// transmitting anything synchronously.
+	for i := 0; i < inFlight; i++ {
+		seg := s.kcp.snd_buf.At(i)
+
+		if seg.rto != wantRTO {
+			t.Errorf("segment %d RTO = %d, want %d", i, seg.rto, wantRTO)
+		}
+		if _itimediff(seg.resendts, before) < 0 ||
+			_itimediff(after, seg.resendts) < 0 {
+			t.Errorf("segment %d resend timestamp = %d, want a timestamp between %d and %d",
+				i, seg.resendts, before, after)
+		}
+		if seg.xmit != xmitBefore[i] {
+			t.Errorf("segment %d transmission count = %d after ResetRTO, want unchanged at %d",
+				i, seg.xmit, xmitBefore[i])
+		}
+	}
+
+	// ResetRTO must not modify segments still waiting in snd_queue.
+	if got := s.kcp.snd_queue.Len(); got != 1 {
+		t.Fatalf("send queue contains %d segments after ResetRTO, want 1", got)
+	}
+	queued = s.kcp.snd_queue.At(0)
+	if queued.rto != queuedRTO || queued.resendts != queuedResendts {
+		t.Errorf("queued segment state changed: RTO = %d, resendts = %d; want RTO = %d, resendts = %d",
+			queued.rto, queued.resendts, queuedRTO, queuedResendts)
+	}
+
+	// The next session update must retransmit every in-flight segment.
+	s.update()
+
+	for i := 0; i < inFlight; i++ {
+		if got, want := s.kcp.snd_buf.At(i).xmit, xmitBefore[i]+1; got != want {
+			t.Errorf("segment %d transmission count = %d, want %d", i, got, want)
+		}
+	}
+}
+
+func TestUDPSessionResetRTODoesNotWakeParkedUpdater(t *testing.T) {
+	s := newUpdaterTestSession(func() {})
+
+	// An idle session parks its updater without scheduling another tick.
+	s.update()
+	if !s.updaterParked.Load() {
+		t.Fatal("idle session updater was not parked")
+	}
+
+	if got := s.kcp.WaitSnd(); got != 0 {
+		t.Fatalf("idle session has %d outstanding segments, want 0", got)
+	}
+
+	// There are no in-flight segments whose retransmission timers need resetting.
+	s.ResetRTO()
+
+	if !s.updaterParked.Load() {
+		t.Fatal("ResetRTO unexpectedly woke the idle updater")
+	}
+}
