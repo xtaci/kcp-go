@@ -87,17 +87,14 @@ const (
 type FramingMode uint8
 
 const (
-	// FramingChunked is the legacy default mode: writes do not coalesce across
-	// calls, each segment has frg=0, and single writes have no fragment limit.
-	FramingChunked FramingMode = iota
+	// FramingMessage enables strict message-boundary framing: writes do not
+	// coalesce, segments carry frg counters for reassembly, and a single write
+	// is limited to IKCP_FRG_MAX fragments.
+	FramingMessage FramingMode = iota
 	// FramingStream enables stream mode: writes may coalesce into the trailing
 	// segment in the send queue, each segment has frg=0, and single writes have
 	// no fragment limit.
 	FramingStream
-	// FramingMessage enables strict message-boundary framing: writes do not
-	// coalesce, segments carry frg counters for reassembly, and a single write
-	// is limited to IKCP_FRG_MAX fragments.
-	FramingMessage
 )
 
 type KCPLogType int32
@@ -447,7 +444,7 @@ func (kcp *KCP) Recv(buffer []byte) (n int) {
 // Invalid mode values are ignored.
 func (kcp *KCP) SetFramingMode(mode FramingMode) {
 	switch mode {
-	case FramingChunked, FramingStream, FramingMessage:
+	case FramingMessage, FramingStream:
 		kcp.framing = mode
 	}
 }

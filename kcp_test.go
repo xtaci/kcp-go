@@ -542,13 +542,13 @@ func TestKCPSendVector(t *testing.T) {
 	})
 }
 
-func BenchmarkWriteBuffersChunkedVector(b *testing.B) {
+func BenchmarkWriteBuffersStreamVector(b *testing.B) {
 	s := &UDPSession{
 		shutdown:   make(chan struct{}),
 		writeDelay: true,
 		kcp:        NewKCP(1, func(buf []byte, size int) {}),
 	}
-	s.SetFramingMode(FramingChunked)
+	s.SetFramingMode(FramingStream)
 	s.kcp.WndSize(1024, 1024)
 	v := [][]byte{
 		make([]byte, 16),

@@ -146,12 +146,12 @@ func TestFramingModes(t *testing.T) {
 			writeDelay: true,
 			kcp:        NewKCP(1, func(buf []byte, size int) {}),
 		}
-		s.SetFramingMode(FramingChunked)
+		s.SetFramingMode(FramingStream)
 		s.kcp.SetMtu(100) // mss = 76
 		return s
 	}
 
-	t.Run("defaults: NewKCP uses FramingMessage, newUDPSession uses FramingChunked", func(t *testing.T) {
+	t.Run("defaults: NewKCP uses FramingMessage, newUDPSession uses FramingStream", func(t *testing.T) {
 		k := NewKCP(1, func(buf []byte, size int) {})
 		if k.framing != FramingMessage {
 			t.Fatalf("NewKCP framing = %v, want FramingMessage", k.framing)
@@ -169,52 +169,13 @@ func TestFramingModes(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer cli.Close()
-		if cli.kcp.framing != FramingChunked {
-			t.Fatalf("DialWithOptions framing = %v, want FramingChunked", cli.kcp.framing)
+		if cli.kcp.framing != FramingStream {
+			t.Fatalf("DialWithOptions framing = %v, want FramingStream", cli.kcp.framing)
 		}
 	})
 
-	t.Run("FramingChunked packs vector, does not coalesce across writes, allows large writes", func(t *testing.T) {
+	t.Run("FramingStream packs vector, coalesces across writes, allows large writes, and maps SetStreamMode", func(t *testing.T) {
 		s := newSession()
-		if s.kcp.framing != FramingChunked {
-			t.Fatalf("framing = %v, want FramingChunked", s.kcp.framing)
-		}
-
-		// Single multi-slice write packs into one segment.
-		if n, ok, err := s.writeBuffersLocked([][]byte{[]byte("hdr:"), []byte("body")}); err != nil || !ok || n != 8 {
-			t.Fatalf("first writeBuffersLocked = (%d, %v, %v), want (8, true, nil)", n, ok, err)
-		}
-		// Second write does not coalesce into the previous segment.
-		if n, ok, err := s.writeBuffersLocked([][]byte{[]byte("next")}); err != nil || !ok || n != 4 {
-			t.Fatalf("second writeBuffersLocked = (%d, %v, %v), want (4, true, nil)", n, ok, err)
-		}
-		if s.kcp.snd_queue.Len() != 2 {
-			t.Fatalf("snd_queue.Len() = %d, want 2", s.kcp.snd_queue.Len())
-		}
-		if got := string(s.kcp.snd_queue.At(0).data); got != "hdr:body" {
-			t.Fatalf("seg[0] = %q, want %q", got, "hdr:body")
-		}
-		if got := string(s.kcp.snd_queue.At(1).data); got != "next" {
-			t.Fatalf("seg[1] = %q, want %q", got, "next")
-		}
-
-		// Oversized write (> IKCP_FRG_MAX segments) succeeds with frg=0.
-		s2 := newSession()
-		s2.kcp.WndSize(512, 512)
-		large := make([]byte, s2.kcp.MSS()*(IKCP_FRG_MAX+3))
-		if n, ok, err := s2.writeBuffersLocked([][]byte{{0x01}, large}); err != nil || !ok || n != 1+len(large) {
-			t.Fatalf("large chunked write = (%d, %v, %v), want (%d, true, nil)", n, ok, err, 1+len(large))
-		}
-		for seg := range s2.kcp.snd_queue.ForEach {
-			if seg.frg != 0 {
-				t.Fatalf("chunked seg.frg = %d, want 0", seg.frg)
-			}
-		}
-	})
-
-	t.Run("FramingStream coalesces across writes and SetStreamMode maps to FramingMode", func(t *testing.T) {
-		s := newSession()
-		s.SetFramingMode(FramingStream)
 		if s.kcp.framing != FramingStream {
 			t.Fatalf("framing = %v, want FramingStream", s.kcp.framing)
 		}
@@ -227,17 +188,30 @@ func TestFramingModes(t *testing.T) {
 			t.Fatalf("coalesced = %q, want %q", got, "abcdef")
 		}
 
+		// Oversized write (> IKCP_FRG_MAX segments) succeeds with frg=0.
+		s2 := newSession()
+		s2.kcp.WndSize(512, 512)
+		large := make([]byte, s2.kcp.MSS()*(IKCP_FRG_MAX+3))
+		if n, ok, err := s2.writeBuffersLocked([][]byte{{0x01}, large}); err != nil || !ok || n != 1+len(large) {
+			t.Fatalf("large stream write = (%d, %v, %v), want (%d, true, nil)", n, ok, err, 1+len(large))
+		}
+		for seg := range s2.kcp.snd_queue.ForEach {
+			if seg.frg != 0 {
+				t.Fatalf("stream seg.frg = %d, want 0", seg.frg)
+			}
+		}
+
 		// Invalid mode is ignored.
 		s.SetFramingMode(FramingMode(99))
 		if s.kcp.framing != FramingStream {
 			t.Fatalf("invalid mode mutated state: framing=%v", s.kcp.framing)
 		}
 
-		// Deprecated SetStreamMode(false) switches back to FramingChunked, even from FramingMessage.
+		// Deprecated SetStreamMode always sets FramingStream regardless of enable.
 		s.SetFramingMode(FramingMessage)
 		s.SetStreamMode(false)
-		if s.kcp.framing != FramingChunked {
-			t.Fatalf("SetStreamMode(false) -> framing=%v, want FramingChunked", s.kcp.framing)
+		if s.kcp.framing != FramingStream {
+			t.Fatalf("SetStreamMode(false) -> framing=%v, want FramingStream", s.kcp.framing)
 		}
 		s.SetStreamMode(true)
 		if s.kcp.framing != FramingStream {

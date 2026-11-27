@@ -290,7 +290,7 @@ func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn 
 	}
 
 	sess.kcp = NewKCP(conv, sess.output)
-	sess.kcp.SetFramingMode(FramingChunked)
+	sess.kcp.SetFramingMode(FramingStream)
 
 	// Set Default MTU
 	if !sess.SetMtu(IKCP_MTU_DEF) {
@@ -725,6 +725,8 @@ func (s *UDPSession) SetMtu(mtu int) bool {
 }
 
 // SetFramingMode sets how UDPSession frames writes into KCP segments.
+// New sessions default to FramingStream (coalescing across writes with frg=0
+// and no fragment limit, replacing the legacy non-coalescing chunked default).
 // Invalid mode values are ignored.
 func (s *UDPSession) SetFramingMode(mode FramingMode) {
 	s.mutex.Lock()
@@ -732,13 +734,13 @@ func (s *UDPSession) SetFramingMode(mode FramingMode) {
 	s.mutex.Unlock()
 }
 
-// Deprecated: use SetFramingMode instead.
+// SetStreamMode sets FramingStream regardless of enable.
+//
+// Deprecated: UDPSession now defaults to FramingStream and the legacy
+// non-coalescing chunked mode has been merged into FramingStream; use
+// SetFramingMode instead.
 func (s *UDPSession) SetStreamMode(enable bool) {
-	if enable {
-		s.SetFramingMode(FramingStream)
-	} else {
-		s.SetFramingMode(FramingChunked)
-	}
+	s.SetFramingMode(FramingStream)
 }
 
 // SetACKNoDelay controls ACK flushing. When true, ACKs are flushed immediately.
