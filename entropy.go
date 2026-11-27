@@ -112,16 +112,19 @@ func (r *rngAES) updateSeed() {
 	r.count = 0
 }
 
-// Read returns up to 16 pseudorandom bytes generated with AES.
+// Read fills p with pseudorandom bytes generated with AES.
 func (r *rngAES) Read(p []byte) (int, error) {
 	if len(p) == 0 {
 		return 0, nil
 	}
 
 	r.mutex.Lock()
-	r.updateSeed()
-	r.block.Encrypt(r.seed[:], r.seed[:])
-	n := copy(p, r.seed[:])
+	n := 0
+	for n < len(p) {
+		r.updateSeed()
+		r.block.Encrypt(r.seed[:], r.seed[:])
+		n += copy(p[n:], r.seed[:])
+	}
 	r.mutex.Unlock()
 	return n, nil
 }

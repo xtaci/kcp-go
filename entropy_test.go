@@ -51,6 +51,47 @@ func TestEntropyAES(t *testing.T) {
 	}
 }
 
+func TestEntropyAESReadMultipleBlocks(t *testing.T) {
+	key := [aes.BlockSize]byte{1, 2, 3, 4}
+	seed := [aes.BlockSize]byte{5, 6, 7, 8}
+	block, err := aes.NewCipher(key[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	largeRead := &rngAES{block: block, seed: seed}
+	chunkedReads := &rngAES{block: block, seed: seed}
+
+	got := make([]byte, 3*aes.BlockSize+5)
+	n, err := largeRead.Read(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(got) {
+		t.Fatalf("expected %d bytes, got %d", len(got), n)
+	}
+
+	want := make([]byte, len(got))
+	for offset := 0; offset < len(want); {
+		end := min(offset+aes.BlockSize, len(want))
+		n, err := chunkedReads.Read(want[offset:end])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != end-offset {
+			t.Fatalf("expected %d bytes, got %d", end-offset, n)
+		}
+		offset = end
+	}
+
+	if string(got) != string(want) {
+		t.Fatal("large read differs from equivalent block reads")
+	}
+	if largeRead.count != chunkedReads.count {
+		t.Fatalf("expected equal reseed counters, got %d and %d", largeRead.count, chunkedReads.count)
+	}
+}
+
 func TestEntropyChacha8(t *testing.T) {
 	r := NewEntropyChacha8()
 	buf := make([]byte, 32)
@@ -151,6 +192,18 @@ func BenchmarkCsprngAES128(b *testing.B) {
 	r := NewEntropyAES()
 	for b.Loop() {
 		io.ReadFull(r, data[:])
+	}
+}
+
+func BenchmarkCsprngAESLarge(b *testing.B) {
+	data := make([]byte, 1024)
+	b.SetBytes(int64(len(data)))
+
+	r := NewEntropyAES()
+	for b.Loop() {
+		if _, err := r.Read(data); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 
