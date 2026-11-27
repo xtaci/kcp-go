@@ -25,11 +25,12 @@ package kcp
 import (
 	"encoding/binary"
 	"fmt"
+	"math/rand"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -43,6 +44,15 @@ import (
 //
 // The exhaustive matrices cover finite sample windows. They cannot enumerate
 // an unbounded packet stream, so focused tests cover long-running state changes.
+
+// pulse is the independent sequence-and-signal representation used by the
+// test oracle for gap patterns.
+type pulse struct {
+	bit bool
+	seq uint32
+}
+
+// logAutoTunePattern renders the sequence window for FEC test diagnostics.
 func logAutoTunePattern(t *testing.T, tune *autoTune) {
 	t.Helper()
 	if tune.count == 0 {
@@ -50,36 +60,24 @@ func logAutoTunePattern(t *testing.T, tune *autoTune) {
 		return
 	}
 
-	samples := make([]pulse, tune.count)
-	for i := range tune.count {
-		samples[i] = tune.pulses[(tune.head+i)%maxAutoTuneSamples]
-	}
-	sort.Slice(samples, func(i, j int) bool {
-		return _itimediff(samples[i].seq, samples[j].seq) < 0
-	})
-
 	var pattern strings.Builder
-	for i, sample := range samples {
-		if i > 0 {
-			delta := _itimediff(sample.seq, samples[i-1].seq)
-			switch {
-			case delta == 0:
-				pattern.WriteByte('=')
-			case delta > 1:
-				pattern.WriteString(strings.Repeat(".", int(delta)-1))
-			}
-		}
-		if sample.bit {
+	for i := range tune.count {
+		index := (tune.head + i) % maxAutoTuneSamples
+		mask := uint64(1) << (index % 64)
+		switch {
+		case tune.present[index/64]&mask == 0:
+			pattern.WriteByte('.')
+		case tune.bits[index/64]&mask != 0:
 			pattern.WriteByte('#')
-		} else {
+		default:
 			pattern.WriteByte('_')
 		}
 	}
-	t.Logf("pattern: %s (#=data/high, _=parity/low, .=missing, = duplicate sequence)", pattern.String())
+	t.Logf("pattern: %s (#=data/high, _=parity/low, .=missing or conflicting)", pattern.String())
 }
 
+// TestAutoTuneOverflow verifies that sustained input cannot grow the window.
 func TestAutoTuneOverflow(t *testing.T) {
-	// minimal test
 	tune := autoTune{}
 	for i := range 1024 {
 		if i%maxAutoTuneSamples == 0 {
@@ -93,36 +91,185 @@ func TestAutoTuneOverflow(t *testing.T) {
 	assert.Equal(t, maxAutoTuneSamples, tune.count)
 }
 
-func TestAutoTunePop(t *testing.T) {
+// TestAutoTuneSignalSuffixes verifies that detection starts at the first
+// complete pulse, not at a partial pulse at the beginning of a window.
+func TestAutoTuneSignalSuffixes(t *testing.T) {
 	signals := []uint32{0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0}
-	tune := autoTune{}
-	for i, signal := range signals {
-		if signal == 0 {
-			tune.Sample(false, uint32(i))
-		} else {
-			tune.Sample(true, uint32(i))
+	for _, tt := range []struct {
+		start        int
+		data, parity int
+	}{
+		{0, 2, 2},
+		{1, 1, 2},
+		{4, 1, 1},
+	} {
+		tune := autoTune{}
+		for i := tt.start; i < len(signals); i++ {
+			tune.Sample(signals[i] != 0, uint32(i))
 		}
+		assert.Equal(t, tt.parity, tune.FindPeriod(false))
+		assert.Equal(t, tt.data, tune.FindPeriod(true))
 	}
-	assert.Equal(t, 2, tune.FindPeriod(false))
-	assert.Equal(t, 2, tune.FindPeriod(true))
+}
 
-	// Simulate pop by advancing head (removes oldest element)
-	tune.head = (tune.head + 1) % maxAutoTuneSamples
-	tune.count--
+// TestAutoTuneSequenceWindow exercises duplicate, stale and distant samples,
+// including when the window crosses the uint32 sequence boundary.
+func TestAutoTuneSequenceWindow(t *testing.T) {
+	for _, start := range []uint32{0, ^uint32(0) - 100} {
+		t.Run(fmt.Sprint(start), func(t *testing.T) {
+			tune := autoTune{}
+			for i := range maxAutoTuneSamples {
+				tune.Sample(i%2 != 0, start+uint32(i))
+			}
+			// Duplicate and stale samples must not evict the current window.
+			for range maxAutoTuneSamples + 1 {
+				tune.Sample(true, start+1)
+				tune.Sample(false, start-1)
+			}
+			assert.Equal(t, start, tune.base)
+			assert.Equal(t, 1, tune.FindPeriod(true))
 
-	assert.Equal(t, 2, tune.FindPeriod(false))
+			// Advancing the window clears the reused slot, including conflicts.
+			tune.Sample(true, start)
+			tune.Sample(true, start+uint32(maxAutoTuneSamples))
+			assert.Equal(t, start+1, tune.base)
+			assert.Equal(t, 1, tune.FindPeriod(true))
+
+			// A distant jump drops old samples; late arrivals can fill gaps.
+			far := start + 10000
+			tune.Sample(false, far)
+			assert.Equal(t, -1, tune.FindPeriod(true))
+			tune.Sample(false, far-2)
+			tune.Sample(true, far-1)
+			assert.Equal(t, 1, tune.FindPeriod(true))
+		})
+	}
+}
+
+// TestAutoTuneConflictStaysMissing ensures a later duplicate cannot restore
+// a sequence position after conflicting shard types were observed.
+func TestAutoTuneConflictStaysMissing(t *testing.T) {
+	tune := autoTune{}
+	tune.Sample(false, 0)
+	tune.Sample(true, 1)
+	tune.Sample(false, 1)
+	tune.Sample(true, 1)
+	tune.Sample(false, 2)
+	assert.Equal(t, -1, tune.FindPeriod(true))
+}
+
+// TestAutoTuneEvictsConflict verifies that a reused ring slot loses its old
+// conflict marker and accepts the new sequence's sample.
+func TestAutoTuneEvictsConflict(t *testing.T) {
+	tune := autoTune{}
+	tune.Sample(false, 0)
+	tune.Sample(true, 0)
+	for seq := uint32(1); seq < maxAutoTuneSamples; seq++ {
+		tune.Sample(false, seq)
+	}
+	tune.Sample(true, maxAutoTuneSamples)
+	tune.Sample(false, maxAutoTuneSamples+1)
 	assert.Equal(t, 1, tune.FindPeriod(true))
+}
 
-	// after popping more
-	tune.head = (tune.head + 1) % maxAutoTuneSamples
-	tune.count--
-	tune.head = (tune.head + 1) % maxAutoTuneSamples
-	tune.count--
-	tune.head = (tune.head + 1) % maxAutoTuneSamples
-	tune.count--
+// TestAutoTuneCompactStorage guards the per-decoder memory reduction.
+func TestAutoTuneCompactStorage(t *testing.T) {
+	if size := unsafe.Sizeof(autoTune{}); size > 160 {
+		t.Fatalf("autoTune uses %d bytes, want at most 160", size)
+	}
+}
 
-	assert.Equal(t, 1, tune.FindPeriod(false))
+// TestAutoTuneWindowCapacity checks retention and eviction at the window limit.
+func TestAutoTuneWindowCapacity(t *testing.T) {
+	tune := autoTune{}
+	tune.Sample(false, 0)
+	tune.Sample(true, 1)
+	tune.Sample(false, 2)
+	tune.Sample(false, 511)
 	assert.Equal(t, 1, tune.FindPeriod(true))
+	tune.Sample(false, 512)
+	assert.Equal(t, -1, tune.FindPeriod(true))
+}
+
+// TestAutoTuneSlidingWindowAgainstReference compares each update with a
+// sequence-keyed model across repeated window shifts and sequence wraparound.
+func TestAutoTuneSlidingWindowAgainstReference(t *testing.T) {
+	const (
+		parity   = 1
+		data     = 2
+		conflict = 3
+	)
+	for _, start := range []uint32{0, ^uint32(0) - 128} {
+		t.Run(fmt.Sprint(start), func(t *testing.T) {
+			rng := rand.New(rand.NewSource(42))
+			tune := autoTune{}
+			samples := make(map[int]int)
+			newest, previousSeq := 0, 0
+			previousBit := false
+			for step := range 5000 {
+				seq := newest
+				bit := rng.Intn(5) < 3
+				switch action := rng.Intn(200); {
+				case step == 0:
+				case action < 110:
+					seq += 1 + rng.Intn(4)
+				case action < 160:
+					seq -= rng.Intn(maxAutoTuneSamples + 30)
+				case action < 199:
+					seq, bit = previousSeq, previousBit
+					if rng.Intn(4) == 0 {
+						bit = !bit
+					}
+				default:
+					seq += maxAutoTuneSamples + rng.Intn(300)
+				}
+				previousSeq, previousBit = seq, bit
+				tune.Sample(bit, start+uint32(seq))
+
+				if seq > newest {
+					newest = seq
+					for old := range samples {
+						if old < newest-maxAutoTuneSamples+1 {
+							delete(samples, old)
+						}
+					}
+				}
+				if seq >= newest-maxAutoTuneSamples+1 {
+					value := parity
+					if bit {
+						value = data
+					}
+					if old := samples[seq]; old != 0 && old != value {
+						value = conflict
+					}
+					samples[seq] = value
+				}
+
+				for _, target := range []int{parity, data} {
+					want, left, previous := -1, 0, 0
+					inside := false
+					for pos := newest - maxAutoTuneSamples + 1; pos <= newest; pos++ {
+						current := samples[pos]
+						if current == 0 || current == conflict {
+							inside, previous = false, 0
+							continue
+						}
+						if previous != 0 && previous != target && current == target {
+							left = pos
+							inside = true
+						} else if inside && current != target {
+							want = pos - left
+							break
+						}
+						previous = current
+					}
+					if got := tune.FindPeriod(target == data); got != want {
+						t.Fatalf("step=%d seq=%d target=%d: got %d, want %d", step, seq, target, got, want)
+					}
+				}
+			}
+		})
+	}
 }
 
 // TestAutoTuneRingBufferWrapAround tests that the ring buffer handles
@@ -534,6 +681,8 @@ func TestAutoTuneSequenceWrapAround(t *testing.T) {
 	assert.Equal(t, 2, periodFalse)
 }
 
+// TestAutoTuneWithMissingAndDuplicateSamples checks that loss and identical
+// duplicates do not prevent detection of later complete pulses.
 func TestAutoTuneWithMissingAndDuplicateSamples(t *testing.T) {
 	tune := autoTune{}
 	for seq := range uint32(20) {
@@ -551,6 +700,8 @@ func TestAutoTuneWithMissingAndDuplicateSamples(t *testing.T) {
 	assert.Equal(t, 2, tune.FindPeriod(false))
 }
 
+// TestAutoTuneFindsPulseAfterMissingBoundary checks recovery after a missing
+// sample obscures an earlier pulse or one of its boundaries.
 func TestAutoTuneFindsPulseAfterMissingBoundary(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -595,6 +746,8 @@ func TestAutoTuneFindsPulseAfterMissingBoundary(t *testing.T) {
 	}
 }
 
+// TestAutoTuneDiscardsConflictingDuplicateSequence checks that conflicting
+// samples are ignored while later complete pulses remain detectable.
 func TestAutoTuneDiscardsConflictingDuplicateSequence(t *testing.T) {
 	tune := autoTune{}
 	for seq := range uint32(30) {
@@ -610,6 +763,8 @@ func TestAutoTuneDiscardsConflictingDuplicateSequence(t *testing.T) {
 	assert.Equal(t, 2, tune.FindPeriod(false))
 }
 
+// TestAutoTuneDoesNotInferPulseAcrossMissingBoundary rejects transitions
+// inferred from samples whose sequence numbers are not adjacent.
 func TestAutoTuneDoesNotInferPulseAcrossMissingBoundary(t *testing.T) {
 	tune := autoTune{}
 	for seq, bit := range []bool{false, true, true, false, false} {
@@ -623,6 +778,8 @@ func TestAutoTuneDoesNotInferPulseAcrossMissingBoundary(t *testing.T) {
 	assert.Equal(t, -1, tune.FindPeriod(false))
 }
 
+// TestAutoTuneDoesNotInferPulseAcrossInternalGap rejects an apparent pulse
+// whose interior contains an unobserved sequence number.
 func TestAutoTuneDoesNotInferPulseAcrossInternalGap(t *testing.T) {
 	tune := autoTune{}
 	tune.Sample(false, 0)
@@ -635,6 +792,8 @@ func TestAutoTuneDoesNotInferPulseAcrossInternalGap(t *testing.T) {
 	assert.Equal(t, -1, tune.FindPeriod(true))
 }
 
+// TestAutoTuneExhaustiveEightSampleSignalAndLossPatterns compares all
+// eight-position signal and reception masks in forward and reverse order.
 func TestAutoTuneExhaustiveEightSampleSignalAndLossPatterns(t *testing.T) {
 	const windowSize = 8
 	const patternCount = 1 << windowSize
@@ -675,6 +834,8 @@ func TestAutoTuneExhaustiveEightSampleSignalAndLossPatterns(t *testing.T) {
 	}
 }
 
+// TestAutoTuneExhaustiveEightSampleGapPatterns compares all eight-sample
+// signal patterns and combinations of adjacent or separated sequences.
 func TestAutoTuneExhaustiveEightSampleGapPatterns(t *testing.T) {
 	const (
 		sampleCount = 8
@@ -734,6 +895,8 @@ func TestAutoTuneExhaustiveEightSampleGapPatterns(t *testing.T) {
 	}
 }
 
+// TestAutoTuneExhaustiveArrivalOrders checks every arrival permutation for
+// each five-position signal and reception pattern.
 func TestAutoTuneExhaustiveArrivalOrders(t *testing.T) {
 	const (
 		windowSize   = 5
@@ -777,6 +940,8 @@ func TestAutoTuneExhaustiveArrivalOrders(t *testing.T) {
 	}
 }
 
+// TestAutoTuneExhaustiveDuplicatePatterns covers missing, single, duplicate,
+// and conflicting samples at every position of each five-position signal.
 func TestAutoTuneExhaustiveDuplicatePatterns(t *testing.T) {
 	const (
 		windowSize       = 5
@@ -792,6 +957,7 @@ func TestAutoTuneExhaustiveDuplicatePatterns(t *testing.T) {
 	for _, startSeq := range startSeqs {
 		for signalPattern := range signalCount {
 			for sampleStates := range sampleStateCount {
+				// Conflicting duplicates are treated as missing by the oracle.
 				receivedPattern := 0
 				for i := range windowSize {
 					state := sampleStates >> (2 * i) & 3
@@ -839,6 +1005,7 @@ func TestAutoTuneExhaustiveDuplicatePatterns(t *testing.T) {
 	}
 }
 
+// forEachPermutation invokes fn for each ordering, reusing the input slice.
 func forEachPermutation(values []int, fn func([]int)) {
 	var permute func(int)
 	permute = func(index int) {
@@ -856,6 +1023,7 @@ func forEachPermutation(values []int, fn func([]int)) {
 	permute(0)
 }
 
+// completePulsePeriod is the test oracle for a signal and reception bitmask.
 func completePulsePeriod(signalPattern, receivedPattern, windowSize int, bit bool) int {
 	bitAt := func(i int) bool {
 		return signalPattern&(1<<i) != 0
@@ -883,6 +1051,8 @@ func completePulsePeriod(signalPattern, receivedPattern, windowSize int, bit boo
 	return -1
 }
 
+// completePulsePeriodForSamples is the test oracle for sequence-ordered
+// samples that may have gaps or wrap around uint32.
 func completePulsePeriodForSamples(samples []pulse, bit bool) int {
 	for left := 1; left < len(samples); left++ {
 		if samples[left-1].bit == bit || samples[left].bit != bit ||
@@ -903,6 +1073,8 @@ func completePulsePeriodForSamples(samples []pulse, bit bool) int {
 	return -1
 }
 
+// TestFECDecoderAutoTunesConfigurationMatrix checks reconfiguration across
+// shard counts and injected loss and duplicate scenarios.
 func TestFECDecoderAutoTunesConfigurationMatrix(t *testing.T) {
 	scenarios := []struct {
 		name      string
@@ -1005,6 +1177,8 @@ func TestFECDecoderAutoTunesConfigurationMatrix(t *testing.T) {
 	}
 }
 
+// TestFECDecoderAutoTunesAfterIncompleteGroup verifies convergence after loss
+// makes the first shard group ambiguous.
 func TestFECDecoderAutoTunesAfterIncompleteGroup(t *testing.T) {
 	encoder := newFECEncoder(4, 2, 0)
 	decoder := newFECDecoder(1, 1)
@@ -1025,6 +1199,8 @@ func TestFECDecoderAutoTunesAfterIncompleteGroup(t *testing.T) {
 	}
 }
 
+// TestFECDecoderRejectsAutoTuneConfigurationOverShardLimit ensures an
+// inferred configuration exceeding 256 shards is not applied.
 func TestFECDecoderRejectsAutoTuneConfigurationOverShardLimit(t *testing.T) {
 	decoder := newFECDecoder(2, 2)
 	if decoder == nil {
@@ -1058,6 +1234,8 @@ func feedFECGroupWithDuplicate(t *testing.T, encoder *fecEncoder, decoder *fecDe
 	feedFECGroupWithMutations(t, encoder, decoder, dropDataShard, -1, duplicateDataShard)
 }
 
+// feedFECGroupWithMutations sends one encoded group, optionally dropping or
+// duplicating indexed shards; -1 disables the corresponding mutation.
 func feedFECGroupWithMutations(t *testing.T, encoder *fecEncoder, decoder *fecDecoder, dropDataShard, dropParityShard, duplicateDataShard int) {
 	t.Helper()
 	encoder.tsLatestPacket = time.Now().UnixMilli()
@@ -1085,6 +1263,8 @@ func recycleRecoveredShards(shards [][]byte) {
 	}
 }
 
+// TestAutoTuneSupports256Shards verifies the largest supported shard set can
+// be inferred and applied by the decoder.
 func TestAutoTuneSupports256Shards(t *testing.T) {
 	decoder := newFECDecoder(1, 1)
 	if decoder == nil {

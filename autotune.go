@@ -22,45 +22,95 @@
 
 package kcp
 
-import (
-	"sort"
-)
-
-const maxAutoTuneSamples = 258 // 256 + 2 extra samples for edge detection
-
-// pulse represents a single sample in the signal stream: a boolean bit
-// (data=true, parity=false) tagged with its FEC sequence number.
-type pulse struct {
-	bit bool   // true = data shard, false = parity shard
-	seq uint32 // FEC sequence number of this packet
-}
+const maxAutoTuneSamples = 512 // two 256-shard sets, aligned to bitmap words
 
 // autoTune detects the repeating period of data and parity shards in the
 // incoming FEC stream. This allows the decoder to auto-detect the peer's
 // dataShards/parityShards configuration.
 //
-// Algorithm: collect recent samples into a ring buffer, sort by sequence,
-// then scan for the first complete pulse (rising edge -> falling edge)
-// of the target signal. The pulse width equals the shard count.
+// Samples occupy a sliding window of up to maxAutoTuneSamples sequence
+// numbers. Older samples outside the window are ignored, and duplicates do
+// not advance it. Missing and conflicting samples break continuity.
+//
+// Each ring position uses two bits (present, bits): 00 means missing, 10 is
+// parity, 11 is data, and 01 is a conflicting duplicate. A conflict remains
+// unusable until that position leaves the window.
 type autoTune struct {
-	pulses    [maxAutoTuneSamples]pulse // fixed-size array to avoid heap allocations
-	sortCache [maxAutoTuneSamples]pulse // reusable cache for sorting to avoid allocations
-	head      int                       // oldest element index
-	tail      int                       // next write position
-	count     int                       // number of elements
+	bits    [maxAutoTuneSamples / 64]uint64
+	present [maxAutoTuneSamples / 64]uint64
+	base    uint32 // sequence number at head
+	head    int    // ring index of base
+	count   int    // sequence positions in the window, including gaps
 }
 
-// Sample adds a signal sample to the pulse buffer using a ring buffer
-func (tune *autoTune) Sample(bit bool, seq uint32) {
-	// Write to current tail position
-	tune.pulses[tune.tail] = pulse{bit: bit, seq: seq}
-	tune.tail = (tune.tail + 1) % maxAutoTuneSamples
+func (tune *autoTune) clear(index int) {
+	mask := uint64(1) << (index % 64)
+	tune.bits[index/64] &^= mask
+	tune.present[index/64] &^= mask
+}
 
-	if tune.count < maxAutoTuneSamples {
-		tune.count++
-	} else {
-		// Buffer is full, advance head (discard oldest)
-		tune.head = (tune.head + 1) % maxAutoTuneSamples
+// Sample adds a signal sample to the sequence-number window. Sequence
+// comparisons use modular uint32 arithmetic and assume samples are less than
+// 2^31 positions apart.
+func (tune *autoTune) Sample(bit bool, seq uint32) {
+	if tune.count == 0 {
+		tune.base = seq
+		tune.count = 1
+	}
+
+	offset := int64(_itimediff(seq, tune.base))
+	if offset < 0 {
+		// Accept reordered samples before the base only if the entire span fits.
+		back := -offset
+		if back+int64(tune.count) > maxAutoTuneSamples {
+			return
+		}
+		for range int(back) {
+			tune.head = (tune.head + maxAutoTuneSamples - 1) % maxAutoTuneSamples
+			tune.clear(tune.head)
+		}
+		tune.base = seq
+		tune.count += int(back)
+		offset = 0
+	} else if offset >= maxAutoTuneSamples {
+		advance := offset - maxAutoTuneSamples + 1
+		if advance >= int64(tune.count) {
+			// The new window no longer overlaps any existing sample.
+			tune.bits = [len(tune.bits)]uint64{}
+			tune.present = [len(tune.present)]uint64{}
+			tune.head = 0
+			tune.base = seq
+			tune.count = 1
+			offset = 0
+		} else {
+			// Clear evicted positions before their ring slots are reused.
+			for range int(advance) {
+				tune.clear(tune.head)
+				tune.head = (tune.head + 1) % maxAutoTuneSamples
+			}
+			tune.base += uint32(advance)
+			tune.count -= int(advance)
+			offset -= advance
+		}
+	}
+
+	if int(offset) >= tune.count {
+		tune.count = int(offset) + 1
+	}
+	index := (tune.head + int(offset)) % maxAutoTuneSamples
+	mask := uint64(1) << (index % 64)
+	word := index / 64
+	if tune.present[word]&mask != 0 {
+		if (tune.bits[word]&mask != 0) != bit {
+			// Conflicts remain distinct from missing slots on later arrivals.
+			tune.present[word] &^= mask
+			tune.bits[word] |= mask
+		}
+	} else if tune.bits[word]&mask == 0 {
+		tune.present[word] |= mask
+		if bit {
+			tune.bits[word] |= mask
+		}
 	}
 }
 
@@ -71,7 +121,7 @@ func (tune *autoTune) Sample(bit bool, seq uint32) {
 // appear before a parity shard, giving us the dataShards count.
 // For bit=false (parity shards), it gives the parityShards count.
 //
-// The detection works by finding a complete pulse in the sorted sequence:
+// The detection works by finding a complete pulse in sequence order:
 //  1. Find the "left edge": where the signal transitions TO the target bit
 //  2. Find the "right edge": where the signal transitions AWAY from the target bit
 //  3. The period = rightEdge - leftEdge
@@ -89,62 +139,31 @@ func (tune *autoTune) Sample(bit bool, seq uint32) {
 //	    |-----------------------------------------------------> Time
 //	         A     B    C     D  E     F     G  H     I
 func (tune *autoTune) FindPeriod(bit bool) int {
-	// Need at least 3 samples to detect a period (rising and falling edges)
+	// At least three sequence positions are needed for both edges.
 	if tune.count < 3 {
 		return -1
 	}
 
-	// Copy elements from ring buffer to sortCache for sorting and analysis.
-	// Using fixed-size array to avoid heap allocation.
+	left := -1
+	previous := false
+	havePrevious := false
 	for i := 0; i < tune.count; i++ {
-		idx := (tune.head + i) % maxAutoTuneSamples
-		tune.sortCache[i] = tune.pulses[idx]
-	}
-
-	// Create a slice view over the cache for sorting
-	sorted := tune.sortCache[:tune.count]
-
-	// Sort the copied data by sequence number (seq) to ensure linear order for period calculation.
-	sort.Slice(sorted, func(i, j int) bool {
-		return _itimediff(sorted[i].seq, sorted[j].seq) < 0
-	})
-
-	// Collapse duplicate sequence numbers. Conflicting samples for the same
-	// sequence are unusable and are discarded.
-	unique := 0
-	for i := 0; i < len(sorted); {
-		end := i + 1
-		conflict := false
-		for end < len(sorted) && sorted[end].seq == sorted[i].seq {
-			conflict = conflict || sorted[end].bit != sorted[i].bit
-			end++
-		}
-		if !conflict {
-			sorted[unique] = sorted[i]
-			unique++
-		}
-		i = end
-	}
-	sorted = sorted[:unique]
-
-	// Find a complete pulse with consecutive samples from the entering edge
-	// through the exiting edge. A gap can hide a signal transition, making
-	// the pulse width ambiguous.
-	for left := 1; left < len(sorted); left++ {
-		if sorted[left-1].bit == bit || sorted[left].bit != bit ||
-			sorted[left-1].seq+1 != sorted[left].seq {
+		index := (tune.head + i) % maxAutoTuneSamples
+		mask := uint64(1) << (index % 64)
+		if tune.present[index/64]&mask == 0 {
+			// A missing or conflicting sample can hide a transition.
+			left = -1
+			havePrevious = false
 			continue
 		}
-
-		for right := left + 1; right < len(sorted); right++ {
-			if sorted[right-1].seq+1 != sorted[right].seq {
-				break
-			}
-			if sorted[right].bit != bit {
-				return int(_itimediff(sorted[right].seq, sorted[left].seq))
-			}
+		current := tune.bits[index/64]&mask != 0
+		if havePrevious && previous != bit && current == bit {
+			left = i
+		} else if left >= 0 && current != bit {
+			return i - left
 		}
+		previous = current
+		havePrevious = true
 	}
-
 	return -1
 }
