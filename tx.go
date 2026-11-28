@@ -34,14 +34,7 @@ func (s *UDPSession) defaultTxUDP(udpConn udpConn, txqueue []ipv4.Message) {
 	nbytes := 0
 	npkts := 0
 	for k := range txqueue {
-		var n int
-		var err error
-		switch txqueue[k].OOB {
-		case nil:
-			n, err = s.conn.WriteTo(txqueue[k].Buffers[0], txqueue[k].Addr)
-		default:
-			n, _, err = udpConn.WriteMsgUDP(txqueue[k].Buffers[0], txqueue[k].OOB, txqueue[k].Addr.(*net.UDPAddr))
-		}
+		n, _, err := udpConn.WriteMsgUDP(txqueue[k].Buffers[0], txqueue[k].OOB, txqueue[k].Addr.(*net.UDPAddr))
 		if err != nil {
 			s.notifyWriteError(errors.WithStack(err))
 			break
@@ -56,11 +49,16 @@ func (s *UDPSession) defaultTxUDP(udpConn udpConn, txqueue []ipv4.Message) {
 
 // defaultTx is the default transmission function for UDP sessions.
 func (s *UDPSession) defaultTx(txqueue []ipv4.Message) {
+	if s.l == nil {
+		goto tx
+	}
+
 	if udpConn, ok := s.conn.(udpConn); ok {
 		s.defaultTxUDP(udpConn, txqueue)
 		return
 	}
 
+tx:
 	nbytes := 0
 	npkts := 0
 	for k := range txqueue {

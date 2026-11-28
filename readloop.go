@@ -31,6 +31,17 @@ import (
 	libnetip "github.com/xtaci/kcp-go/v5/internal/lib/net/netip"
 )
 
+func isValidAddr(addr net.Addr) bool {
+	switch addr := addr.(type) {
+	case nil:
+		return false
+	case *net.UDPAddr:
+		return addr != nil
+	default:
+		return true
+	}
+}
+
 // isUnicast rejects unspecified, multicast, and limited broadcast destinations.
 func isUnicast(addr libnetip.Addr) bool {
 	if addr.IsUnspecified() {
@@ -46,6 +57,31 @@ func isUnicast(addr libnetip.Addr) bool {
 	}
 
 	return true
+}
+
+// isSameAddr compares net.Addr.
+func isSameAddr(a, b net.Addr) bool {
+	if a == nil || b == nil {
+		return false
+	}
+
+	{
+		ua, ok := a.(*net.UDPAddr)
+		if !ok {
+			goto compareCustom
+		}
+
+		ub, ok := b.(*net.UDPAddr)
+		if !ok {
+			goto compareCustom
+		}
+
+		// Fast path for net.UDPAddr, that avoid string allocation.
+		return isSameUDPAddr(ua, ub)
+	}
+
+compareCustom:
+	return a.String() == b.String()
 }
 
 // isSameUDPAddr compares UDP addresses, including their IPv6 zones.
@@ -74,7 +110,7 @@ func (s *UDPSession) readLoopGeneric() {
 	buf := make([]byte, maxPacketSize)
 
 	for {
-		n, addr, err := s.conn.ReadFrom(buf)
+		n, remoteAddr, err := s.conn.ReadFrom(buf)
 		if err != nil {
 			s.notifyReadError(errors.WithStack(err))
 			return
@@ -84,13 +120,12 @@ func (s *UDPSession) readLoopGeneric() {
 			return
 		}
 
-		remoteAddr, ok := addr.(*net.UDPAddr)
-		if !ok || remoteAddr == nil {
+		if !isValidAddr(remoteAddr) {
 			continue
 		}
 
 		// Ensure the packet comes from the same source.
-		if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+		if !isSameAddr(remoteAddr, s.remoteAddr) {
 			DefaultSnmp.increaseInErrs()
 			continue
 		}
@@ -103,14 +138,33 @@ func (s *UDPSession) readLoopGeneric() {
 func (l *Listener) readLoopGeneric() {
 	buf := make([]byte, maxPacketSize)
 	for {
-		n, raddr, err := l.conn.ReadFrom(buf)
+		n, remoteAddr, err := l.conn.ReadFrom(buf)
 		if err != nil {
 			l.notifyReadError(errors.WithStack(err))
 			return
 		}
 
-		remoteAddr, ok := raddr.(*net.UDPAddr)
-		if !ok || remoteAddr == nil {
+		if !isValidAddr(remoteAddr) {
+			continue
+		}
+
+		l.dispatch(buf[:n], libnetip.AddrInterface{}, nil, remoteAddr)
+	}
+}
+
+// readLoopUDPGeneric is the standard procedure for reading and accepting connections on a listener
+func (l *Listener) readLoopUDPGeneric() {
+	udpConn := l.conn.(udpConn)
+
+	buf := make([]byte, maxPacketSize)
+	for {
+		n, _, _, remoteAddr, err := udpConn.ReadMsgUDP(buf, nil)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		if remoteAddr == nil {
 			continue
 		}
 
@@ -141,7 +195,7 @@ func (l *Listener) readLoopUnspecifiedGeneric() {
 			continue
 		}
 
-		localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+		localAddr := cmsg.ResolveUDPAddr(laddr, l.localPort)
 		l.dispatch(buf[:n], laddr, localAddr, remoteAddr)
 	}
 }
@@ -168,7 +222,7 @@ type PacketPusher interface {
 }
 
 // pushedPacket is the PacketPusher callback of a client session.
-func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
+func (s *UDPSession) pushedPacket(b []byte, remoteAddr net.Addr, err error) {
 	if err != nil {
 		s.notifyReadError(errors.WithStack(err))
 		return
@@ -177,13 +231,12 @@ func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 		return
 	}
 
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok || remoteAddr == nil {
+	if remoteAddr == nil {
 		return
 	}
 
 	// Ensure the packet comes from the same source.
-	if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+	if !isSameAddr(remoteAddr, s.remoteAddr) {
 		DefaultSnmp.increaseInErrs()
 		return
 	}
@@ -192,14 +245,13 @@ func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 }
 
 // pushedPacket is the PacketPusher callback of a Listener.
-func (l *Listener) pushedPacket(b []byte, raddr net.Addr, err error) {
+func (l *Listener) pushedPacket(b []byte, remoteAddr net.Addr, err error) {
 	if err != nil {
 		l.notifyReadError(errors.WithStack(err))
 		return
 	}
 
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok || remoteAddr == nil {
+	if remoteAddr == nil {
 		return
 	}
 

@@ -162,7 +162,7 @@ type (
 
 		// settings
 		laddr                       libnetip.AddrInterface
-		localAddr, remoteAddr       *net.UDPAddr
+		localAddr, remoteAddr       net.Addr
 		readDeadline, writeDeadline *deadline.Deadline
 		readNotify                  atomic.Pointer[func()] // see SetReadNotify
 		headerSize                  int                    // the header size additional to a KCP frame
@@ -242,7 +242,7 @@ func (s *UDPSession) output(buf []byte, size int) {
 }
 
 // newUDPSession creates a new UDP session for a client or server.
-func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr, block BlockCrypt) *UDPSession {
+func newUDPSession(conv uint32, dataShards, parityShards int, l *Listener, conn net.PacketConn, ownConn bool, laddr libnetip.AddrInterface, localAddr, remoteAddr net.Addr, block BlockCrypt) *UDPSession {
 	sess := new(UDPSession)
 	sess.writeGate = make(chan struct{}, 1)
 	sess.writeGate <- struct{}{}
@@ -1381,7 +1381,7 @@ type (
 		dataShards   int            // number of FEC data shards
 		parityShards int            // number of FEC parity shards
 		conn         net.PacketConn // the underlying packet connection
-		udpPort      uint16         // the local UDP port, if applicable
+		localPort    uint16         // the local UDP port, if applicable
 		ownConn      bool           // true if we created conn internally, false if provided by caller
 
 		sessions connManagerImpl // all sessions accepted by this Listener
@@ -1397,7 +1397,7 @@ type (
 )
 
 // getConn finds or atomically creates the session for an incoming packet.
-func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
+func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr net.Addr, hasConv bool, conv, sn uint32) (*UDPSession, bool) {
 	sess, loaded := l.sessions.Load(laddr, remoteAddr)
 	if loaded && (!hasConv || conv == sess.kcp.conv) {
 		return sess, false
@@ -1444,7 +1444,7 @@ func (l *Listener) getConn(laddr libnetip.AddrInterface, localAddr, remoteAddr *
 // dispatch is the Listener's packet input handler.
 // It decrypts the packet, demultiplexes by remote address,
 // and dispatches to existing sessions or creates new ones.
-func (l *Listener) dispatch(data []byte, laddr libnetip.AddrInterface, localAddr, remoteAddr *net.UDPAddr) {
+func (l *Listener) dispatch(data []byte, laddr libnetip.AddrInterface, localAddr, remoteAddr net.Addr) {
 	if !l.shutdown.Add(1) {
 		return
 	}
@@ -1800,14 +1800,16 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 		return l, nil
 	}
 
+	udpConn, ok := conn.(udpConn)
+	if !ok {
+		l.sessions.connManager = newConnManagerCustom()
+		go l.readLoop()
+		return l, nil
+	}
+
 	// Use scope for goto jumping to generic case below.
 	{
 		if !cmsg.SupportsControlMessage {
-			goto genericListener
-		}
-
-		udpConn, ok := conn.(udpConn)
-		if !ok {
 			goto genericListener
 		}
 
@@ -1830,7 +1832,7 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 			return nil, errors.WithStack(err)
 		}
 
-		l.udpPort = uint16(laddr.Port)
+		l.localPort = uint16(laddr.Port)
 		l.sessions.connManager = newConnManagerUnspecified()
 		go l.readLoopUnspecified()
 		return l, nil
@@ -1838,8 +1840,17 @@ func serveConn(block BlockCrypt, dataShards, parityShards int, conn net.PacketCo
 
 genericListener:
 	l.sessions.connManager = newConnManager()
-	go l.readLoop()
+	go l.readLoopUDP()
 	return l, nil
+}
+
+func generateConv() (uint32, error) {
+	var conv [4]byte
+	if _, err := io.ReadFull(rand.Reader, conv[:]); err != nil {
+		return 0, errors.WithStack(err)
+	}
+	convid := binary.LittleEndian.Uint32(conv[:])
+	return convid, nil
 }
 
 // Dial connects to the remote address "raddr" on the network "udp" without encryption and FEC
@@ -1863,8 +1874,7 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 		return nil, errors.WithStack(err)
 	}
 
-	var convid uint32
-	err = binary.Read(rand.Reader, binary.LittleEndian, &convid)
+	convid, err := generateConv()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -1884,55 +1894,43 @@ func DialWithOptions(raddr string, block BlockCrypt, dataShards, parityShards in
 // NewConn4 establishes a session that speaks KCP over a packet connection.
 // raddr must be a non-nil *net.UDPAddr. Packets with a nil or non-UDP source
 // address are ignored.
-// TODO: use *net.UDPAddr in future.
 func NewConn4(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, ownConn bool, conn net.PacketConn) (*UDPSession, error) {
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok {
-		return nil, errors.New("invalid remote address type")
-	}
-	if remoteAddr == nil {
-		return nil, errors.New("nil remote address")
+	if !isValidAddr(raddr) {
+		return nil, errors.New("invalid remote address")
 	}
 
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, ownConn, libnetip.AddrInterface{}, nil, raddr, block), nil
 }
 
 // NewConn3 establishes a session that speaks KCP over a packet connection.
 // raddr must be a non-nil *net.UDPAddr. Packets with a nil or non-UDP source
 // address are ignored.
-// TODO: Remove this function in the future, as it is redundant with NewConn4.
+//
+// TODO: Remove this function in the future. It is redundant with NewConn4, which provides the same functionality with an additional `ownConn` parameter to indicate whether the connection is owned by the caller or not.
+//
+// Deprecated: Use NewConn4 instead. This function is retained for backward compatibility, but it is redundant with NewConn4 and may be removed in the future.
 func NewConn3(convid uint32, raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok {
-		return nil, errors.New("invalid remote address type")
-	}
-	if remoteAddr == nil {
-		return nil, errors.New("nil remote address")
+	if !isValidAddr(raddr) {
+		return nil, errors.New("invalid remote address")
 	}
 
-	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, libnetip.AddrInterface{}, nil, remoteAddr, block), nil
+	return newUDPSession(convid, dataShards, parityShards, nil, conn, false, libnetip.AddrInterface{}, nil, raddr, block), nil
 }
 
 // NewConn2 establishes a session that speaks KCP over a packet connection.
 // raddr must be a non-nil *net.UDPAddr. Packets with a nil or non-UDP source
 // address are ignored.
-// TODO: use *net.UDPAddr in future.
 func NewConn2(raddr net.Addr, block BlockCrypt, dataShards, parityShards int, conn net.PacketConn) (*UDPSession, error) {
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok {
-		return nil, errors.New("invalid remote address type")
-	}
-	if remoteAddr == nil {
-		return nil, errors.New("nil remote address")
+	if !isValidAddr(raddr) {
+		return nil, errors.New("invalid remote address")
 	}
 
-	var convid uint32
-	err := binary.Read(rand.Reader, binary.LittleEndian, &convid)
+	convid, err := generateConv()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
 
-	return NewConn3(convid, remoteAddr, block, dataShards, parityShards, conn)
+	return NewConn3(convid, raddr, block, dataShards, parityShards, conn)
 }
 
 // NewConn establishes a session that speaks KCP over a packet connection.
