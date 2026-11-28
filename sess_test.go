@@ -2615,6 +2615,22 @@ func TestUDPSessionReadResumesUpdaterOnlyWhenReadingFromKCP(t *testing.T) {
 	}
 }
 
+func TestUDPSessionReadResumesUpdaterWithSmallBuffer(t *testing.T) {
+	called := make(chan struct{}, 1)
+	s := newUpdaterTestSession(func() { notifyUpdater(called) })
+	s.kcp.rcv_wnd = 1
+	s.kcp.rcv_queue.Push(segment{data: []byte("data")})
+	s.update()
+
+	if n, ok := s.read(make([]byte, 2)); !ok || n != 2 {
+		t.Fatalf("read = (%d, %v), want (2, true)", n, ok)
+	}
+	if s.kcp.probe&IKCP_ASK_TELL == 0 || s.updaterSuspended.Load() {
+		t.Fatal("reading from KCP did not schedule a window update and resume the updater")
+	}
+	waitForUpdaterCall(t, called)
+}
+
 func TestUDPSessionWriteResumesUpdater(t *testing.T) {
 	called := make(chan struct{}, 1)
 	s := newUpdaterTestSession(func() { notifyUpdater(called) })

@@ -185,8 +185,7 @@ type (
 		// there are no outstanding KCP segments, the remote window is open, and
 		// no probes or ACKs are pending. resumeUpdate() clears the flag and schedules
 		// the loop when a KCP operation requires another update. The idle check and
-		// Store are performed under mutex; resumeUpdate() uses an atomic compare-and-swap
-		// after releasing mutex.
+		// Store are performed under mutex; resumeUpdate() uses an atomic compare-and-swap.
 		updaterSuspended atomic.Bool
 
 		// platform-dependent optimizations
@@ -340,6 +339,9 @@ func (s *UDPSession) readLocked(b []byte) (int, bool) {
 	if size <= 0 {
 		return 0, false
 	}
+	// Recv can schedule a window update; resume after either KCP read path.
+	defer s.resumeUpdate()
+
 	// If b is large enough, read directly from KCP into b without an
 	// intermediate buffer.
 	if len(b) >= size {
@@ -367,18 +369,11 @@ func (s *UDPSession) readLocked(b []byte) (int, bool) {
 
 func (s *UDPSession) read(b []byte) (n int, ok bool) {
 	s.mutex.Lock()
-	readFromKCP := s.input.Len() == 0
 	n, ok = s.readLocked(b)
 	s.mutex.Unlock()
 
 	if !ok {
 		return
-	}
-
-	if readFromKCP {
-		// Recv can schedule a window-update probe (IKCP_ASK_TELL).
-		// Make sure a suspended updater flushes it.
-		s.resumeUpdate()
 	}
 
 	DefaultSnmp.addBytesReceived(n)
@@ -1036,10 +1031,8 @@ func (s *UDPSession) update() {
 	}
 }
 
-// resumeUpdate re-arms the periodic update loop if it is suspended. Call it
-// after releasing mutex when a KCP operation may have changed state that
-// requires another update. The compare-and-swap ensures that only one
-// caller schedules the loop.
+// resumeUpdate re-arms the periodic update loop if it is suspended. The
+// compare-and-swap ensures that only one caller schedules the loop.
 func (s *UDPSession) resumeUpdate() {
 	if s.updaterSuspended.CompareAndSwap(true, false) {
 		fn := s.updateFn
