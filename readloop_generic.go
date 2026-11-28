@@ -33,6 +33,10 @@ func (l *Listener) readLoop() {
 	l.readLoopGeneric()
 }
 
+func (l *Listener) readLoopUDP() {
+	l.readLoopUDPGeneric()
+}
+
 // readLoopUnspecified reads destination control messages without batch I/O.
 func (l *Listener) readLoopUnspecified() {
 	l.readLoopUnspecifiedGeneric()

@@ -64,13 +64,12 @@ func (s *UDPSession) readLoop() {
 		for i := range count {
 			msg := &msgs[i]
 
-			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
-			if !ok || remoteAddr == nil {
+			if !isValidAddr(msg.Addr) {
 				continue
 			}
 
 			// Ensure the packet comes from the same source.
-			if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+			if !isSameAddr(msg.Addr, s.remoteAddr) {
 				DefaultSnmp.increaseInErrs()
 				continue
 			}
@@ -85,9 +84,41 @@ func (s *UDPSession) readLoop() {
 // receive multiple UDP packets in a single system call.
 func (l *Listener) readLoop() {
 	batchConn := newBatchConn(l.conn)
-
 	if batchConn == nil {
 		l.readLoopGeneric()
+		return
+	}
+
+	msgs := make([]ipv4.Message, batchSize)
+	for k := range msgs {
+		msgs[k].Buffers = [][]byte{make([]byte, maxPacketSize)}
+	}
+
+	for {
+		count, err := batchConn.ReadBatch(msgs, 0)
+		if err != nil {
+			l.notifyReadError(errors.WithStack(err))
+			return
+		}
+
+		for i := range count {
+			msg := &msgs[i]
+
+			if !isValidAddr(msg.Addr) {
+				continue
+			}
+
+			l.dispatch(msg.Buffers[0][:msg.N], libnetip.AddrInterface{}, nil, msg.Addr)
+		}
+	}
+}
+
+// readLoopUDP is the optimized Linux read loop, using the recvmmsg syscall to
+// receive multiple UDP packets in a single system call.
+func (l *Listener) readLoopUDP() {
+	batchConn := newBatchConn(l.conn)
+	if batchConn == nil {
+		l.readLoopUDPGeneric()
 		return
 	}
 
@@ -154,7 +185,7 @@ func (l *Listener) readLoopUnspecified() {
 				continue
 			}
 
-			localAddr := cmsg.ResolveUDPAddr(laddr, l.udpPort)
+			localAddr := cmsg.ResolveUDPAddr(laddr, l.localPort)
 			l.dispatch(msg.Buffers[0][:msg.N], laddr, localAddr, remoteAddr)
 		}
 	}
