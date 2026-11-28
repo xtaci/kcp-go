@@ -115,3 +115,77 @@ func TestConnManagerLoad(t *testing.T) {
 		})
 	}
 }
+
+func TestConnManagerDefaultConnKey(t *testing.T) {
+	manager := &connManagerImplDefault{}
+
+	udpAddr := &net.UDPAddr{
+		IP:   net.IPv4(192, 0, 2, 1),
+		Port: 12345,
+	}
+
+	udpKey := manager.connKey(udpAddr)
+
+	if udpKey.custom {
+		t.Fatal("UDP address should not use a custom key")
+	}
+
+	if udpKey.remote != udpAddr.AddrPort() {
+		t.Fatalf("unexpected UDP key: %+v", udpKey)
+	}
+
+	customKey := manager.connKey(netAddrTestStringAddr("peer:12345"))
+
+	if !customKey.custom {
+		t.Fatal("custom address should use a custom key")
+	}
+
+	if customKey.raddr != "peer:12345" {
+		t.Fatalf("unexpected custom address key: %+v", customKey)
+	}
+
+	sameCustomKey := manager.connKey(netAddrTestStringAddr("peer:12345"))
+
+	if customKey != sameCustomKey {
+		t.Fatal("same custom addresses produced different keys")
+	}
+
+	differentCustomKey := manager.connKey(netAddrTestStringAddr("peer:12346"))
+
+	if customKey == differentCustomKey {
+		t.Fatal("different custom addresses produced the same key")
+	}
+
+	emptyCustomKey := manager.connKey(netAddrTestStringAddr(""))
+	zeroUDPKey := manager.connKey(&net.UDPAddr{})
+
+	if emptyCustomKey == zeroUDPKey {
+		t.Fatal("custom and UDP keys should not collide")
+	}
+}
+
+func TestConnManagerUnspecifiedRejectsCustomAddr(t *testing.T) {
+	manager := &connManagerImplUnspecified{}
+
+	_, ok := manager.connKey(
+		libnetip.AddrInterface{},
+		netAddrTestStringAddr("peer:12345"),
+	)
+	if ok {
+		t.Fatal("custom address should not be accepted")
+	}
+
+	udpAddr := &net.UDPAddr{
+		IP:   net.IPv4(192, 0, 2, 1),
+		Port: 12345,
+	}
+
+	key, ok := manager.connKey(libnetip.AddrInterface{}, udpAddr)
+	if !ok {
+		t.Fatal("UDP address should be accepted")
+	}
+
+	if key.remote != udpAddr.AddrPort() {
+		t.Fatalf("unexpected remote key: %+v", key)
+	}
+}

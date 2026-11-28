@@ -64,13 +64,12 @@ func (s *UDPSession) readLoop() {
 		for i := range count {
 			msg := &msgs[i]
 
-			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
-			if !ok || remoteAddr == nil {
+			if !isValidAddr(msg.Addr) {
 				continue
 			}
 
 			// Ensure the packet comes from the same source.
-			if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+			if !isSameAddr(msg.Addr, s.remoteAddr) {
 				DefaultSnmp.increaseInErrs()
 				continue
 			}
@@ -106,12 +105,11 @@ func (l *Listener) readLoop() {
 		for i := range count {
 			msg := &msgs[i]
 
-			remoteAddr, ok := msg.Addr.(*net.UDPAddr)
-			if !ok || remoteAddr == nil {
+			if !isValidAddr(msg.Addr) {
 				continue
 			}
 
-			l.dispatch(msg.Buffers[0][:msg.N], libnetip.AddrInterface{}, nil, remoteAddr)
+			l.dispatch(msg.Buffers[0][:msg.N], libnetip.AddrInterface{}, nil, msg.Addr)
 		}
 	}
 }

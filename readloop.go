@@ -48,21 +48,47 @@ func isUnicast(addr libnetip.Addr) bool {
 	return true
 }
 
-// isSameUDPAddr compares UDP addresses, including their IPv6 zones.
-func isSameUDPAddr(a, b *net.UDPAddr) bool {
-	if a == nil || b == nil {
+// isValidAddr reports whether addr is non-nil and, for UDP addresses,
+// whether the underlying *net.UDPAddr is non-nil.
+func isValidAddr(addr net.Addr) bool {
+	if addr == nil {
 		return false
 	}
 
-	if a.Port != b.Port {
+	if udpAddr, ok := addr.(*net.UDPAddr); ok && udpAddr == nil {
 		return false
 	}
 
-	if !a.IP.Equal(b.IP) {
+	return true
+}
+
+// isSameAddr compares UDP addresses by IP, port, and zone. Non-UDP
+// addresses are compared by String(); UDP and non-UDP addresses never match.
+func isSameAddr(addr1, addr2 net.Addr) bool {
+	if addr1 == nil || addr2 == nil {
 		return false
 	}
 
-	if a.Zone != b.Zone {
+	udpAddr1, ok1 := addr1.(*net.UDPAddr)
+	udpAddr2, ok2 := addr2.(*net.UDPAddr)
+
+	if (ok1 && udpAddr1 == nil) || (ok2 && udpAddr2 == nil) || ok1 != ok2 {
+		return false
+	}
+
+	if !ok1 {
+		return addr1.String() == addr2.String()
+	}
+
+	if udpAddr1.Port != udpAddr2.Port {
+		return false
+	}
+
+	if !udpAddr1.IP.Equal(udpAddr2.IP) {
+		return false
+	}
+
+	if udpAddr1.Zone != udpAddr2.Zone {
 		return false
 	}
 
@@ -84,13 +110,12 @@ func (s *UDPSession) readLoopGeneric() {
 			return
 		}
 
-		remoteAddr, ok := addr.(*net.UDPAddr)
-		if !ok || remoteAddr == nil {
+		if !isValidAddr(addr) {
 			continue
 		}
 
 		// Ensure the packet comes from the same source.
-		if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+		if !isSameAddr(addr, s.remoteAddr) {
 			DefaultSnmp.increaseInErrs()
 			continue
 		}
@@ -109,12 +134,11 @@ func (l *Listener) readLoopGeneric() {
 			return
 		}
 
-		remoteAddr, ok := raddr.(*net.UDPAddr)
-		if !ok || remoteAddr == nil {
+		if !isValidAddr(raddr) {
 			continue
 		}
 
-		l.dispatch(buf[:n], libnetip.AddrInterface{}, nil, remoteAddr)
+		l.dispatch(buf[:n], libnetip.AddrInterface{}, nil, raddr)
 	}
 }
 
@@ -156,8 +180,11 @@ func (l *Listener) readLoopUnspecifiedGeneric() {
 // conn. fn may modify b but must not keep it after returning. A non-nil err
 // ends reads. Closing a client session or Listener sets a nil fn, which must
 // remove the receiver. Closing a Listener also closes its accepted sessions.
-// When err is nil, raddr must be a non-nil *net.UDPAddr; packets with nil or
-// non-UDP source addresses are ignored.
+//
+// When err is nil, raddr must be a valid, non-nil net.Addr. UDP addresses are
+// matched by IP, port, and zone; other address types are matched by String().
+// For custom addresses, String() must return a stable value that uniquely
+// identifies the peer.
 //
 // SetPacketReceiver is called with internal locks held. Implementations must
 // not call back into kcp from inside SetPacketReceiver — no calls into the
@@ -177,13 +204,12 @@ func (s *UDPSession) pushedPacket(b []byte, raddr net.Addr, err error) {
 		return
 	}
 
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok || remoteAddr == nil {
+	if !isValidAddr(raddr) {
 		return
 	}
 
 	// Ensure the packet comes from the same source.
-	if !isSameUDPAddr(remoteAddr, s.remoteAddr) {
+	if !isSameAddr(raddr, s.remoteAddr) {
 		DefaultSnmp.increaseInErrs()
 		return
 	}
@@ -198,10 +224,9 @@ func (l *Listener) pushedPacket(b []byte, raddr net.Addr, err error) {
 		return
 	}
 
-	remoteAddr, ok := raddr.(*net.UDPAddr)
-	if !ok || remoteAddr == nil {
+	if !isValidAddr(raddr) {
 		return
 	}
 
-	l.dispatch(b, libnetip.AddrInterface{}, nil, remoteAddr)
+	l.dispatch(b, libnetip.AddrInterface{}, nil, raddr)
 }
