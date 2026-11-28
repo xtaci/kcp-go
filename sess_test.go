@@ -52,7 +52,7 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-func TestNewConnRejectsNilUDPAddr(t *testing.T) {
+func TestNewConnRejectsNilRemoteAddr(t *testing.T) {
 	var addr *net.UDPAddr
 	for _, tt := range []struct {
 		name string
@@ -2807,5 +2807,401 @@ func TestUDPSessionResetRTODoesNotWakeSuspendedUpdater(t *testing.T) {
 
 	if !s.updaterSuspended.Load() {
 		t.Fatal("ResetRTO unexpectedly woke the idle updater")
+	}
+}
+
+// customAddr wraps an address with a custom net.Addr type.
+type customAddr struct {
+	addr net.Addr
+}
+
+func (a customAddr) Network() string {
+	return a.addr.Network()
+}
+
+func (a customAddr) String() string {
+	return a.addr.String()
+}
+
+// customStringAddr is a custom address backed by a string.
+type customStringAddr string
+
+func (a customStringAddr) Network() string {
+	return "test"
+}
+
+func (a customStringAddr) String() string {
+	return string(a)
+}
+
+// customPacketPusherStub implements PacketPusher without starting a
+// read goroutine, allowing connection constructors to be tested independently.
+type customPacketPusherStub struct {
+	receiver func(b []byte, raddr net.Addr, err error)
+}
+
+func (c *customPacketPusherStub) SetPacketReceiver(fn func(b []byte, raddr net.Addr, err error)) {
+	c.receiver = fn
+}
+
+func (c *customPacketPusherStub) ReadFrom([]byte) (int, net.Addr, error) {
+	return 0, nil, io.EOF
+}
+
+func (c *customPacketPusherStub) WriteTo(b []byte, _ net.Addr) (int, error) {
+	return len(b), nil
+}
+
+func (c *customPacketPusherStub) Close() error {
+	return nil
+}
+
+func (c *customPacketPusherStub) LocalAddr() net.Addr {
+	return &net.UDPAddr{}
+}
+
+func (c *customPacketPusherStub) SetDeadline(time.Time) error {
+	return nil
+}
+
+func (c *customPacketPusherStub) SetReadDeadline(time.Time) error {
+	return nil
+}
+
+func (c *customPacketPusherStub) SetWriteDeadline(time.Time) error {
+	return nil
+}
+
+var _ net.PacketConn = (*customPacketPusherStub)(nil)
+var _ PacketPusher = (*customPacketPusherStub)(nil)
+
+// TestNewConnAcceptsCustomAddr verifies that all public connection constructors
+// accept custom net.Addr implementations and register/unregister PacketPusher.
+func TestNewConnAcceptsCustomAddr(t *testing.T) {
+	tests := []struct {
+		name string
+		new  func(net.Addr, net.PacketConn) (*UDPSession, error)
+	}{
+		{
+			name: "NewConn2",
+			new: func(addr net.Addr, conn net.PacketConn) (*UDPSession, error) {
+				return NewConn2(addr, nil, 0, 0, conn)
+			},
+		},
+		{
+			name: "NewConn3",
+			new: func(addr net.Addr, conn net.PacketConn) (*UDPSession, error) {
+				return NewConn3(1, addr, nil, 0, 0, conn)
+			},
+		},
+		{
+			name: "NewConn4",
+			new: func(addr net.Addr, conn net.PacketConn) (*UDPSession, error) {
+				return NewConn4(1, addr, nil, 0, 0, false, conn)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			conn := &customPacketPusherStub{}
+			addr := customStringAddr("peer:12345")
+
+			sess, err := tt.new(addr, conn)
+			if err != nil {
+				t.Fatalf("create session: %v", err)
+			}
+			if sess == nil {
+				t.Fatal("created session is nil")
+			}
+
+			closed := false
+			t.Cleanup(func() {
+				if !closed {
+					_ = sess.Close()
+				}
+			})
+
+			got, ok := sess.RemoteAddr().(customStringAddr)
+			if !ok || got != addr {
+				t.Fatalf("RemoteAddr() = %v (%T), want %v",
+					sess.RemoteAddr(), sess.RemoteAddr(), addr)
+			}
+
+			if conn.receiver == nil {
+				t.Fatal("PacketPusher receiver was not registered")
+			}
+
+			if err := sess.Close(); err != nil {
+				t.Fatalf("close session: %v", err)
+			}
+			closed = true
+
+			if conn.receiver != nil {
+				t.Fatal("PacketPusher receiver was not removed")
+			}
+		})
+	}
+}
+
+// customPacketConn wraps a PacketConn and returns custom net.Addr values.
+// It unwraps the custom address before forwarding WriteTo to the underlying conn.
+type customPacketConn struct {
+	net.PacketConn
+}
+
+func (c *customPacketConn) ReadFrom(b []byte) (int, net.Addr, error) {
+	n, addr, err := c.PacketConn.ReadFrom(b)
+	if err != nil {
+		return n, nil, err
+	}
+
+	return n, customAddr{addr: addr}, nil
+}
+
+func (c *customPacketConn) WriteTo(b []byte, addr net.Addr) (int, error) {
+	if customAddr, ok := addr.(customAddr); ok {
+		addr = customAddr.addr
+	}
+
+	return c.PacketConn.WriteTo(b, addr)
+}
+
+// customPacketPusher wraps a custom-address PacketConn and delivers
+// received packets through PacketPusher instead of ReadFrom.
+type customPacketPusher struct {
+	*customPacketConn
+
+	mu       sync.Mutex
+	receiver func(b []byte, raddr net.Addr, err error)
+
+	done      chan struct{}
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func newCustomPacketPusher(conn *customPacketConn) *customPacketPusher {
+	pusher := &customPacketPusher{
+		customPacketConn: conn,
+		done:             make(chan struct{}),
+	}
+
+	go pusher.readLoop()
+
+	return pusher
+}
+
+func (p *customPacketPusher) SetPacketReceiver(fn func(b []byte, raddr net.Addr, err error)) {
+	p.mu.Lock()
+	p.receiver = fn
+	p.mu.Unlock()
+}
+
+func (p *customPacketPusher) hasReceiver() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.receiver != nil
+}
+
+func (p *customPacketPusher) readLoop() {
+	defer close(p.done)
+
+	buf := make([]byte, maxPacketSize)
+	for {
+		n, addr, err := p.ReadFrom(buf)
+
+		p.mu.Lock()
+		receiver := p.receiver
+		p.mu.Unlock()
+
+		if receiver != nil {
+			// The callback is synchronous, so buf is not reused until it returns.
+			receiver(buf[:n], addr, err)
+		}
+
+		if err != nil {
+			return
+		}
+	}
+}
+
+func (p *customPacketPusher) Close() error {
+	p.closeOnce.Do(func() {
+		p.closeErr = p.customPacketConn.Close()
+	})
+
+	<-p.done
+	return p.closeErr
+}
+
+var _ net.PacketConn = (*customPacketPusher)(nil)
+var _ PacketPusher = (*customPacketPusher)(nil)
+
+// TestCustomAddrPacketConn verifies bidirectional KCP communication using
+// PacketConn implementations that return custom net.Addr values.
+func TestCustomAddrPacketConn(t *testing.T) {
+	clientRaw, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientConn := &customPacketConn{PacketConn: clientRaw}
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+	})
+
+	testCustomAddrEcho(t, clientConn, false)
+}
+
+// TestCustomAddrPacketPusher verifies bidirectional KCP communication when
+// both the client and Listener use PacketPusher callbacks.
+func TestCustomAddrPacketPusher(t *testing.T) {
+	clientRaw, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clientConn := newCustomPacketPusher(
+		&customPacketConn{PacketConn: clientRaw},
+	)
+	t.Cleanup(func() {
+		_ = clientConn.Close()
+	})
+
+	testCustomAddrEcho(t, clientConn, true)
+}
+
+// testCustomAddrEcho verifies a complete KCP exchange using custom net.Addr
+// values on both sides. The server can use either ReadFrom or PacketPusher.
+func testCustomAddrEcho(t *testing.T, clientConn net.PacketConn, useServerPacketPusher bool) {
+	t.Helper()
+
+	const timeout = 5 * time.Second
+
+	serverRaw, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serverBase := &customPacketConn{PacketConn: serverRaw}
+
+	var serverConn net.PacketConn = serverBase
+	if useServerPacketPusher {
+		serverConn = newCustomPacketPusher(serverBase)
+	}
+
+	// ServeConn does not own the supplied PacketConn.
+	t.Cleanup(func() {
+		_ = serverConn.Close()
+	})
+
+	listener, err := ServeConn(nil, 0, 0, serverConn)
+	if err != nil {
+		t.Fatalf("ServeConn: %v", err)
+	}
+
+	listenerClosed := false
+	t.Cleanup(func() {
+		if !listenerClosed {
+			_ = listener.Close()
+		}
+	})
+
+	if err := listener.SetDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("set listener deadline: %v", err)
+	}
+
+	clientAddr := customAddr{addr: serverConn.LocalAddr()}
+
+	client, err := NewConn2(clientAddr, nil, 0, 0, clientConn)
+	if err != nil {
+		t.Fatalf("NewConn2: %v", err)
+	}
+
+	clientClosed := false
+	t.Cleanup(func() {
+		if !clientClosed {
+			_ = client.Close()
+		}
+	})
+
+	if _, ok := client.RemoteAddr().(customAddr); !ok {
+		t.Fatalf("client RemoteAddr has unexpected type %T", client.RemoteAddr())
+	}
+
+	if err := client.SetDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("set client deadline: %v", err)
+	}
+
+	request := []byte("custom net.Addr request")
+
+	if n, err := client.Write(request); err != nil {
+		t.Fatalf("client write: %v", err)
+	} else if n != len(request) {
+		t.Fatalf("client write = %d, want %d", n, len(request))
+	}
+
+	server, err := listener.AcceptKCP()
+	if err != nil {
+		t.Fatalf("AcceptKCP: %v", err)
+	}
+
+	if _, ok := server.RemoteAddr().(customAddr); !ok {
+		t.Fatalf("server RemoteAddr has unexpected type %T", server.RemoteAddr())
+	}
+
+	if err := server.SetDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("set server deadline: %v", err)
+	}
+
+	received := make([]byte, len(request))
+	if _, err := io.ReadFull(server, received); err != nil {
+		t.Fatalf("server read: %v", err)
+	}
+
+	if !bytes.Equal(received, request) {
+		t.Fatalf("server received %q, want %q", received, request)
+	}
+
+	response := []byte("custom net.Addr response")
+
+	if n, err := server.Write(response); err != nil {
+		t.Fatalf("server write: %v", err)
+	} else if n != len(response) {
+		t.Fatalf("server write = %d, want %d", n, len(response))
+	}
+
+	if err := client.SetDeadline(time.Now().Add(timeout)); err != nil {
+		t.Fatalf("reset client deadline: %v", err)
+	}
+
+	received = make([]byte, len(response))
+	if _, err := io.ReadFull(client, received); err != nil {
+		t.Fatalf("client read: %v", err)
+	}
+
+	if !bytes.Equal(received, response) {
+		t.Fatalf("client received %q, want %q", received, response)
+	}
+
+	// Closing the client session must unregister its PacketPusher receiver.
+	if err := client.Close(); err != nil {
+		t.Fatalf("close client: %v", err)
+	}
+	clientClosed = true
+
+	if pusher, ok := clientConn.(*customPacketPusher); ok && pusher.hasReceiver() {
+		t.Fatal("client PacketPusher receiver was not removed")
+	}
+
+	// Closing the Listener must unregister its PacketPusher receiver.
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+	listenerClosed = true
+
+	if pusher, ok := serverConn.(*customPacketPusher); ok && pusher.hasReceiver() {
+		t.Fatal("server PacketPusher receiver was not removed")
 	}
 }
