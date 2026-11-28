@@ -181,13 +181,13 @@ type (
 		// outgoing packet sender
 		sender sender
 
-		// updaterParked reports whether the periodic update() loop is parked because
+		// updaterSuspended reports whether the periodic update() loop is suspended because
 		// there are no outstanding KCP segments, the remote window is open, and
-		// no probes or ACKs are pending. kickUpdater() clears the flag and schedules
+		// no probes or ACKs are pending. resumeUpdate() clears the flag and schedules
 		// the loop when a KCP operation requires another update. The idle check and
-		// Store are performed under mutex; kickUpdater() uses an atomic compare-and-swap
+		// Store are performed under mutex; resumeUpdate() uses an atomic compare-and-swap
 		// after releasing mutex.
-		updaterParked atomic.Bool
+		updaterSuspended atomic.Bool
 
 		// platform-dependent optimizations
 		platform platform
@@ -377,8 +377,8 @@ func (s *UDPSession) read(b []byte) (n int, ok bool) {
 
 	if readFromKCP {
 		// Recv can schedule a window-update probe (IKCP_ASK_TELL).
-		// Make sure a parked updater flushes it.
-		s.kickUpdater()
+		// Make sure a suspended updater flushes it.
+		s.resumeUpdate()
 	}
 
 	DefaultSnmp.addBytesReceived(n)
@@ -485,9 +485,9 @@ func (s *UDPSession) writeBuffers(v [][]byte) (n int, ok bool) {
 		return
 	}
 
-	// Data is now queued in KCP; restart the parked update loop so
+	// Data is now queued in KCP; restart the suspended update loop so
 	// retransmission timers run until everything is acknowledged.
-	s.kickUpdater()
+	s.resumeUpdate()
 	DefaultSnmp.addBytesSent(n)
 	s.writeWait(n)
 	return
@@ -1019,13 +1019,10 @@ func (s *UDPSession) update() {
 		if waitsnd < int(s.kcp.snd_wnd) {
 			s.notifyWriteEvent()
 		}
-		// Park the loop when there are no outstanding KCP segments, the remote
-		// window is open, and no probes or ACKs are pending. Otherwise, an idle
-		// session would wake up every `interval` ms without doing useful work.
-		// KCP operations that require another update call kickUpdater() after
-		// releasing mutex.
-		if waitsnd == 0 && s.kcp.rmt_wnd > 0 && s.kcp.probe == 0 && len(s.kcp.acklist) == 0 {
-			s.updaterParked.Store(true)
+		// A full flush clears pending ACKs and probes. Keep updating when the
+		// remote window is closed so window probing continues.
+		if waitsnd == 0 && s.kcp.rmt_wnd > 0 {
+			s.updaterSuspended.Store(true)
 			s.mutex.Unlock()
 			return
 		}
@@ -1039,12 +1036,12 @@ func (s *UDPSession) update() {
 	}
 }
 
-// kickUpdater re-arms the periodic update loop if it is parked. Call it
+// resumeUpdate re-arms the periodic update loop if it is suspended. Call it
 // after releasing mutex when a KCP operation may have changed state that
 // requires another update. The compare-and-swap ensures that only one
 // caller schedules the loop.
-func (s *UDPSession) kickUpdater() {
-	if s.updaterParked.CompareAndSwap(true, false) {
+func (s *UDPSession) resumeUpdate() {
+	if s.updaterSuspended.CompareAndSwap(true, false) {
 		fn := s.updateFn
 		if fn == nil {
 			fn = s.update
@@ -1282,27 +1279,31 @@ func (s *UDPSession) kcpInput(data []byte) {
 	// type markers 0x00f1-0x00f3.
 	fecFlag := binary.LittleEndian.Uint16(data[4:])
 
+	if fecFlag == typeOOB {
+		DefaultSnmp.increaseOOBPackets()
+		if callback := s.callbackForOOB.Load(); callback != nil {
+			// Data layout: | FEC header (fecPacketHeaderSize) | conv (4B) | OOB payload |
+			(*callback)(data[oobHeaderSize:])
+		}
+		return
+	}
+	if (fecFlag == typeData || fecFlag == typeParity) && len(data) < fecPacketHeaderSize {
+		DefaultSnmp.increaseInErrs()
+		return
+	}
+
+	// Unlock before waking the updater.
+	defer s.resumeUpdate()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	if s.isClosed() {
+		return
+	}
+
 	switch fecFlag {
 	case typeData, typeParity: // packet with FEC
-		if len(data) < fecPacketHeaderSize {
-			DefaultSnmp.increaseInErrs()
-			return
-		}
-
 		var kcpInErrors uint64
 		f := fecPacket(data)
-
-		// Wake up the parked update loop after processing the packet to flush
-		// generated ACKs and handle any remote window changes. Defer this before
-		// locking mutex so it runs after mutex is unlocked.
-		defer s.kickUpdater()
-
-		// lock
-		s.mutex.Lock()
-		defer s.mutex.Unlock()
-		if s.isClosed() {
-			return
-		}
 
 		// if fecDecoder is not initialized, create one with default parameter
 		// lazy initialization
@@ -1335,56 +1336,21 @@ func (s *UDPSession) kcpInput(data []byte) {
 			defaultBufferPool.Put(r)
 		}
 
-		// to notify the readers to receive the data if there's any
-		if n := s.kcp.PeekSize(); n > 0 {
-			s.notifyReadEvent()
-		}
-
-		// to notify the writers if the window size allows to send more packets
-		// and the remote window size is not full.
-		waitsnd := s.kcp.WaitSnd()
-		if waitsnd < int(s.kcp.snd_wnd) {
-			s.notifyWriteEvent()
-		}
-
 		if kcpInErrors > 0 {
 			DefaultSnmp.addKCPInErrors(kcpInErrors)
 		}
-	case typeOOB:
-		// Count received OOB packet
-		DefaultSnmp.increaseOOBPackets()
-		// If an OOB callback is registered, invoke it synchronously.
-		// The callback is responsible for ensuring non-blocking behavior.
-		if callback := s.callbackForOOB.Load(); callback != nil {
-			// Data layout: | FEC header (fecPacketHeaderSize) | conv (4B) | OOB payload |
-			(*callback)(data[oobHeaderSize:])
-		}
-
 	default: // packet without FEC
-		// Wake up the parked update loop after processing the packet to flush
-		// generated ACKs and handle any remote window changes. Defer this before
-		// locking mutex so it runs after mutex is unlocked.
-		defer s.kickUpdater()
-
-		s.mutex.Lock()
-		defer s.mutex.Unlock()
-		if s.isClosed() {
-			return
-		}
-
 		if ret := s.kcp.Input(data, IKCP_PACKET_REGULAR, s.ackNoDelay); ret != 0 {
 			DefaultSnmp.addKCPInErrors(1)
 		}
 
-		if n := s.kcp.PeekSize(); n > 0 {
-			s.notifyReadEvent()
-		}
+	}
 
-		waitsnd := s.kcp.WaitSnd()
-		if waitsnd < int(s.kcp.snd_wnd) {
-			s.notifyWriteEvent()
-		}
-		return
+	if s.kcp.PeekSize() > 0 {
+		s.notifyReadEvent()
+	}
+	if s.kcp.WaitSnd() < int(s.kcp.snd_wnd) {
+		s.notifyWriteEvent()
 	}
 }
 
